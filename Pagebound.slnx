@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Pagebound.Core/Pagebound.Core.csproj" />
+    <Project Path="src/Pagebound.Infrastructure/Pagebound.Infrastructure.csproj" />
+    <Project Path="src/Pagebound.Web/Pagebound.Web.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Pagebound.Core.Tests/Pagebound.Core.Tests.csproj" />
+    <Project Path="tests/Pagebound.E2ETests/Pagebound.E2ETests.csproj" />
+    <Project Path="tests/Pagebound.Web.Tests/Pagebound.Web.Tests.csproj" />
+  </Folder>
+</Solution>

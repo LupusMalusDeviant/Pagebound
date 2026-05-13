@@ -1,0 +1,84 @@
+Pagebound
+Copyright 2026 Pagebound Contributors
+
+This product includes software developed at the Pagebound project.
+
+================================================================================
+Third-Party Software
+================================================================================
+
+This project incorporates components from the projects listed below. The
+original copyright notices and the licenses under which Pagebound received such
+components are set forth below. Pagebound complies with the terms of each
+license.
+
+--------------------------------------------------------------------------------
+PDF.js
+--------------------------------------------------------------------------------
+Copyright Mozilla Foundation and contributors
+Licensed under Apache License, Version 2.0
+https://github.com/mozilla/pdf.js
+
+--------------------------------------------------------------------------------
+PdfSharpCore
+--------------------------------------------------------------------------------
+Copyright 2018-present empira Software GmbH, Troisdorf (Germany), and
+PdfSharpCore contributors
+Licensed under MIT License
+https://github.com/ststeiger/PdfSharpCore
+
+--------------------------------------------------------------------------------
+Tesseract.js
+--------------------------------------------------------------------------------
+Copyright project-naptha and Tesseract.js contributors
+Licensed under Apache License, Version 2.0
+https://github.com/naptha/tesseract.js
+
+--------------------------------------------------------------------------------
+Markdig
+--------------------------------------------------------------------------------
+Copyright Alexandre Mutel
+Licensed under BSD-2-Clause License
+https://github.com/xoofx/markdig
+
+--------------------------------------------------------------------------------
+Tailwind CSS
+--------------------------------------------------------------------------------
+Copyright Tailwind Labs, Inc.
+Licensed under MIT License
+https://github.com/tailwindlabs/tailwindcss
+
+--------------------------------------------------------------------------------
+Blazored.LocalStorage
+--------------------------------------------------------------------------------
+Copyright Chris Sainty
+Licensed under MIT License
+https://github.com/Blazored/LocalStorage
+
+--------------------------------------------------------------------------------
+bUnit
+--------------------------------------------------------------------------------
+Copyright bUnit contributors
+Licensed under MIT License
+https://github.com/bUnit-dev/bUnit
+
+--------------------------------------------------------------------------------
+xUnit
+--------------------------------------------------------------------------------
+Copyright .NET Foundation and Contributors
+Licensed under Apache License, Version 2.0
+https://github.com/xunit/xunit
+
+--------------------------------------------------------------------------------
+Microsoft.Playwright
+--------------------------------------------------------------------------------
+Copyright Microsoft Corporation
+Licensed under Apache License, Version 2.0
+https://github.com/microsoft/playwright-dotnet
+
+--------------------------------------------------------------------------------
+.NET Runtime / Blazor WebAssembly
+--------------------------------------------------------------------------------
+Copyright .NET Foundation and Contributors
+Licensed under MIT License
+https://github.com/dotnet/runtime

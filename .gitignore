@@ -1,0 +1,95 @@
+# =============================================================================
+# Pagebound — .gitignore
+# Basis: .NET / Blazor / VS / Node (Tailwind) / Playwright
+# =============================================================================
+
+# --- .NET / Visual Studio --------------------------------------------------
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+[Dd]ebug/
+[Rr]elease/
+[Pp]ublish/
+*.user
+*.userosscache
+*.suo
+*.sln.docstates
+*.pdb
+*.dll
+*.exe
+
+# Build artifacts
+*.csproj.user
+*.vbproj.user
+*.fsproj.user
+*.dbproj.user
+*.cscfg.user
+project.lock.json
+project.fragment.lock.json
+artifacts/
+
+# .NET runtime restore
+.dotnet/
+
+# Visual Studio cache/options
+.vs/
+.vscode/
+*.swp
+
+# Rider
+.idea/
+*.sln.iml
+
+# --- Test results / Coverage -----------------------------------------------
+[Tt]est[Rr]esult*/
+[Bb]uild[Ll]og.*
+*.VisualState.xml
+TestResult.xml
+coverage*.json
+coverage*.xml
+coverage*.info
+*.coverage
+*.coveragexml
+
+# --- Node / npm / Tailwind -------------------------------------------------
+node_modules/
+package-lock.json.bak
+.npm/
+.cache/
+.parcel-cache/
+
+# Tailwind build output (regeneriert in CI)
+src/Pagebound.Web/wwwroot/css/app.css
+src/Pagebound.Web/wwwroot/css/app.css.map
+
+# --- Playwright ------------------------------------------------------------
+playwright-report/
+test-results/
+playwright/.cache/
+
+# --- Lighthouse CI ---------------------------------------------------------
+.lighthouseci/
+
+# --- OS-spezifisch ---------------------------------------------------------
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# --- Lokale Konfiguration --------------------------------------------------
+*.local.json
+appsettings.Development.json
+appsettings.Local.json
+.env
+.env.local
+.env.*.local
+
+# --- Sonstiges -------------------------------------------------------------
+*.tmp
+*.bak
+*.orig
+*~
+
+# --- Pagebound-spezifisch --------------------------------------------------
+# Lokale Sidecar-Dateien fuer Entwicklungs-PDFs nicht versionieren
+samples/**/*.pagebound.json
