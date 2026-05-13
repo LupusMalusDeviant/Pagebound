@@ -2,13 +2,20 @@
   "name": "pagebound-web",
   "version": "0.0.0-pre",
   "private": true,
-  "description": "Tailwind/CSS build pipeline für Pagebound.Web (Blazor WASM frontend liegt im .NET-Projekt).",
+  "description": "Tailwind/CSS + JavaScript-Interop build pipeline für Pagebound.Web (Blazor WASM frontend liegt im .NET-Projekt).",
   "scripts": {
+    "build": "npm run build:css && npm run build:js",
     "build:css": "tailwindcss -i ./wwwroot/css/app.src.css -o ./wwwroot/css/app.css --minify",
-    "watch:css": "tailwindcss -i ./wwwroot/css/app.src.css -o ./wwwroot/css/app.css --watch"
+    "build:js": "node esbuild.mjs",
+    "watch:css": "tailwindcss -i ./wwwroot/css/app.src.css -o ./wwwroot/css/app.css --watch",
+    "watch:js": "node esbuild.mjs --watch",
+    "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
-    "@tailwindcss/cli": "^4.0.0"
+    "@tailwindcss/cli": "^4.0.0",
+    "esbuild": "^0.28.0",
+    "pdfjs-dist": "^5.7.284",
+    "typescript": "^6.0.3"
   },
   "license": "Apache-2.0"
 }

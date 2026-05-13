@@ -1,0 +1,211 @@
+@page "/reader"
+@using Microsoft.AspNetCore.Components.Forms
+@inject IPdfRenderer Renderer
+@implements IAsyncDisposable
+
+<PageTitle>Reader — Pagebound</PageTitle>
+
+<section class="mx-auto max-w-5xl px-6 py-8">
+    <header class="mb-6">
+        <h1 class="text-2xl font-bold">Reader (Demo)</h1>
+        <p class="mt-1 text-sm text-pb-fg-muted">
+            Erste vertikale Skelett-Iteration für Release 0.1.
+            Volltext-Suche, Outline, Highlights folgen.
+        </p>
+    </header>
+
+    <div class="rounded-lg border border-pb-border bg-pb-surface p-4">
+        <label class="flex flex-col gap-2 text-sm">
+            <span class="font-medium">PDF auswählen</span>
+            <InputFile OnChange="HandleFileSelected"
+                       accept=".pdf"
+                       class="block text-sm file:mr-3 file:rounded file:border-0 file:bg-pb-accent file:px-3 file:py-1.5 file:text-white file:cursor-pointer cursor-pointer" />
+        </label>
+
+        @if (_errorMessage is not null)
+        {
+            <div class="mt-3 rounded border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700"
+                 role="alert">
+                @_errorMessage
+            </div>
+        }
+
+        @if (_isLoading)
+        {
+            <div class="mt-3 text-sm text-pb-fg-muted" aria-live="polite">Lade …</div>
+        }
+    </div>
+
+    @if (_handle is not null)
+    {
+        <div class="mt-6 flex items-center justify-between gap-3">
+            <div class="text-sm">
+                <span class="font-medium">@(_handle.Title ?? "Ohne Titel")</span>
+                <span class="text-pb-fg-muted"> · @_handle.PageCount Seiten</span>
+            </div>
+            <nav class="flex items-center gap-2" aria-label="Seitennavigation">
+                <button type="button"
+                        class="rounded border border-pb-border px-3 py-1 text-sm disabled:opacity-40"
+                        disabled="@(_currentPage <= 1 || _isRendering)"
+                        @onclick="PreviousPage">
+                    ‹ Zurück
+                </button>
+                <span class="text-sm tabular-nums">
+                    Seite @_currentPage / @_handle.PageCount
+                </span>
+                <button type="button"
+                        class="rounded border border-pb-border px-3 py-1 text-sm disabled:opacity-40"
+                        disabled="@(_currentPage >= _handle.PageCount || _isRendering)"
+                        @onclick="NextPage">
+                    Weiter ›
+                </button>
+            </nav>
+        </div>
+
+        <div class="mt-3 flex flex-wrap items-center gap-2 text-sm">
+            <span class="text-pb-fg-muted">Zoom:</span>
+            @foreach (var s in _zoomLevels)
+            {
+                var current = s;
+                <button type="button"
+                        class="@($"rounded border px-2 py-0.5 {(Math.Abs(_scale - current) < 0.001 ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted")}")"
+                        disabled="@_isRendering"
+                        @onclick="@(() => SetZoom(current))">
+                    @(current * 100)%
+                </button>
+            }
+        </div>
+
+        <figure class="mt-6 flex justify-center rounded-lg border border-pb-border bg-pb-bg p-4 overflow-auto">
+            @if (_rasterDataUrl is not null)
+            {
+                <img src="@_rasterDataUrl"
+                     alt="@($"Seite {_currentPage} von {_handle.PageCount}")"
+                     class="max-w-full h-auto shadow-sm" />
+            }
+            else
+            {
+                <div class="text-sm text-pb-fg-muted py-12">Rendere …</div>
+            }
+        </figure>
+    }
+    else if (!_isLoading)
+    {
+        <div class="mt-6 rounded-lg border border-dashed border-pb-border p-6 text-center text-sm text-pb-fg-muted">
+            Wähle eine PDF-Datei aus, um sie zu öffnen.
+        </div>
+    }
+</section>
+
+@code {
+    private const long MaxFileSize = 100L * 1024 * 1024; // 100 MB Demo-Limit
+
+    private readonly double[] _zoomLevels = [0.75, 1.0, 1.5, 2.0];
+
+    private PdfDocumentHandle? _handle;
+    private int _currentPage = 1;
+    private double _scale = 1.5;
+    private string? _rasterDataUrl;
+    private string? _errorMessage;
+    private bool _isLoading;
+    private bool _isRendering;
+
+    private async Task HandleFileSelected(InputFileChangeEventArgs e)
+    {
+        _errorMessage = null;
+        _isLoading = true;
+        _rasterDataUrl = null;
+
+        try
+        {
+            if (_handle is not null)
+            {
+                await Renderer.UnloadAsync(_handle);
+                _handle = null;
+            }
+
+            await using var stream = e.File.OpenReadStream(MaxFileSize);
+            await using var buffer = new MemoryStream();
+            await stream.CopyToAsync(buffer);
+            buffer.Position = 0;
+
+            _handle = await Renderer.LoadAsync(buffer, new LoadOptions(), CancellationToken.None);
+            _currentPage = 1;
+            await RenderCurrentPageAsync();
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"PDF konnte nicht geöffnet werden: {ex.Message}";
+            _handle = null;
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private async Task RenderCurrentPageAsync()
+    {
+        if (_handle is null) return;
+
+        _isRendering = true;
+        try
+        {
+            var rendered = await Renderer.RenderPageAsync(
+                _handle,
+                _currentPage,
+                new RenderOptions(Scale: _scale),
+                CancellationToken.None);
+
+            if (rendered.RasterBytes is not null && rendered.RasterFormat is not null)
+            {
+                _rasterDataUrl = $"data:{rendered.RasterFormat};base64,{Convert.ToBase64String(rendered.RasterBytes)}";
+            }
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Seite konnte nicht gerendert werden: {ex.Message}";
+        }
+        finally
+        {
+            _isRendering = false;
+        }
+    }
+
+    private async Task PreviousPage()
+    {
+        if (_handle is null || _currentPage <= 1) return;
+        _currentPage--;
+        await RenderCurrentPageAsync();
+    }
+
+    private async Task NextPage()
+    {
+        if (_handle is null || _currentPage >= _handle.PageCount) return;
+        _currentPage++;
+        await RenderCurrentPageAsync();
+    }
+
+    private async Task SetZoom(double scale)
+    {
+        if (Math.Abs(_scale - scale) < 0.001) return;
+        _scale = scale;
+        await RenderCurrentPageAsync();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_handle is not null)
+        {
+            try
+            {
+                await Renderer.UnloadAsync(_handle);
+            }
+            catch
+            {
+                // Page wird entladen; ignoriere Cleanup-Fehler.
+            }
+            _handle = null;
+        }
+    }
+}

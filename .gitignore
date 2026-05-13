@@ -63,6 +63,11 @@ package-lock.json.bak
 src/Pagebound.Web/wwwroot/css/app.css
 src/Pagebound.Web/wwwroot/css/app.css.map
 
+# esbuild JS-Interop build output (regeneriert in CI)
+src/Pagebound.Web/wwwroot/js/pdfjs-bridge.js
+src/Pagebound.Web/wwwroot/js/pdfjs-bridge.js.map
+src/Pagebound.Web/wwwroot/js/pdf.worker.min.mjs
+
 # --- Playwright ------------------------------------------------------------
 playwright-report/
 test-results/

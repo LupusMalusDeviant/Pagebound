@@ -40,9 +40,9 @@ jobs:
         working-directory: src/Pagebound.Web
         run: npm ci
 
-      - name: Build Tailwind CSS
+      - name: Build CSS + JS bridges
         working-directory: src/Pagebound.Web
-        run: npm run build:css
+        run: npm run build
 
       - name: Build solution
         run: dotnet build --configuration Release --no-restore
@@ -90,11 +90,11 @@ jobs:
           dotnet build tests/Pagebound.E2ETests --configuration Release
           pwsh tests/Pagebound.E2ETests/bin/Release/net10.0/playwright.ps1 install --with-deps chromium
 
-      - name: Build Tailwind CSS
+      - name: Build CSS + JS bridges
         working-directory: src/Pagebound.Web
         run: |
           npm ci
-          npm run build:css
+          npm run build
 
       - name: Run E2E tests
         run: dotnet test tests/Pagebound.E2ETests --configuration Release --no-build
@@ -129,7 +129,7 @@ jobs:
         run: |
           cd src/Pagebound.Web
           npm ci
-          npm run build:css
+          npm run build
           cd ../..
           dotnet publish src/Pagebound.Web --configuration Release --output ./publish
 

@@ -6,12 +6,26 @@
     <aside class="hidden md:flex w-64 flex-col border-r border-pb-border bg-pb-surface"
            aria-label="Library">
         <div class="px-4 py-3 border-b border-pb-border">
-            <h1 class="text-lg font-semibold tracking-tight">Pagebound</h1>
-            <p class="text-xs text-pb-fg-muted">Pre-Alpha</p>
+            <a href="/" class="block">
+                <h1 class="text-lg font-semibold tracking-tight">Pagebound</h1>
+                <p class="text-xs text-pb-fg-muted">Pre-Alpha</p>
+            </a>
         </div>
-        <nav class="flex-1 overflow-y-auto p-2 text-sm" aria-label="Hauptnavigation">
+        <nav class="flex-1 overflow-y-auto p-2 text-sm space-y-1" aria-label="Hauptnavigation">
+            <NavLink href="/"
+                     Match="NavLinkMatch.All"
+                     class="block px-2 py-1.5 rounded hover:bg-pb-bg"
+                     ActiveClass="bg-pb-bg font-medium text-pb-accent">
+                Start
+            </NavLink>
+            <NavLink href="/reader"
+                     class="block px-2 py-1.5 rounded hover:bg-pb-bg"
+                     ActiveClass="bg-pb-bg font-medium text-pb-accent">
+                Reader (Demo)
+            </NavLink>
+            <div class="mt-4 px-2 text-xs uppercase tracking-wide text-pb-fg-muted">Library</div>
             <span class="block px-2 py-1 text-pb-fg-muted italic">
-                Library-Skelett — folgt in Release 0.5.
+                Folgt in Release 0.5.
             </span>
         </nav>
     </aside>

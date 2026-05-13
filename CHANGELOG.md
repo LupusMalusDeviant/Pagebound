@@ -16,6 +16,14 @@ die Versionierung folgt [Semantic Versioning](https://semver.org/lang/de/).
 - Zwei vollständige Service-Implementierungen: `NoOpTelemetryService`, `Sha256HashService`
 - i18n-Ressourcen `wwwroot/resources/de.json` und `en.json`
 - DI-Registrierungen in `Program.cs` gegen Interfaces
+- **PDF.js-Integration**: TypeScript-Bridge `wwwroot/js/pdfjs-bridge.ts` (esbuild-Bundle als IIFE-Global `pageboundPdf`), Worker-Datei `pdf.worker.min.mjs` aus pdfjs-dist
+- **`PdfJsRenderer`** in `Pagebound.Infrastructure/Pdf/`: erste Implementation von `IPdfRenderer` (`LoadAsync`, `RenderPageAsync`, `UnloadAsync` vollständig; `ExtractTextAsync`/`SearchAsync`/`GetOutlineAsync` als `NotImplementedException` mit TODO)
+- `Microsoft.JSInterop` (10.0.8) als Paket-Referenz in `Pagebound.Infrastructure`
+- **Reader-Demo-Page** unter `/reader`: File-Picker, Seitennavigation, Zoom-Stufen (75/100/150/200 %)
+- `esbuild.mjs` + `tsconfig.json` für JS-Interop-Bundling
+- npm-Scripts erweitert: `build` (CSS+JS), `build:js`, `watch:js`, `typecheck`
+- CI-Workflow nutzt `npm run build` (zuvor nur `build:css`)
+- Navigation in `MainLayout` mit `NavLink`-Items (Start, Reader)
 
 ### Changed
 - Bootstrap-Assets und Demo-Pages (Counter, Weather, NavMenu) durch Tailwind-basiertes Layout ersetzt
