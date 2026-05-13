@@ -1,15 +1,30 @@
-﻿@inherits LayoutComponentBase
-<div class="page">
-    <div class="sidebar">
-        <NavMenu />
-    </div>
+@inherits LayoutComponentBase
 
-    <main>
-        <div class="top-row px-4">
-            <a href="https://learn.microsoft.com/aspnet/core/" target="_blank">About</a>
+<div class="flex h-screen w-screen overflow-hidden bg-pb-bg text-pb-fg">
+
+    @* Library-Sidebar — auto-collapse beim Lesen, hier vorerst Stub *@
+    <aside class="hidden md:flex w-64 flex-col border-r border-pb-border bg-pb-surface"
+           aria-label="Library">
+        <div class="px-4 py-3 border-b border-pb-border">
+            <h1 class="text-lg font-semibold tracking-tight">Pagebound</h1>
+            <p class="text-xs text-pb-fg-muted">Pre-Alpha</p>
         </div>
+        <nav class="flex-1 overflow-y-auto p-2 text-sm" aria-label="Hauptnavigation">
+            <span class="block px-2 py-1 text-pb-fg-muted italic">
+                Library-Skelett — folgt in Release 0.5.
+            </span>
+        </nav>
+    </aside>
 
-        <article class="content px-4">
+    @* Hauptbereich (Tabs + Content) *@
+    <main class="flex-1 flex flex-col min-w-0" role="main">
+        @* Tab-Leiste — vorerst Stub *@
+        <header class="flex items-center justify-between border-b border-pb-border px-4 h-12">
+            <div class="text-sm text-pb-fg-muted">Tabs — folgt</div>
+            <div class="text-xs text-pb-fg-muted">v0.0.0-pre</div>
+        </header>
+
+        <article class="flex-1 overflow-auto">
             @Body
         </article>
     </main>

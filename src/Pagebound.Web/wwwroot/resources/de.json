@@ -1,0 +1,26 @@
+{
+  "app.title": "Pagebound",
+  "app.tagline": "Schlanker, datenschutzfreundlicher Open-Source-Adobe-Reader-Ersatz.",
+  "app.preAlpha": "Pre-Alpha",
+  "app.loading": "Lädt …",
+  "app.error.unhandled": "Ein unerwarteter Fehler ist aufgetreten.",
+  "app.error.reload": "Neu laden",
+  "app.error.dismiss": "Schließen",
+
+  "nav.library": "Library",
+  "nav.libraryComingSoon": "Library-Skelett — folgt in Release 0.5.",
+
+  "tabs.comingSoon": "Tabs — folgt",
+
+  "home.nextUp": "Was als Nächstes kommt",
+  "home.feature.pdfOpen": "PDFs öffnen, anzeigen, navigieren",
+  "home.feature.highlight": "Highlight, Sticky Notes, Markdown",
+  "home.feature.library": "Library-Verwaltung mit Tags",
+  "home.feature.signature": "PNG-Signatur mit Hash-Integrität",
+  "home.feature.markdown": "Markdown-Export für Obsidian",
+  "home.releaseHint": "Roadmap und Spezifikation: {0}",
+
+  "notFound.title": "404 — Nicht gefunden",
+  "notFound.text": "Der gewünschte Inhalt existiert nicht.",
+  "notFound.toHome": "Zur Startseite"
+}

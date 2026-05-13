@@ -1,0 +1,136 @@
+@import "tailwindcss";
+
+/* =============================================================================
+   Tailwind v4: Sources
+   ----------------------------------------------------------------------------
+   v4 erkennt CSS-/HTML-Dateien automatisch im selben Verzeichnis und darüber.
+   Razor-Komponenten müssen wir explizit angeben.
+   ============================================================================= */
+@source "../../**/*.razor";
+@source "../../**/*.cshtml";
+@source "../../**/*.cs";
+@source "../index.html";
+
+/* =============================================================================
+   Theme: Pagebound Custom Color Tokens
+   ----------------------------------------------------------------------------
+   Vier Themes (Light, Dark, Sepia, Custom — FA-100). Theme wird über
+   data-theme-Attribut am <html>-Element gesteuert (gesetzt durch IThemeService).
+   ============================================================================= */
+@theme inline {
+  --color-pb-bg:        var(--pb-bg);
+  --color-pb-fg:        var(--pb-fg);
+  --color-pb-fg-muted:  var(--pb-fg-muted);
+  --color-pb-surface:   var(--pb-surface);
+  --color-pb-border:    var(--pb-border);
+  --color-pb-accent:    var(--pb-accent);
+
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+/* Light (Default) */
+:root,
+:root[data-theme="light"] {
+  --pb-bg:        #ffffff;
+  --pb-fg:        #0f172a;
+  --pb-fg-muted:  #64748b;
+  --pb-surface:   #f8fafc;
+  --pb-border:    #e2e8f0;
+  --pb-accent:    #2563eb;
+  color-scheme: light;
+}
+
+/* Dark */
+:root[data-theme="dark"] {
+  --pb-bg:        #0f172a;
+  --pb-fg:        #e2e8f0;
+  --pb-fg-muted:  #94a3b8;
+  --pb-surface:   #1e293b;
+  --pb-border:    #334155;
+  --pb-accent:    #60a5fa;
+  color-scheme: dark;
+}
+
+/* Sepia */
+:root[data-theme="sepia"] {
+  --pb-bg:        #f5eed7;
+  --pb-fg:        #463a2a;
+  --pb-fg-muted:  #7a6c5a;
+  --pb-surface:   #ede5cd;
+  --pb-border:    #d8c9a8;
+  --pb-accent:    #8b5a2b;
+  color-scheme: light;
+}
+
+/* Auto (folgt System-Setting wenn kein Theme explizit) */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    --pb-bg:        #0f172a;
+    --pb-fg:        #e2e8f0;
+    --pb-fg-muted:  #94a3b8;
+    --pb-surface:   #1e293b;
+    --pb-border:    #334155;
+    --pb-accent:    #60a5fa;
+    color-scheme: dark;
+  }
+}
+
+/* =============================================================================
+   Splash-Loader (vor Blazor-Boot sichtbar)
+   ----------------------------------------------------------------------------
+   Wird vom App-Bootstrap überschrieben, sobald MainLayout rendert.
+   ============================================================================= */
+.pb-splash {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  gap: 1rem;
+  color: var(--pb-fg-muted);
+}
+.pb-splash-logo {
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--pb-fg);
+  letter-spacing: -0.025em;
+}
+.pb-splash-spinner {
+  width: 2.5rem;
+  height: 2.5rem;
+  color: var(--pb-accent);
+  animation: pb-spin 1.2s linear infinite;
+}
+.pb-splash-text {
+  font-size: 0.875rem;
+}
+@keyframes pb-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* =============================================================================
+   Blazor-Error-Bar (von Blazor erwartete .styles.css-kompatible Klasse)
+   ============================================================================= */
+#blazor-error-ui.pb-error-bar {
+  background: #fee2e2;
+  color: #991b1b;
+  border-top: 1px solid #fecaca;
+  padding: 0.75rem 1rem;
+  font-size: 0.875rem;
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  display: none;
+  z-index: 1000;
+}
+#blazor-error-ui.pb-error-bar .reload {
+  margin-left: 0.5rem;
+  text-decoration: underline;
+  color: inherit;
+}
+#blazor-error-ui.pb-error-bar .dismiss {
+  float: right;
+  cursor: pointer;
+}

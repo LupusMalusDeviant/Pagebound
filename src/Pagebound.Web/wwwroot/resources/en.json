@@ -1,0 +1,26 @@
+{
+  "app.title": "Pagebound",
+  "app.tagline": "A lean, privacy-friendly open-source replacement for Adobe Reader.",
+  "app.preAlpha": "Pre-Alpha",
+  "app.loading": "Loading …",
+  "app.error.unhandled": "An unexpected error occurred.",
+  "app.error.reload": "Reload",
+  "app.error.dismiss": "Dismiss",
+
+  "nav.library": "Library",
+  "nav.libraryComingSoon": "Library scaffold — coming in release 0.5.",
+
+  "tabs.comingSoon": "Tabs — coming soon",
+
+  "home.nextUp": "What's next",
+  "home.feature.pdfOpen": "Open, view, navigate PDFs",
+  "home.feature.highlight": "Highlight, sticky notes, markdown",
+  "home.feature.library": "Library with tags",
+  "home.feature.signature": "PNG signature with hash integrity",
+  "home.feature.markdown": "Markdown export for Obsidian",
+  "home.releaseHint": "Roadmap and specification: {0}",
+
+  "notFound.title": "404 — Not found",
+  "notFound.text": "The content you are looking for does not exist.",
+  "notFound.toHome": "Back to home"
+}
