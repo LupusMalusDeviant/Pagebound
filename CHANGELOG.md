@@ -24,6 +24,10 @@ die Versionierung folgt [Semantic Versioning](https://semver.org/lang/de/).
 - npm-Scripts erweitert: `build` (CSS+JS), `build:js`, `watch:js`, `typecheck`
 - CI-Workflow nutzt `npm run build` (zuvor nur `build:css`)
 - Navigation in `MainLayout` mit `NavLink`-Items (Start, Reader)
+- **Docker-Setup für lokales / Self-Hosted-Deployment**: Multi-Stage `Dockerfile` (Node-Stage baut Tailwind+esbuild, .NET-10-Stage `dotnet publish`, `nginx:alpine`-Stage liefert statische Site), `infra/docker/nginx.conf` mit korrekten MIME-Types für WASM/PWA/PDF.js und SPA-Fallback auf `index.html`, `.dockerignore` für schlanken Build-Kontext
+
+### Fixed
+- Reader-Layout nutzt jetzt die volle Breite des Hauptbereichs — Controls (Header, File-Picker, Navigation, Zoom-Buttons) bleiben auf `max-w-4xl` mittig zentriert, das PDF-`<figure>` nimmt den verfügbaren Platz bis `max-w-[1800px]`. Zoom-Faktoren neu gemappt: der angezeigte „100 %"-Default entspricht jetzt einem internen PDF.js-Scale von 2.0 (vorher 1.5), Stufen jetzt 50 / 75 / 100 / 125 / 150 / 200 %.
 
 ### Changed
 - Bootstrap-Assets und Demo-Pages (Counter, Weather, NavMenu) durch Tailwind-basiertes Layout ersetzt
