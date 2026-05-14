@@ -344,6 +344,268 @@ export function downloadFile(
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+// ============================================================================
+// Drawing capture (FA-013 Stift, FA-014 Formen)
+// ----------------------------------------------------------------------------
+// `startDrawingCapture` attaches pointer listeners to a page-canvas element
+// and renders a live SVG preview during each pointerdown→up cycle. At pointerup
+// it calls back into C# with the captured points in 0..1 page coordinates so
+// the Razor side can persist the Annotation. Designed to stay attached for
+// many strokes/shapes in a row (the user picks a tool and draws multiple
+// times) — `stopDrawingCapture` removes the listeners and the preview SVG
+// when the user leaves the drawing mode.
+
+type DrawMode = "ink" | "rect" | "arrow" | "line";
+
+interface DrawingCaptureOptions {
+  color: string;
+  /** Strichstärke als Anteil der Container-Breite. JS rechnet daraus die
+   *  Pixel-Stärke für den Live-Preview und gibt sie 1:1 zurück an C#. */
+  strokeWidthFraction: number;
+}
+
+interface DrawingResult {
+  mode: DrawMode;
+  color: string;
+  strokeWidthFraction: number;
+  strokes: { x: number; y: number }[][];
+}
+
+let activeDrawingCapture: { cleanup: () => void } | null = null;
+
+export function startDrawingCapture(
+  containerSelector: string,
+  mode: DrawMode,
+  options: DrawingCaptureOptions,
+  dotNetRef: DotNetRef,
+  callbackMethod: string
+): void {
+  stopDrawingCapture();
+
+  const container = document.querySelector(containerSelector);
+  if (!(container instanceof HTMLElement)) return;
+
+  const strokeWidthPx = Math.max(
+    1,
+    options.strokeWidthFraction * container.clientWidth
+  );
+
+  // Eigener SVG-Layer für Live-Preview. Wir hängen ihn an den Container, nicht
+  // an document.body — dann skaliert er mit der Seite und ist bei Page-Wechsel
+  // sofort weg (Container wird neu gerendert).
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute(
+    "style",
+    "position:absolute; inset:0; width:100%; height:100%; pointer-events:none; z-index:30;"
+  );
+  svg.setAttribute("viewBox", "0 0 1 1");
+  svg.setAttribute("preserveAspectRatio", "none");
+  container.appendChild(svg);
+
+  let isDrawing = false;
+  let inkPoints: { x: number; y: number }[] = [];
+  let shapeStart: { x: number; y: number } | null = null;
+  let shapeEnd: { x: number; y: number } | null = null;
+  let previewNode: SVGElement | null = null;
+
+  function pointFromEvent(e: PointerEvent): { x: number; y: number } {
+    const rect = container!.getBoundingClientRect();
+    const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    const y = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
+    return { x, y };
+  }
+
+  function clearPreview(): void {
+    if (previewNode) {
+      previewNode.remove();
+      previewNode = null;
+    }
+  }
+
+  function renderInkPreview(): void {
+    clearPreview();
+    if (inkPoints.length < 2) return;
+    const d = inkPoints
+      .map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`)
+      .join(" ");
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", d);
+    path.setAttribute("fill", "none");
+    path.setAttribute("stroke", options.color);
+    path.setAttribute("stroke-width", String(strokeWidthPx));
+    path.setAttribute("stroke-linecap", "round");
+    path.setAttribute("stroke-linejoin", "round");
+    path.setAttribute("vector-effect", "non-scaling-stroke");
+    svg.appendChild(path);
+    previewNode = path;
+  }
+
+  function renderShapePreview(): void {
+    clearPreview();
+    if (!shapeStart || !shapeEnd) return;
+    let node: SVGElement;
+    if (mode === "rect") {
+      const x = Math.min(shapeStart.x, shapeEnd.x);
+      const y = Math.min(shapeStart.y, shapeEnd.y);
+      const w = Math.abs(shapeEnd.x - shapeStart.x);
+      const h = Math.abs(shapeEnd.y - shapeStart.y);
+      const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+      rect.setAttribute("x", String(x));
+      rect.setAttribute("y", String(y));
+      rect.setAttribute("width", String(w));
+      rect.setAttribute("height", String(h));
+      rect.setAttribute("fill", "none");
+      rect.setAttribute("stroke", options.color);
+      rect.setAttribute("stroke-width", String(strokeWidthPx));
+      rect.setAttribute("vector-effect", "non-scaling-stroke");
+      node = rect;
+    } else {
+      // arrow + line: gerade Linie zwischen Start und Ende
+      const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+      line.setAttribute("x1", String(shapeStart.x));
+      line.setAttribute("y1", String(shapeStart.y));
+      line.setAttribute("x2", String(shapeEnd.x));
+      line.setAttribute("y2", String(shapeEnd.y));
+      line.setAttribute("stroke", options.color);
+      line.setAttribute("stroke-width", String(strokeWidthPx));
+      line.setAttribute("stroke-linecap", "round");
+      line.setAttribute("vector-effect", "non-scaling-stroke");
+      if (mode === "arrow") {
+        // Spitze als kleines Dreieck am Endpunkt. ViewBox ist 0..1 — wir bauen
+        // die Spitze in Page-Fraktionen, abhängig von der Strichstärke.
+        const arrowSize = Math.max(0.012, strokeWidthPx * 3 / container!.clientWidth);
+        const dx = shapeEnd.x - shapeStart.x;
+        const dy = shapeEnd.y - shapeStart.y;
+        const len = Math.hypot(dx, dy);
+        if (len > 0) {
+          const ux = dx / len;
+          const uy = dy / len;
+          const baseX = shapeEnd.x - ux * arrowSize;
+          const baseY = shapeEnd.y - uy * arrowSize;
+          // 90° gedrehte Normale
+          const nx = -uy;
+          const ny = ux;
+          const halfBase = arrowSize * 0.5;
+          const p1 = `${shapeEnd.x},${shapeEnd.y}`;
+          const p2 = `${baseX + nx * halfBase},${baseY + ny * halfBase}`;
+          const p3 = `${baseX - nx * halfBase},${baseY - ny * halfBase}`;
+          const tri = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
+          tri.setAttribute("points", `${p1} ${p2} ${p3}`);
+          tri.setAttribute("fill", options.color);
+          tri.setAttribute("stroke", "none");
+          // Wir bauen ein Gruppe-Node aus Line + Triangle.
+          const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
+          group.appendChild(line);
+          group.appendChild(tri);
+          node = group;
+        } else {
+          node = line;
+        }
+      } else {
+        node = line;
+      }
+    }
+    svg.appendChild(node);
+    previewNode = node;
+  }
+
+  function onDown(e: PointerEvent): void {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    isDrawing = true;
+    const p = pointFromEvent(e);
+    if (mode === "ink") {
+      inkPoints = [p];
+      renderInkPreview();
+    } else {
+      shapeStart = p;
+      shapeEnd = p;
+      renderShapePreview();
+    }
+    container!.setPointerCapture(e.pointerId);
+  }
+
+  function onMove(e: PointerEvent): void {
+    if (!isDrawing) return;
+    const p = pointFromEvent(e);
+    if (mode === "ink") {
+      const last = inkPoints[inkPoints.length - 1];
+      // Sehr nahe Punkte überspringen, damit die Stroke-Liste nicht unnötig
+      // groß wird — JSON-Roundtrip + IndexedDB-Persistenz danken's.
+      if (!last || Math.hypot(p.x - last.x, p.y - last.y) > 0.002) {
+        inkPoints.push(p);
+        renderInkPreview();
+      }
+    } else {
+      shapeEnd = p;
+      renderShapePreview();
+    }
+  }
+
+  function onUp(e: PointerEvent): void {
+    if (!isDrawing) return;
+    isDrawing = false;
+    try {
+      container!.releasePointerCapture(e.pointerId);
+    } catch {
+      // OK — Browser hat capture eventuell schon implizit freigegeben.
+    }
+    let result: DrawingResult | null = null;
+    const strokeWidthFraction = options.strokeWidthFraction;
+    if (mode === "ink") {
+      if (inkPoints.length >= 2) {
+        result = {
+          mode,
+          color: options.color,
+          strokeWidthFraction,
+          strokes: [inkPoints.slice()]
+        };
+      }
+      inkPoints = [];
+    } else {
+      if (shapeStart && shapeEnd) {
+        // Mini-Bewegungen (Single-Click) verwerfen.
+        const dist = Math.hypot(shapeEnd.x - shapeStart.x, shapeEnd.y - shapeStart.y);
+        if (dist > 0.005) {
+          result = {
+            mode,
+            color: options.color,
+            strokeWidthFraction,
+            strokes: [[shapeStart, shapeEnd]]
+          };
+        }
+      }
+      shapeStart = null;
+      shapeEnd = null;
+    }
+    clearPreview();
+    if (result) {
+      void dotNetRef.invokeMethodAsync(callbackMethod, result);
+    }
+  }
+
+  container.addEventListener("pointerdown", onDown);
+  container.addEventListener("pointermove", onMove);
+  container.addEventListener("pointerup", onUp);
+  container.addEventListener("pointercancel", onUp);
+
+  activeDrawingCapture = {
+    cleanup(): void {
+      container.removeEventListener("pointerdown", onDown);
+      container.removeEventListener("pointermove", onMove);
+      container.removeEventListener("pointerup", onUp);
+      container.removeEventListener("pointercancel", onUp);
+      clearPreview();
+      svg.remove();
+    }
+  };
+}
+
+export function stopDrawingCapture(): void {
+  activeDrawingCapture?.cleanup();
+  activeDrawingCapture = null;
+}
+
 /**
  * Binary variant of downloadFile: takes Base64-encoded bytes and produces a
  * proper binary Blob with the given mime type. Used by the PDF-tools save

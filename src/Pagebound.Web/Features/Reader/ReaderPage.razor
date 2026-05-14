@@ -229,7 +229,63 @@
                         @(_isSavingSignedPdf ? "Speichere …" : "📥 Signiert speichern")
                     </button>
                 }
+                <span class="text-pb-fg-muted ml-2">Zeichnen:</span>
+                <button type="button"
+                        class="@($"rounded border px-2 py-0.5 {(_annotationMode == AnnotationMode.Pen ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted")}")"
+                        @onclick="@(() => SetAnnotationMode(AnnotationMode.Pen))"
+                        title="Freihand-Zeichnen mit Maus/Stift (FA-013)">
+                    ✏️ Stift
+                </button>
+                <button type="button"
+                        class="@($"rounded border px-2 py-0.5 {(_annotationMode == AnnotationMode.RectShape ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted")}")"
+                        @onclick="@(() => SetAnnotationMode(AnnotationMode.RectShape))"
+                        title="Rechteck aufziehen (FA-014)">
+                    ▭ Rechteck
+                </button>
+                <button type="button"
+                        class="@($"rounded border px-2 py-0.5 {(_annotationMode == AnnotationMode.ArrowShape ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted")}")"
+                        @onclick="@(() => SetAnnotationMode(AnnotationMode.ArrowShape))"
+                        title="Pfeil ziehen (FA-014)">
+                    ↗ Pfeil
+                </button>
+                <button type="button"
+                        class="@($"rounded border px-2 py-0.5 {(_annotationMode == AnnotationMode.LineShape ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted")}")"
+                        @onclick="@(() => SetAnnotationMode(AnnotationMode.LineShape))"
+                        title="Linie ziehen (FA-014)">
+                    ╱ Linie
+                </button>
             </div>
+            @if (IsDrawingMode(_annotationMode))
+            {
+                <div class="max-w-4xl mx-auto mt-1 flex flex-wrap items-center gap-3 text-xs text-pb-fg-muted">
+                    <span>Farbe:</span>
+                    @foreach (var (label, css) in DrawPalette)
+                    {
+                        var c = css;
+                        var l = label;
+                        var isActive = string.Equals(_drawColor, c, StringComparison.OrdinalIgnoreCase);
+                        <button type="button"
+                                class="@($"w-6 h-6 rounded-full border {(isActive ? "border-pb-accent ring-2 ring-pb-accent/40" : "border-pb-border")} hover:scale-110 transition-transform")"
+                                style="@($"background-color:{c}")"
+                                title="@l"
+                                aria-label="@($"Stiftfarbe {l}")"
+                                @onclick="@(() => SetDrawColor(c))"></button>
+                    }
+                    <span class="ml-2">Stärke:</span>
+                    @foreach (var (label, fraction) in DrawStrokeWidths)
+                    {
+                        var f = fraction;
+                        var l = label;
+                        var isActive = Math.Abs(_drawStrokeWidth - f) < 1e-6;
+                        <button type="button"
+                                class="@($"rounded border px-2 py-0.5 {(isActive ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted")}")"
+                                title="@($"Strichstärke {l}")"
+                                @onclick="@(() => SetDrawStrokeWidth(f))">
+                            @l
+                        </button>
+                    }
+                </div>
+            }
             <div class="flex items-center gap-2">
                 <button type="button"
                         class="@($"rounded border px-2 py-0.5 {(_outlineOpen ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted")}")"
@@ -355,7 +411,7 @@
                     "container-type:size; aspect-ratio:{0}/{1}; width:min(100%, {2}px)",
                     pageW, pageH, maxWidthPx);
                 <div data-pb-page-canvas
-                     class="relative @(_annotationMode == AnnotationMode.StickyNote ? "cursor-crosshair" : "cursor-text")"
+                     class="relative @(_annotationMode == AnnotationMode.StickyNote || IsDrawingMode(_annotationMode) ? "cursor-crosshair" : "cursor-text")"
                      style="@canvasStyle"
                      @onclick="HandlePdfClickAsync"
                      @onmouseup="HandleCanvasMouseUpAsync">
@@ -370,7 +426,7 @@
                        direkt auf das Canvas-Div durchschlagen und einen Pin setzen können. *@
                     @if (_pageTextItems.Count > 0)
                     {
-                        var textLayerClass = _annotationMode == AnnotationMode.StickyNote
+                        var textLayerClass = (_annotationMode == AnnotationMode.StickyNote || IsDrawingMode(_annotationMode))
                             ? "absolute inset-0 leading-none whitespace-pre select-none pointer-events-none"
                             : "absolute inset-0 leading-none whitespace-pre select-text";
                         <div class="@textLayerClass" aria-hidden="true">
@@ -405,6 +461,136 @@
                                     @onclick="@(() => OpenHighlightEditor(highlight))"
                                     @onclick:stopPropagation></button>
                         }
+                    }
+
+                    @* Ink + Shape Overlay (FA-013 Stift, FA-014 Formen).
+                       SVG mit viewBox 0..1 — alle Punkte/Bounds sind als
+                       Seiten-Anteile gespeichert und skalieren automatisch
+                       mit dem Zoom. *@
+                    @if (InkOnCurrentPage.Any() || ShapesOnCurrentPage.Any())
+                    {
+                        var drawingActive = IsDrawingMode(_annotationMode);
+                        // Hit-Helper-Stroke: transparente, deutlich dickere
+                        // Variante jedes Pfads — pointer-events:stroke fängt
+                        // nur EXAKT auf der Strichbreite, deshalb brauchen wir
+                        // ein eigenes Element mit ~0.02 Seiten-Anteilen für
+                        // bequemes Klicken zum Löschen. Im Zeichen-Modus auch
+                        // diese Helper deaktivieren, damit Klicks beim Live-Zeichnen
+                        // an die JS-Bridge auf dem Canvas durchgereicht werden.
+                        const string HitStrokeWidth = "0.024";
+                        var hitPointerCss = drawingActive
+                            ? "pointer-events:none"
+                            : "pointer-events:stroke; cursor:pointer";
+                        <svg class="absolute inset-0 w-full h-full"
+                             style="pointer-events:none; z-index:10"
+                             viewBox="0 0 1 1" preserveAspectRatio="none" aria-hidden="true">
+                            @foreach (var ink in InkOnCurrentPage)
+                            {
+                                var inkAnn = ink;
+                                var inkColor = InkAnnotation.GetColor(inkAnn);
+                                var inkSw = InkAnnotation.GetStrokeWidth(inkAnn)
+                                    .ToString("F4", CultureInfo.InvariantCulture);
+                                foreach (var stroke in InkAnnotation.GetStrokes(inkAnn))
+                                {
+                                    var d = BuildInkPath(stroke);
+                                    if (string.IsNullOrEmpty(d)) continue;
+                                    @* Hit-Helper: transparent + dick + klickbar *@
+                                    <path d="@d" fill="none" stroke="transparent" stroke-width="@HitStrokeWidth"
+                                          stroke-linecap="round" stroke-linejoin="round"
+                                          style="@hitPointerCss"
+                                          @onclick="@(() => OpenDrawingEditor(inkAnn))"
+                                          @onclick:stopPropagation />
+                                    @* Sichtbarer Stroke: pointer-events deaktiviert *@
+                                    <path d="@d" fill="none" stroke="@inkColor" stroke-width="@inkSw"
+                                          stroke-linecap="round" stroke-linejoin="round"
+                                          style="pointer-events:none" />
+                                }
+                            }
+                            @foreach (var shape in ShapesOnCurrentPage)
+                            {
+                                var sa = shape;
+                                var kind = ShapeAnnotation.GetShape(sa);
+                                var col = ShapeAnnotation.GetColor(sa);
+                                var sw = ShapeAnnotation.GetStrokeWidth(sa);
+                                var swStr = sw.ToString("F4", CultureInfo.InvariantCulture);
+                                var sx = ShapeAnnotation.GetStartX(sa);
+                                var sy = ShapeAnnotation.GetStartY(sa);
+                                var ex = ShapeAnnotation.GetEndX(sa);
+                                var ey = ShapeAnnotation.GetEndY(sa);
+                                if (kind == ShapeKind.Rectangle)
+                                {
+                                    var rx = Math.Min(sx, ex).ToString("F4", CultureInfo.InvariantCulture);
+                                    var ry = Math.Min(sy, ey).ToString("F4", CultureInfo.InvariantCulture);
+                                    var rw = Math.Abs(ex - sx).ToString("F4", CultureInfo.InvariantCulture);
+                                    var rh = Math.Abs(ey - sy).ToString("F4", CultureInfo.InvariantCulture);
+                                    @* Hit-Helper auf den Rahmen, nicht auf den hohlen Innenraum *@
+                                    <rect x="@rx" y="@ry" width="@rw" height="@rh"
+                                          fill="none" stroke="transparent" stroke-width="@HitStrokeWidth"
+                                          style="@hitPointerCss"
+                                          @onclick="@(() => OpenDrawingEditor(sa))"
+                                          @onclick:stopPropagation />
+                                    <rect x="@rx" y="@ry" width="@rw" height="@rh"
+                                          fill="none" stroke="@col" stroke-width="@swStr"
+                                          style="pointer-events:none" />
+                                }
+                                else
+                                {
+                                    var x1 = sx.ToString("F4", CultureInfo.InvariantCulture);
+                                    var y1 = sy.ToString("F4", CultureInfo.InvariantCulture);
+                                    var x2 = ex.ToString("F4", CultureInfo.InvariantCulture);
+                                    var y2 = ey.ToString("F4", CultureInfo.InvariantCulture);
+                                    <line x1="@x1" y1="@y1" x2="@x2" y2="@y2"
+                                          stroke="transparent" stroke-width="@HitStrokeWidth"
+                                          stroke-linecap="round"
+                                          style="@hitPointerCss"
+                                          @onclick="@(() => OpenDrawingEditor(sa))"
+                                          @onclick:stopPropagation />
+                                    <line x1="@x1" y1="@y1" x2="@x2" y2="@y2"
+                                          stroke="@col" stroke-width="@swStr"
+                                          stroke-linecap="round"
+                                          style="pointer-events:none" />
+                                    @if (kind == ShapeKind.Arrow)
+                                    {
+                                        var head = ComputeArrowHead(sx, sy, ex, ey, sw);
+                                        if (head is not null)
+                                        {
+                                            var (hx1, hy1, hx2, hy2, hx3, hy3) = head.Value;
+                                            var points = string.Format(CultureInfo.InvariantCulture,
+                                                "{0:F4},{1:F4} {2:F4},{3:F4} {4:F4},{5:F4}",
+                                                hx1, hy1, hx2, hy2, hx3, hy3);
+                                            <polygon points="@points" fill="@col" stroke="none"
+                                                     style="pointer-events:none" />
+                                        }
+                                    }
+                                }
+                            }
+                        </svg>
+                    }
+
+                    @* Lösch-Mini-Toolbar (FA-013/014) bei selektierter Ink/Shape *@
+                    @if (_editingDrawing is not null && _editingDrawing.PageNumber == _currentPage)
+                    {
+                        var (anchorX, anchorY) = GetDrawingAnchor(_editingDrawing);
+                        var anchorLeftPct = (anchorX * 100).ToString("F2", CultureInfo.InvariantCulture);
+                        var anchorTopPct = (anchorY * 100).ToString("F2", CultureInfo.InvariantCulture);
+                        var translateY = anchorY < 0.08 ? "8px" : "calc(-100% - 6px)";
+                        <div class="absolute z-20 flex items-center gap-1 rounded-md border border-pb-border bg-pb-surface px-2 py-1 shadow-lg"
+                             style="@($"left:{anchorLeftPct}%; top:{anchorTopPct}%; transform: translate(-50%, {translateY})")"
+                             @onclick:stopPropagation>
+                            <span class="text-xs text-pb-fg-muted mr-1">
+                                @(_editingDrawing.Type == AnnotationType.Ink ? "Stift" : "Form")
+                            </span>
+                            <button type="button"
+                                    class="px-2 py-0.5 text-xs rounded border border-pb-border text-pb-fg-muted hover:text-pb-fg"
+                                    @onclick="DeleteEditingDrawingAsync"
+                                    title="Löschen">
+                                🗑 Löschen
+                            </button>
+                            <button type="button"
+                                    class="ml-1 px-1 text-pb-fg-muted hover:text-pb-fg text-sm"
+                                    @onclick="@(() => _editingDrawing = null)"
+                                    aria-label="Auswahl verwerfen">✕</button>
+                        </div>
                     }
 
                     @* Inline-Toolbar bei Selection (FA-018) *@
@@ -765,8 +951,37 @@
     {
         Select,
         StickyNote,
-        Signature
+        Signature,
+        Pen,
+        RectShape,
+        ArrowShape,
+        LineShape
     }
+
+    private static bool IsDrawingMode(AnnotationMode mode) => mode is
+        AnnotationMode.Pen or AnnotationMode.RectShape or
+        AnnotationMode.ArrowShape or AnnotationMode.LineShape;
+
+    // Zeichenwerkzeug-State (FA-013 Stift, FA-014 Formen).
+    // Persistente Listener-Verwaltung liegt im JS (shortcuts-bridge), pro
+    // pointerdown→up kommt ein Callback zurück mit den 0..1-Punkten.
+    private static readonly (string Label, string Css)[] DrawPalette =
+    {
+        ("Schwarz", "#000000"),
+        ("Rot", "#dc2626"),
+        ("Blau", "#2563eb")
+    };
+
+    private static readonly (string Label, double Fraction)[] DrawStrokeWidths =
+    {
+        ("dünn", 0.002),
+        ("normal", 0.004),
+        ("dick", 0.008)
+    };
+
+    private string _drawColor = "#000000";
+    private double _drawStrokeWidth = 0.004;
+    private int? _captureAttachedToPage;
 
     // Signatur-State (FA-015/016/017)
     private const string SignerStorageKey = "settings:signer";
@@ -782,6 +997,12 @@
 
     private IEnumerable<Annotation> SignaturesOnCurrentPage =>
         _annotations.Where(a => a.Type == AnnotationType.Signature && a.PageNumber == _currentPage);
+
+    private IEnumerable<Annotation> InkOnCurrentPage =>
+        _annotations.Where(a => a.Type == AnnotationType.Ink && a.PageNumber == _currentPage);
+
+    private IEnumerable<Annotation> ShapesOnCurrentPage =>
+        _annotations.Where(a => a.Type == AnnotationType.Shape && a.PageNumber == _currentPage);
 
     private sealed record SelectionDto(
         string Text,
@@ -1011,6 +1232,208 @@
         // sich Modus-Indikatoren und offener Popover unangenehm.
         _editingAnnotation = null;
         _editingContent = string.Empty;
+        _editingDrawing = null;
+        // Drawing-Capture (FA-013/014): bei Mode-Wechsel JS-Listener
+        // (de-)attachen. Fire-and-Forget — stopDrawingCapture in JS ist
+        // idempotent, also race-frei.
+        _ = SyncDrawingCaptureAsync();
+    }
+
+    private void SetDrawColor(string color)
+    {
+        _drawColor = color;
+        _ = SyncDrawingCaptureAsync();
+    }
+
+    private void SetDrawStrokeWidth(double fraction)
+    {
+        _drawStrokeWidth = fraction;
+        _ = SyncDrawingCaptureAsync();
+    }
+
+    /// <summary>
+    /// Hängt den JS-seitigen Pointer-Listener für Stift/Formen an das
+    /// Page-Canvas-Element, sobald ein Drawing-Mode aktiv ist — und entfernt
+    /// ihn wieder, sobald wir den Modus verlassen. Wird nach jedem Tool-/
+    /// Stilwechsel aufgerufen, damit Farbe + Strichstärke live ankommen.
+    /// </summary>
+    private async Task SyncDrawingCaptureAsync()
+    {
+        if (_dotNetRef is null) return;
+        try
+        {
+            if (IsDrawingMode(_annotationMode))
+            {
+                await JS.InvokeVoidAsync(
+                    "pageboundShortcuts.startDrawingCapture",
+                    PageCanvasSelector,
+                    MapDrawingModeToJs(_annotationMode),
+                    new { color = _drawColor, strokeWidthFraction = _drawStrokeWidth },
+                    _dotNetRef,
+                    nameof(HandleDrawCompletedAsync));
+                _captureAttachedToPage = _currentPage;
+            }
+            else if (_captureAttachedToPage is not null)
+            {
+                await JS.InvokeVoidAsync("pageboundShortcuts.stopDrawingCapture");
+                _captureAttachedToPage = null;
+            }
+        }
+        catch
+        {
+            // Bridge nicht erreichbar — Tool tut dann einfach nichts.
+        }
+    }
+
+    private static string MapDrawingModeToJs(AnnotationMode mode) => mode switch
+    {
+        AnnotationMode.Pen => "ink",
+        AnnotationMode.RectShape => "rect",
+        AnnotationMode.ArrowShape => "arrow",
+        AnnotationMode.LineShape => "line",
+        _ => "ink"
+    };
+
+    [JSInvokable]
+    public async Task HandleDrawCompletedAsync(DrawingCaptureResult result)
+    {
+        if (_currentPdfId is null) return;
+        if (result.Strokes is null || result.Strokes.Count == 0) return;
+
+        NewAnnotation? toCreate = null;
+        if (string.Equals(result.Mode, "ink", StringComparison.OrdinalIgnoreCase))
+        {
+            var strokes = result.Strokes
+                .Select(s => new InkStroke(
+                    s.Select(p => new InkPoint(p.X, p.Y)).ToList()))
+                .ToList();
+            toCreate = InkAnnotation.Create(
+                _currentPdfId.Value,
+                _currentPage,
+                strokes,
+                result.Color,
+                result.StrokeWidthFraction);
+        }
+        else if (result.Strokes[0].Count >= 2)
+        {
+            var startPoint = result.Strokes[0][0];
+            var endPoint = result.Strokes[0][^1];
+            var shape = result.Mode.ToLowerInvariant() switch
+            {
+                "rect" => ShapeKind.Rectangle,
+                "arrow" => ShapeKind.Arrow,
+                "line" => ShapeKind.Line,
+                _ => ShapeKind.Rectangle
+            };
+            toCreate = ShapeAnnotation.Create(
+                _currentPdfId.Value,
+                _currentPage,
+                shape,
+                startPoint.X, startPoint.Y,
+                endPoint.X, endPoint.Y,
+                result.Color,
+                result.StrokeWidthFraction);
+        }
+
+        if (toCreate is null) return;
+
+        var created = await Annotations.CreateAsync(toCreate, CancellationToken.None);
+        _annotations = _annotations.Append(created).ToList();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    public sealed record DrawingCaptureResult(
+        string Mode,
+        string Color,
+        double StrokeWidthFraction,
+        List<List<DrawPoint>> Strokes);
+
+    public sealed record DrawPoint(double X, double Y);
+
+    // Selektierte Ink/Shape für die Lösch-Mini-Toolbar.
+    private Annotation? _editingDrawing;
+
+    private void OpenDrawingEditor(Annotation annotation)
+    {
+        // In Zeichen-Modi schlucken wir Klicks auf existierende Annotations,
+        // damit der User wirklich zeichnet und nicht versehentlich editiert.
+        if (IsDrawingMode(_annotationMode)) return;
+        _editingDrawing = annotation;
+    }
+
+    private async Task DeleteEditingDrawingAsync()
+    {
+        if (_editingDrawing is null) return;
+        var id = _editingDrawing.Id;
+        await Annotations.DeleteAsync(id, CancellationToken.None);
+        _annotations = _annotations.Where(a => a.Id.Value != id.Value).ToList();
+        _editingDrawing = null;
+    }
+
+    /// <summary>
+    /// Ankerpunkt für die Lösch-Mini-Toolbar (oben-Mitte der Bounding-Box
+    /// der jeweiligen Ink/Shape).
+    /// </summary>
+    private static (double X, double Y) GetDrawingAnchor(Annotation annotation)
+    {
+        if (annotation.Type == AnnotationType.Ink)
+        {
+            var minX = 1.0; var minY = 1.0; var maxX = 0.0;
+            var found = false;
+            foreach (var stroke in InkAnnotation.GetStrokes(annotation))
+            {
+                foreach (var p in stroke.Points)
+                {
+                    if (p.X < minX) minX = p.X;
+                    if (p.X > maxX) maxX = p.X;
+                    if (p.Y < minY) minY = p.Y;
+                    found = true;
+                }
+            }
+            return found ? ((minX + maxX) * 0.5, minY) : (0.5, 0.5);
+        }
+        if (annotation.Type == AnnotationType.Shape)
+        {
+            var sx = ShapeAnnotation.GetStartX(annotation);
+            var sy = ShapeAnnotation.GetStartY(annotation);
+            var ex = ShapeAnnotation.GetEndX(annotation);
+            var ey = ShapeAnnotation.GetEndY(annotation);
+            return ((sx + ex) * 0.5, Math.Min(sy, ey));
+        }
+        return (0.5, 0.5);
+    }
+
+    private static string BuildInkPath(InkStroke stroke)
+    {
+        if (stroke.Points.Count < 2) return string.Empty;
+        return string.Join(" ", stroke.Points.Select((p, i) =>
+            string.Format(CultureInfo.InvariantCulture,
+                "{0} {1:F4} {2:F4}",
+                i == 0 ? "M" : "L", p.X, p.Y)));
+    }
+
+    /// <summary>
+    /// Liefert die drei Eckpunkte der Pfeilspitze (Endpunkt + zwei Basis-Punkte
+    /// links/rechts der Linienrichtung). Größe skaliert leicht mit der
+    /// Strichstärke, ist aber nach unten begrenzt damit dünne Pfeile sichtbar
+    /// bleiben. Gibt <c>null</c> zurück, wenn Start und Ende identisch sind.
+    /// </summary>
+    private static (double X1, double Y1, double X2, double Y2, double X3, double Y3)?
+        ComputeArrowHead(double sx, double sy, double ex, double ey, double strokeWidth)
+    {
+        var dx = ex - sx;
+        var dy = ey - sy;
+        var len = Math.Sqrt(dx * dx + dy * dy);
+        if (len <= 0) return null;
+        var arrowSize = Math.Max(0.012, strokeWidth * 3);
+        var ux = dx / len;
+        var uy = dy / len;
+        var bx = ex - ux * arrowSize;
+        var by = ey - uy * arrowSize;
+        var nx = -uy;
+        var ny = ux;
+        var hb = arrowSize * 0.5;
+        return (ex, ey, bx + nx * hb, by + ny * hb, bx - nx * hb, by - ny * hb);
     }
 
     private async Task HandlePdfClickAsync(MouseEventArgs e)
@@ -1600,26 +2023,36 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (!firstRender) return;
-        if (!_shortcutsRegistered)
+        if (firstRender)
         {
-            _dotNetRef = DotNetObjectReference.Create(this);
-            try
+            if (!_shortcutsRegistered)
             {
-                await JS.InvokeVoidAsync($"{ShortcutsJs}.register", _dotNetRef);
-                _shortcutsRegistered = true;
+                _dotNetRef = DotNetObjectReference.Create(this);
+                try
+                {
+                    await JS.InvokeVoidAsync($"{ShortcutsJs}.register", _dotNetRef);
+                    _shortcutsRegistered = true;
+                }
+                catch (JSException)
+                {
+                    // shortcuts-bridge.js noch nicht geparsed — bei einem späteren
+                    // Render-Zyklus erneut versuchen.
+                    _dotNetRef.Dispose();
+                    _dotNetRef = null;
+                }
             }
-            catch (JSException)
-            {
-                // shortcuts-bridge.js noch nicht geparsed — bei einem späteren
-                // Render-Zyklus erneut versuchen.
-                _dotNetRef.Dispose();
-                _dotNetRef = null;
-            }
+
+            await LoadSignerFromStorageAsync();
+            StateHasChanged();
         }
 
-        await LoadSignerFromStorageAsync();
-        StateHasChanged();
+        // Drawing-Capture (FA-013/014): Page-Wechsel rendert das Canvas neu —
+        // unsere pointer-Listener leben aber auf dem alten DOM-Element. Wenn ein
+        // Zeichenmodus aktiv ist und die Page wechselte, JS-Capture neu attachen.
+        if (IsDrawingMode(_annotationMode) && _captureAttachedToPage != _currentPage)
+        {
+            await SyncDrawingCaptureAsync();
+        }
     }
 
     [JSInvokable]
