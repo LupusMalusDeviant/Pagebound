@@ -93,3 +93,28 @@ export function focusElement(selector: string): void {
   const el = document.querySelector(selector);
   if (el instanceof HTMLElement) el.focus();
 }
+
+/**
+ * Convert an absolute clientX/clientY (from a mouse event) into a 0..1
+ * fraction relative to the element matched by the given selector. The value
+ * is clamped to the [0, 1] range so callers can store it as a position even
+ * if the click happens to land just outside the element.
+ *
+ * Returns null when the selector does not match an HTMLElement.
+ */
+export function clientPositionToFraction(
+  selector: string,
+  clientX: number,
+  clientY: number
+): { x: number; y: number } | null {
+  const el = document.querySelector(selector);
+  if (!(el instanceof HTMLElement)) return null;
+  const rect = el.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0) return null;
+  const x = (clientX - rect.left) / rect.width;
+  const y = (clientY - rect.top) / rect.height;
+  return {
+    x: Math.max(0, Math.min(1, x)),
+    y: Math.max(0, Math.min(1, y))
+  };
+}

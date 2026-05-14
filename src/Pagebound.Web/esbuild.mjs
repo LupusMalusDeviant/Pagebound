@@ -41,6 +41,12 @@ const builds = [
     globalName: "pageboundShortcuts",
     entryPoints: [resolve(__dirname, "wwwroot/js/shortcuts-bridge.ts")],
     outfile: resolve(__dirname, "wwwroot/js/shortcuts-bridge.js")
+  },
+  {
+    ...sharedOptions,
+    globalName: "pageboundStorage",
+    entryPoints: [resolve(__dirname, "wwwroot/js/storage-bridge.ts")],
+    outfile: resolve(__dirname, "wwwroot/js/storage-bridge.js")
   }
 ];
 

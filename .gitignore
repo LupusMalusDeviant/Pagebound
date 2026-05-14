@@ -68,6 +68,8 @@ src/Pagebound.Web/wwwroot/js/pdfjs-bridge.js
 src/Pagebound.Web/wwwroot/js/pdfjs-bridge.js.map
 src/Pagebound.Web/wwwroot/js/shortcuts-bridge.js
 src/Pagebound.Web/wwwroot/js/shortcuts-bridge.js.map
+src/Pagebound.Web/wwwroot/js/storage-bridge.js
+src/Pagebound.Web/wwwroot/js/storage-bridge.js.map
 src/Pagebound.Web/wwwroot/js/pdf.worker.min.mjs
 
 # --- Playwright ------------------------------------------------------------

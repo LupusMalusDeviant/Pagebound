@@ -15,5 +15,5 @@ public interface IStorageService
 
     Task<bool> ExistsAsync(string key, CancellationToken cancellationToken);
 
-    IAsyncEnumerable<string> KeysAsync(string prefix);
+    IAsyncEnumerable<string> KeysAsync(string prefix, CancellationToken cancellationToken = default);
 }

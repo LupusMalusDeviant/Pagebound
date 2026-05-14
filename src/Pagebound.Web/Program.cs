@@ -1,8 +1,10 @@
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
 using Pagebound.Core.Abstractions;
+using Pagebound.Infrastructure.Annotations;
 using Pagebound.Infrastructure.Crypto;
 using Pagebound.Infrastructure.Pdf;
+using Pagebound.Infrastructure.Storage;
 using Pagebound.Infrastructure.Telemetry;
 using Pagebound.Web;
 
@@ -25,8 +27,10 @@ builder.Services.AddScoped(_ => new HttpClient
 builder.Services.AddSingleton<IHashService, Sha256HashService>();
 builder.Services.AddSingleton<ITelemetryService, NoOpTelemetryService>();
 builder.Services.AddScoped<IPdfRenderer, PdfJsRenderer>();
+builder.Services.AddScoped<IStorageService, IndexedDbStorage>();
+builder.Services.AddScoped<IAnnotationService, AnnotationService>();
 
-// TODO Release 0.1: IStorageService, ISidecarService, IAnnotationService, IThemeService, ILocalizationService.
+// TODO Release 0.1: ISidecarService, IThemeService, ILocalizationService.
 //   Jede Registrierung kommt mit ihrer Implementation; die Interfaces stehen bereits.
 
 await builder.Build().RunAsync();

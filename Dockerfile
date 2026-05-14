@@ -34,6 +34,7 @@ COPY src/ /src/
 COPY --from=jsbuild /web/wwwroot/css/app.css              /src/Pagebound.Web/wwwroot/css/app.css
 COPY --from=jsbuild /web/wwwroot/js/pdfjs-bridge.js       /src/Pagebound.Web/wwwroot/js/pdfjs-bridge.js
 COPY --from=jsbuild /web/wwwroot/js/shortcuts-bridge.js   /src/Pagebound.Web/wwwroot/js/shortcuts-bridge.js
+COPY --from=jsbuild /web/wwwroot/js/storage-bridge.js     /src/Pagebound.Web/wwwroot/js/storage-bridge.js
 COPY --from=jsbuild /web/wwwroot/js/pdf.worker.min.mjs    /src/Pagebound.Web/wwwroot/js/pdf.worker.min.mjs
 
 WORKDIR /src/Pagebound.Web

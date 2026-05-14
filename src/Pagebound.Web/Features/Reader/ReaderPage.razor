@@ -1,7 +1,11 @@
 @page "/reader"
+@using System.Globalization
 @using Microsoft.AspNetCore.Components.Forms
+@using Microsoft.AspNetCore.Components.Web
 @using Microsoft.JSInterop
 @inject IPdfRenderer Renderer
+@inject IHashService Hasher
+@inject IAnnotationService Annotations
 @inject IJSRuntime JS
 @implements IAsyncDisposable
 
@@ -150,26 +154,104 @@
             </nav>
         </div>
 
-        <div class="max-w-4xl mx-auto mt-3 flex flex-wrap items-center gap-2 text-sm">
-            <span class="text-pb-fg-muted">Zoom:</span>
-            @foreach (var z in _zoomLevels)
-            {
-                var current = z;
+        <div class="max-w-4xl mx-auto mt-3 flex flex-wrap items-center gap-4 text-sm">
+            <div class="flex flex-wrap items-center gap-2">
+                <span class="text-pb-fg-muted">Zoom:</span>
+                @foreach (var z in _zoomLevels)
+                {
+                    var current = z;
+                    <button type="button"
+                            class="@($"rounded border px-2 py-0.5 {(Math.Abs(_zoomFactor - current) < 0.001 ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted")}")"
+                            disabled="@_isRendering"
+                            @onclick="@(() => SetZoom(current))">
+                        @($"{(int)(current * 100)}%")
+                    </button>
+                }
+            </div>
+            <div class="flex items-center gap-2">
+                <span class="text-pb-fg-muted">Werkzeug:</span>
                 <button type="button"
-                        class="@($"rounded border px-2 py-0.5 {(Math.Abs(_zoomFactor - current) < 0.001 ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted")}")"
-                        disabled="@_isRendering"
-                        @onclick="@(() => SetZoom(current))">
-                    @($"{(int)(current * 100)}%")
+                        class="@($"rounded border px-2 py-0.5 {(_annotationMode == AnnotationMode.Select ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted")}")"
+                        @onclick="@(() => SetAnnotationMode(AnnotationMode.Select))"
+                        title="Auswahl-Modus (kein neuer Pin bei Klick)">
+                    Auswählen
                 </button>
-            }
+                <button type="button"
+                        class="@($"rounded border px-2 py-0.5 {(_annotationMode == AnnotationMode.StickyNote ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted")}")"
+                        @onclick="@(() => SetAnnotationMode(AnnotationMode.StickyNote))"
+                        title="Klick aufs PDF erstellt eine neue Notiz">
+                    📝 Notiz
+                </button>
+            </div>
         </div>
 
         <figure class="mt-6 flex justify-center rounded-lg border border-pb-border bg-pb-bg p-4 overflow-auto">
             @if (_rasterDataUrl is not null)
             {
-                <img src="@_rasterDataUrl"
-                     alt="@($"Seite {_currentPage} von {_handle.PageCount}")"
-                     class="max-w-full h-auto shadow-sm" />
+                <div class="relative inline-block @(_annotationMode == AnnotationMode.StickyNote ? "cursor-crosshair" : "")">
+                    <img src="@_rasterDataUrl"
+                         data-pb-pdf-image
+                         alt="@($"Seite {_currentPage} von {_handle.PageCount}")"
+                         class="max-w-full h-auto shadow-sm block select-none"
+                         @onclick="HandlePdfClickAsync" />
+
+                    @* Pins für alle Sticky Notes auf der aktuellen Seite *@
+                    @foreach (var note in AnnotationsOnCurrentPage)
+                    {
+                        var n = note;
+                        var leftPct = (StickyNoteAnnotation.GetX(n) * 100).ToString("F2", CultureInfo.InvariantCulture);
+                        var topPct = (StickyNoteAnnotation.GetY(n) * 100).ToString("F2", CultureInfo.InvariantCulture);
+                        var color = StickyNoteAnnotation.GetColor(n);
+                        var preview = StickyNoteAnnotation.GetContent(n);
+                        var previewText = string.IsNullOrWhiteSpace(preview) ? "(leer)" : preview;
+                        <button type="button"
+                                class="absolute -translate-x-1/2 -translate-y-1/2 rounded-full border border-pb-border shadow-md w-7 h-7 flex items-center justify-center text-xs hover:scale-110 transition-transform"
+                                style="@($"left:{leftPct}%; top:{topPct}%; background-color:{color}")"
+                                title="@previewText"
+                                aria-label="@($"Notiz auf Seite {n.PageNumber}: {previewText}")"
+                                @onclick="@(() => OpenEditor(n))"
+                                @onclick:stopPropagation>
+                            📝
+                        </button>
+                    }
+
+                    @* Editor-Popover für aktuelle Notiz *@
+                    @if (_editingAnnotation is not null && _editingAnnotation.PageNumber == _currentPage)
+                    {
+                        var editLeft = (StickyNoteAnnotation.GetX(_editingAnnotation) * 100).ToString("F2", CultureInfo.InvariantCulture);
+                        var editTop = (StickyNoteAnnotation.GetY(_editingAnnotation) * 100).ToString("F2", CultureInfo.InvariantCulture);
+                        <div class="absolute z-10 w-72 rounded-lg border border-pb-border bg-pb-surface shadow-xl p-3"
+                             style="@($"left:{editLeft}%; top:{editTop}%; transform: translate(8px, -8px)")"
+                             @onclick:stopPropagation>
+                            <div class="flex items-center justify-between mb-2">
+                                <span class="text-xs text-pb-fg-muted">Notiz · Seite @_editingAnnotation.PageNumber</span>
+                                <button type="button"
+                                        class="text-pb-fg-muted hover:text-pb-fg text-sm"
+                                        @onclick="CancelEditing"
+                                        aria-label="Schließen">
+                                    ✕
+                                </button>
+                            </div>
+                            <textarea @bind="_editingContent"
+                                      @bind:event="oninput"
+                                      class="w-full h-28 rounded border border-pb-border bg-pb-bg px-2 py-1 text-sm resize-none"
+                                      placeholder="Markdown wird in einer späteren Iteration gerendert …"
+                                      aria-label="Notiz-Inhalt"></textarea>
+                            <div class="mt-2 flex gap-2 justify-end">
+                                <button type="button"
+                                        class="rounded border border-red-300/40 px-2 py-1 text-xs text-red-400 hover:bg-red-50/10"
+                                        @onclick="DeleteEditingAnnotationAsync">
+                                    Löschen
+                                </button>
+                                <button type="button"
+                                        class="rounded bg-pb-accent px-3 py-1 text-xs text-white"
+                                        @onclick="SaveEditingAnnotationAsync">
+                                    Speichern
+                                </button>
+                            </div>
+                        </div>
+                    }
+                </div>
             }
             else
             {
@@ -237,7 +319,24 @@
     private DotNetObjectReference<ReaderPage>? _dotNetRef;
     private bool _shortcutsRegistered;
 
+    // Annotation-State (FA-011 Sticky Notes, FA-070 ff. Persistenz)
+    private const string PdfImageSelector = "[data-pb-pdf-image]";
+    private PdfId? _currentPdfId;
+    private IReadOnlyList<Annotation> _annotations = Array.Empty<Annotation>();
+    private AnnotationMode _annotationMode = AnnotationMode.Select;
+    private Annotation? _editingAnnotation;
+    private string _editingContent = string.Empty;
+
     private double InternalScale => BaseScale * _zoomFactor;
+
+    private IEnumerable<Annotation> AnnotationsOnCurrentPage =>
+        _annotations.Where(a => a.PageNumber == _currentPage);
+
+    private enum AnnotationMode
+    {
+        Select,
+        StickyNote
+    }
 
     private async Task HandleFileSelected(InputFileChangeEventArgs e)
     {
@@ -245,6 +344,7 @@
         _isLoading = true;
         _rasterDataUrl = null;
         ClearSearchState();
+        ResetAnnotationState();
 
         try
         {
@@ -259,19 +359,39 @@
             await stream.CopyToAsync(buffer);
             buffer.Position = 0;
 
+            // Hash zuerst: damit die Annotations dieser PDF eindeutig zugeordnet
+            // sind, auch wenn der Dateiname sich ändert oder die PDF anderswo
+            // liegt.
+            var hash = await Hasher.ComputeAsync(buffer, HashAlgorithm.Sha256, CancellationToken.None);
+            buffer.Position = 0;
+            _currentPdfId = PdfId.FromHash(hash);
+
             _handle = await Renderer.LoadAsync(buffer, new LoadOptions(), CancellationToken.None);
             _currentPage = 1;
+
+            _annotations = await Annotations.GetForDocumentAsync(_currentPdfId.Value, CancellationToken.None);
+
             await RenderCurrentPageAsync();
         }
         catch (Exception ex)
         {
             _errorMessage = $"PDF konnte nicht geöffnet werden: {ex.Message}";
             _handle = null;
+            ResetAnnotationState();
         }
         finally
         {
             _isLoading = false;
         }
+    }
+
+    private void ResetAnnotationState()
+    {
+        _annotations = Array.Empty<Annotation>();
+        _currentPdfId = null;
+        _annotationMode = AnnotationMode.Select;
+        _editingAnnotation = null;
+        _editingContent = string.Empty;
     }
 
     private async Task RenderCurrentPageAsync()
@@ -383,6 +503,99 @@
         _currentPage = pageNumber;
         await RenderCurrentPageAsync();
     }
+
+    // --- Annotations (Sticky Notes, FA-011) ---------------------------------
+
+    private void SetAnnotationMode(AnnotationMode mode)
+    {
+        _annotationMode = mode;
+        // Editor schließen, wenn wir den Modus wechseln — sonst überlappen
+        // sich Modus-Indikatoren und offener Popover unangenehm.
+        _editingAnnotation = null;
+        _editingContent = string.Empty;
+    }
+
+    private async Task HandlePdfClickAsync(MouseEventArgs e)
+    {
+        // Editor schließt, sobald wir ins Dokument klicken (außer eben in den
+        // Editor selbst — der stoppt das Event via @onclick:stopPropagation).
+        if (_editingAnnotation is not null)
+        {
+            await SaveEditingAnnotationAsync();
+        }
+
+        if (_annotationMode != AnnotationMode.StickyNote) return;
+        if (_currentPdfId is null || _handle is null) return;
+
+        var fraction = await JS.InvokeAsync<NormalizedPosition?>(
+            "pageboundShortcuts.clientPositionToFraction",
+            PdfImageSelector,
+            e.ClientX,
+            e.ClientY);
+        if (fraction is null) return;
+
+        var newAnnotation = StickyNoteAnnotation.Create(
+            _currentPdfId.Value,
+            _currentPage,
+            fraction.X,
+            fraction.Y,
+            string.Empty);
+
+        var created = await Annotations.CreateAsync(newAnnotation, CancellationToken.None);
+        _annotations = _annotations.Append(created).ToList();
+
+        // Sofort in den Edit-Modus springen, damit der Nutzer den Text
+        // eingeben kann, ohne erst auf den Pin zu klicken.
+        OpenEditor(created);
+
+        // Nach dem Erstellen zurück zum Select-Modus — verhindert versehentliche
+        // Mehrfach-Erstellung beim Weiterklicken.
+        _annotationMode = AnnotationMode.Select;
+    }
+
+    private void OpenEditor(Annotation annotation)
+    {
+        _editingAnnotation = annotation;
+        _editingContent = StickyNoteAnnotation.GetContent(annotation);
+    }
+
+    private async Task SaveEditingAnnotationAsync()
+    {
+        if (_editingAnnotation is null) return;
+        var current = _editingAnnotation;
+        var newContent = _editingContent;
+
+        // Wenn sich nichts geändert hat, Editor einfach schließen.
+        if (StickyNoteAnnotation.GetContent(current) != newContent)
+        {
+            var updated = StickyNoteAnnotation.WithContent(current, newContent);
+            var saved = await Annotations.UpdateAsync(updated, CancellationToken.None);
+            _annotations = _annotations
+                .Select(a => a.Id.Value == saved.Id.Value ? saved : a)
+                .ToList();
+        }
+
+        _editingAnnotation = null;
+        _editingContent = string.Empty;
+    }
+
+    private async Task DeleteEditingAnnotationAsync()
+    {
+        if (_editingAnnotation is null) return;
+        var idToRemove = _editingAnnotation.Id;
+        await Annotations.DeleteAsync(idToRemove, CancellationToken.None);
+        _annotations = _annotations.Where(a => a.Id.Value != idToRemove.Value).ToList();
+        _editingAnnotation = null;
+        _editingContent = string.Empty;
+    }
+
+    private void CancelEditing()
+    {
+        _editingAnnotation = null;
+        _editingContent = string.Empty;
+    }
+
+    private sealed record NormalizedPosition(double X, double Y);
 
     // --- Tastatur-Shortcuts -------------------------------------------------
 
