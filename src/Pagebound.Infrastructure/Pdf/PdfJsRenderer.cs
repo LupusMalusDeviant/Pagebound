@@ -77,20 +77,63 @@ public sealed class PdfJsRenderer : IPdfRenderer
             result.RasterFormat);
     }
 
-    public Task<IReadOnlyList<TextItem>> ExtractTextAsync(
+    public async Task<IReadOnlyList<TextItem>> ExtractTextAsync(
         PdfDocumentHandle handle,
         int pageNumber,
-        CancellationToken cancellationToken) =>
-        throw new NotImplementedException(
-            "ExtractTextAsync folgt in einer späteren Iteration von Release 0.1 (FA-005 Vorbereitung).");
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(handle);
+        if (pageNumber < 1 || pageNumber > handle.PageCount)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(pageNumber),
+                pageNumber,
+                $"Seitenzahl muss zwischen 1 und {handle.PageCount} liegen.");
+        }
 
-    public Task<IReadOnlyList<SearchHit>> SearchAsync(
+        var raw = await _js.InvokeAsync<TextItemDto[]>(
+            $"{JsModuleId}.extractText",
+            cancellationToken,
+            handle.Id,
+            pageNumber)
+            .ConfigureAwait(false);
+
+        return raw
+            .Select(item => new TextItem(item.Text, item.X, item.Y, item.Width, item.Height))
+            .ToList();
+    }
+
+    public async Task<IReadOnlyList<SearchHit>> SearchAsync(
         PdfDocumentHandle handle,
         string query,
         SearchOptions options,
-        CancellationToken cancellationToken) =>
-        throw new NotImplementedException(
-            "SearchAsync folgt nach ExtractTextAsync (FA-005).");
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(handle);
+        ArgumentNullException.ThrowIfNull(options);
+        if (string.IsNullOrEmpty(query))
+        {
+            return Array.Empty<SearchHit>();
+        }
+
+        var raw = await _js.InvokeAsync<SearchHitDto[]>(
+            $"{JsModuleId}.search",
+            cancellationToken,
+            handle.Id,
+            query,
+            options.MatchCase,
+            options.WholeWord)
+            .ConfigureAwait(false);
+
+        return raw
+            .Select(hit => new SearchHit(
+                hit.PageNumber,
+                hit.Position,
+                hit.Match,
+                hit.Snippet,
+                hit.SnippetMatchStart))
+            .ToList();
+    }
 
     public Task<PdfOutline?> GetOutlineAsync(
         PdfDocumentHandle handle,
@@ -121,4 +164,13 @@ public sealed class PdfJsRenderer : IPdfRenderer
         int HeightPx,
         string RasterBase64,
         string RasterFormat);
+
+    private sealed record TextItemDto(string Text, double X, double Y, double Width, double Height);
+
+    private sealed record SearchHitDto(
+        int PageNumber,
+        int Position,
+        string Match,
+        string Snippet,
+        int SnippetMatchStart);
 }

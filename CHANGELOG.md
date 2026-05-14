@@ -28,6 +28,13 @@ die Versionierung folgt [Semantic Versioning](https://semver.org/lang/de/).
 
 ### Fixed
 - Reader-Layout nutzt jetzt die volle Breite des Hauptbereichs — Controls (Header, File-Picker, Navigation, Zoom-Buttons) bleiben auf `max-w-4xl` mittig zentriert, das PDF-`<figure>` nimmt den verfügbaren Platz bis `max-w-[1800px]`. Zoom-Faktoren neu gemappt: der angezeigte „100 %"-Default entspricht jetzt einem internen PDF.js-Scale von 2.0 (vorher 1.5), Stufen jetzt 50 / 75 / 100 / 125 / 150 / 200 %.
+- Such-Eingabe bindet jetzt auf `oninput` statt nur `onchange` — Suchen-Button wird sofort beim Tippen aktiv, kein Klick aus dem Feld mehr nötig.
+- `buildPageText` in der PDF.js-Bridge fügt einzelne Glyphen wieder zu Wörtern zusammen, statt sie naiv mit Leerzeichen zu trennen. Bei stilisiert gerenderten PDFs (Item-pro-Glyph durch Hand-Positionierung) findet die Suche jetzt zuverlässig.
+
+### Implemented
+- **FA-005 Volltext-Suche** (erste Iteration): Eingabefeld in `ReaderPage` mit Optionen „Groß-/Kleinschreibung" und „Ganzes Wort", Trefferliste mit Snippet (Match hervorgehoben), Klick auf Treffer springt zur Seite. `IPdfRenderer.ExtractTextAsync` und `IPdfRenderer.SearchAsync` sind jetzt vollständig implementiert; JS-Bridge führt seitenweise `getTextContent()`, baut robusten Page-Text und liefert Treffer inkl. Snippet zurück.
+- Wenn eine geöffnete PDF keinen Text-Layer enthält (typische Designer-PDFs mit Text-als-Vektor), erscheint statt stummer „Keine Treffer" ein klarer Hinweisblock mit Verweis auf das geplante OCR-Feature (FA-050 / Release 0.9).
+- `SearchHit`-Record erweitert um `Snippet` und `SnippetMatchStart` (Item-genaue `TextItem[]`-Treffer für Highlight-Overlays bleiben Folge-Iteration).
 
 ### Changed
 - Bootstrap-Assets und Demo-Pages (Counter, Weather, NavMenu) durch Tailwind-basiertes Layout ersetzt

@@ -30,11 +30,19 @@ public sealed record SearchOptions(
     bool MatchCase = false,
     bool WholeWord = false);
 
+/// <summary>
+/// Ein Treffer aus der PDF-Volltext-Suche. Snippet ist ein kurzer Text-Auszug
+/// um den Treffer herum (für UI-Vorschau); SnippetMatchStart markiert, wo
+/// innerhalb des Snippets der eigentliche Match beginnt — die Länge entspricht
+/// <c>Match.Length</c>. Item-genaue Highlight-Rechtecke kommen in einer
+/// späteren Iteration (FA-005-Polish + FA-010 Highlight-Overlays).
+/// </summary>
 public sealed record SearchHit(
     int PageNumber,
     int Position,
     string Match,
-    TextItem[] TextItems);
+    string Snippet,
+    int SnippetMatchStart);
 
 public sealed record PdfOutline(IReadOnlyList<PdfOutlineEntry> Entries);
 

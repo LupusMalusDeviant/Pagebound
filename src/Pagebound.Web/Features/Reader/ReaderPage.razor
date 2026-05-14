@@ -38,6 +38,91 @@
 
     @if (_handle is not null)
     {
+        <div class="max-w-4xl mx-auto mt-4 rounded-lg border border-pb-border bg-pb-surface p-4">
+            <form @onsubmit="DoSearchAsync" @onsubmit:preventDefault>
+                <div class="flex flex-wrap gap-2 items-center">
+                    <input @bind="_searchQuery"
+                           @bind:event="oninput"
+                           type="search"
+                           class="flex-1 min-w-0 rounded border border-pb-border bg-pb-bg px-3 py-1.5 text-sm"
+                           placeholder="Im Dokument suchen …"
+                           disabled="@_isSearching"
+                           aria-label="Suchbegriff" />
+                    <button type="submit"
+                            class="rounded bg-pb-accent px-3 py-1.5 text-sm text-white disabled:opacity-40"
+                            disabled="@(_isSearching || string.IsNullOrWhiteSpace(_searchQuery))">
+                        @(_isSearching ? "Suche …" : "Suchen")
+                    </button>
+                    @if (_searchHits is not null)
+                    {
+                        <button type="button"
+                                class="rounded border border-pb-border px-2 py-1 text-xs text-pb-fg-muted hover:text-pb-fg"
+                                @onclick="ClearSearch"
+                                aria-label="Suche zurücksetzen">
+                            Zurücksetzen
+                        </button>
+                    }
+                </div>
+                <div class="mt-2 flex gap-4 text-xs text-pb-fg-muted">
+                    <label class="flex items-center gap-1 cursor-pointer">
+                        <input type="checkbox" @bind="_matchCase" class="rounded" />
+                        Groß-/Kleinschreibung
+                    </label>
+                    <label class="flex items-center gap-1 cursor-pointer">
+                        <input type="checkbox" @bind="_wholeWord" class="rounded" />
+                        Ganzes Wort
+                    </label>
+                </div>
+            </form>
+
+            @if (_searchHits is not null)
+            {
+                <div class="mt-3 text-sm" aria-live="polite">
+                    @if (_pdfHasNoTextLayer)
+                    {
+                        <div class="rounded border border-amber-300/40 bg-amber-50/10 px-3 py-2 text-pb-fg">
+                            <div class="font-medium">Diese PDF enthält keinen durchsuchbaren Text.</div>
+                            <p class="mt-1 text-pb-fg-muted">
+                                Wahrscheinlich wurde der Text als Vektor-Pfade gerendert
+                                (typisch für stilisierte Designer-Layouts aus Illustrator,
+                                InDesign oder Figma). Eine Volltext-Suche ist erst möglich,
+                                wenn der Text per OCR erkannt wird — das ist als
+                                Funktion <span class="font-mono">FA-050</span> in
+                                <span class="font-medium">Release 0.9</span> geplant.
+                            </p>
+                        </div>
+                    }
+                    else if (_searchHits.Count == 0)
+                    {
+                        <span class="text-pb-fg-muted">Keine Treffer für „<span class="font-medium">@_lastSearched</span>".</span>
+                    }
+                    else
+                    {
+                        <span><span class="font-medium">@_searchHits.Count</span> Treffer für „<span class="font-medium">@_lastSearched</span>":</span>
+                        <ul class="mt-2 max-h-64 overflow-y-auto divide-y divide-pb-border border border-pb-border rounded">
+                            @foreach (var hit in _searchHits)
+                            {
+                                var snippetBefore = hit.Snippet.Substring(0, Math.Min(hit.SnippetMatchStart, hit.Snippet.Length));
+                                var matchEnd = Math.Min(hit.SnippetMatchStart + hit.Match.Length, hit.Snippet.Length);
+                                var snippetMatch = hit.Snippet.Substring(Math.Min(hit.SnippetMatchStart, hit.Snippet.Length), matchEnd - Math.Min(hit.SnippetMatchStart, hit.Snippet.Length));
+                                var snippetAfter = matchEnd < hit.Snippet.Length ? hit.Snippet.Substring(matchEnd) : "";
+                                <li>
+                                    <button type="button"
+                                            class="block w-full text-left p-2 hover:bg-pb-bg"
+                                            @onclick="@(() => GoToPageAsync(hit.PageNumber))">
+                                        <div class="text-xs text-pb-fg-muted">Seite @hit.PageNumber</div>
+                                        <div class="text-sm">
+                                            @snippetBefore<mark class="bg-pb-accent/20 text-pb-fg rounded px-0.5">@snippetMatch</mark>@snippetAfter
+                                        </div>
+                                    </button>
+                                </li>
+                            }
+                        </ul>
+                    }
+                </div>
+            }
+        </div>
+
         <div class="max-w-4xl mx-auto mt-6 flex items-center justify-between gap-3">
             <div class="text-sm">
                 <span class="font-medium">@(_handle.Title ?? "Ohne Titel")</span>
@@ -116,6 +201,15 @@
     private bool _isLoading;
     private bool _isRendering;
 
+    // Such-Zustand (FA-005)
+    private string _searchQuery = string.Empty;
+    private bool _matchCase;
+    private bool _wholeWord;
+    private bool _isSearching;
+    private IReadOnlyList<SearchHit>? _searchHits;
+    private string _lastSearched = string.Empty;
+    private bool _pdfHasNoTextLayer;
+
     private double InternalScale => BaseScale * _zoomFactor;
 
     private async Task HandleFileSelected(InputFileChangeEventArgs e)
@@ -123,6 +217,7 @@
         _errorMessage = null;
         _isLoading = true;
         _rasterDataUrl = null;
+        ClearSearchState();
 
         try
         {
@@ -198,6 +293,67 @@
     {
         if (Math.Abs(_zoomFactor - zoomFactor) < 0.001) return;
         _zoomFactor = zoomFactor;
+        await RenderCurrentPageAsync();
+    }
+
+    private async Task DoSearchAsync()
+    {
+        if (_handle is null) return;
+        if (string.IsNullOrWhiteSpace(_searchQuery))
+        {
+            _searchHits = null;
+            return;
+        }
+
+        _isSearching = true;
+        _errorMessage = null;
+        _pdfHasNoTextLayer = false;
+        try
+        {
+            var options = new SearchOptions(MatchCase: _matchCase, WholeWord: _wholeWord);
+            _searchHits = await Renderer.SearchAsync(_handle, _searchQuery, options, CancellationToken.None);
+            _lastSearched = _searchQuery;
+
+            // Wenn die Suche gar nichts gefunden hat, prüfen wir, ob das
+            // überhaupt am PDF liegt: hat Seite 1 *irgendeinen* Text-Item?
+            // Wenn nicht, ist die PDF vektorisiert (typisch für stilisierte
+            // Designer-Layouts) — dafür braucht es OCR (FA-050 / Release 0.9).
+            if (_searchHits.Count == 0)
+            {
+                var sample = await Renderer.ExtractTextAsync(_handle, 1, CancellationToken.None);
+                _pdfHasNoTextLayer = sample.Count == 0;
+            }
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Suche fehlgeschlagen: {ex.Message}";
+            _searchHits = null;
+        }
+        finally
+        {
+            _isSearching = false;
+        }
+    }
+
+    private void ClearSearch()
+    {
+        ClearSearchState();
+    }
+
+    private void ClearSearchState()
+    {
+        _searchHits = null;
+        _searchQuery = string.Empty;
+        _lastSearched = string.Empty;
+        _pdfHasNoTextLayer = false;
+    }
+
+    private async Task GoToPageAsync(int pageNumber)
+    {
+        if (_handle is null) return;
+        if (pageNumber < 1 || pageNumber > _handle.PageCount) return;
+        if (pageNumber == _currentPage) return;
+        _currentPage = pageNumber;
         await RenderCurrentPageAsync();
     }
 

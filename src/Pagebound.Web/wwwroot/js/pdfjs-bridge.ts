@@ -116,3 +116,190 @@ export async function unload(handleId: string): Promise<void> {
 export function isLoaded(handleId: string): boolean {
   return documents.has(handleId);
 }
+
+// =============================================================================
+// Text-Extraktion und Suche (FA-005)
+// =============================================================================
+
+export interface TextItemDto {
+  text: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface SearchHitDto {
+  pageNumber: number;
+  position: number;
+  match: string;
+  snippet: string;
+  snippetMatchStart: number;
+}
+
+interface PdfTextItem {
+  str: string;
+  transform: number[];
+  width: number;
+  height: number;
+  hasEOL?: boolean;
+}
+
+const SNIPPET_RADIUS = 40;
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Build a searchable page-text from PDF.js text items.
+ *
+ * Naive `items.map(i => i.str).join(" ")` breaks when a PDF was rendered with
+ * hand-positioned glyphs (typical for stylish CVs and design-heavy documents):
+ * single letters arrive as individual items and "Web" becomes "W e b", killing
+ * every substring search.
+ *
+ * Strategy here:
+ *   - Concatenate item strings without any separator (so "W"+"e"+"b" => "Web").
+ *   - Insert a space when the next item is visually separate from the current
+ *     one (different Y baseline, or an X-gap larger than the item is wide).
+ *   - Insert a space when the item ends a line (`hasEOL`).
+ *   - Never produce double whitespace (final collapse).
+ */
+function buildPageText(items: PdfTextItem[]): string {
+  let text = "";
+  for (let i = 0; i < items.length; i++) {
+    const cur = items[i];
+    text += cur.str;
+
+    const next = items[i + 1];
+    if (!next) {
+      if (cur.hasEOL && !text.endsWith(" ")) text += " ";
+      continue;
+    }
+
+    // Skip if either side already has whitespace at the join.
+    const curEndsWS = /\s$/.test(cur.str);
+    const nextStartsWS = /^\s/.test(next.str);
+
+    if (cur.hasEOL) {
+      if (!curEndsWS) text += " ";
+      continue;
+    }
+
+    if (curEndsWS || nextStartsWS) continue;
+
+    const curY = cur.transform[5];
+    const nextY = next.transform[5];
+    const curEndX = cur.transform[4] + cur.width;
+    const nextStartX = next.transform[4];
+
+    // Different visual line → separator.
+    if (Math.abs(curY - nextY) > 1) {
+      text += " ";
+      continue;
+    }
+
+    // Significant horizontal gap → separator. We compare against half the
+    // average glyph width: kerning gaps stay inside the threshold (no space
+    // injected between "W"+"e"+"b"), while real inter-word gaps cross it.
+    const avgGlyph = cur.width / Math.max(cur.str.length, 1);
+    const tolerance = Math.max(1, avgGlyph * 0.5);
+    if (nextStartX - curEndX > tolerance) {
+      text += " ";
+    }
+  }
+  // Collapse any accidental run of whitespace; leaves "real" spaces intact.
+  return text.replace(/[\t ]{2,}/g, " ");
+}
+
+async function readPageText(
+  doc: PDFDocumentProxy,
+  pageNumber: number
+): Promise<{ items: PdfTextItem[]; pageText: string; viewportHeight: number }> {
+  const page = await doc.getPage(pageNumber);
+  const content = await page.getTextContent();
+  const items = content.items as unknown as PdfTextItem[];
+  const pageText = buildPageText(items);
+  const viewport = page.getViewport({ scale: 1 });
+  return { items, pageText, viewportHeight: viewport.height };
+}
+
+export async function extractText(
+  handleId: string,
+  pageNumber: number
+): Promise<TextItemDto[]> {
+  const doc = requireDoc(handleId);
+  const { items, viewportHeight } = await readPageText(doc, pageNumber);
+
+  return items.map((it) => {
+    // PDF coordinates are bottom-up; convert to top-down for the UI side.
+    const tx = it.transform[4];
+    const ty = viewportHeight - it.transform[5] - it.height;
+    return { text: it.str, x: tx, y: ty, width: it.width, height: it.height };
+  });
+}
+
+export async function search(
+  handleId: string,
+  query: string,
+  matchCase: boolean,
+  wholeWord: boolean
+): Promise<SearchHitDto[]> {
+  if (!query || query.length === 0) return [];
+  const doc = requireDoc(handleId);
+
+  const hits: SearchHitDto[] = [];
+  const needleRaw = query;
+  const wholeWordRegex = wholeWord
+    ? new RegExp(`\\b${escapeRegExp(needleRaw)}\\b`, matchCase ? "g" : "gi")
+    : null;
+  const needleLower = needleRaw.toLowerCase();
+
+  for (let n = 1; n <= doc.numPages; n++) {
+    const { pageText } = await readPageText(doc, n);
+
+    if (wholeWordRegex) {
+      wholeWordRegex.lastIndex = 0;
+      let m: RegExpExecArray | null;
+      while ((m = wholeWordRegex.exec(pageText)) !== null) {
+        hits.push(buildHit(n, m.index, m[0], pageText));
+        // Sicherheits-Step für zero-length matches (sollte hier nicht eintreten):
+        if (m.index === wholeWordRegex.lastIndex) wholeWordRegex.lastIndex++;
+      }
+    } else {
+      const haystack = matchCase ? pageText : pageText.toLowerCase();
+      const needle = matchCase ? needleRaw : needleLower;
+      let from = 0;
+      while (true) {
+        const found = haystack.indexOf(needle, from);
+        if (found < 0) break;
+        hits.push(buildHit(n, found, pageText.substring(found, found + needle.length), pageText));
+        from = found + needle.length;
+      }
+    }
+  }
+
+  return hits;
+}
+
+function buildHit(
+  pageNumber: number,
+  position: number,
+  match: string,
+  pageText: string
+): SearchHitDto {
+  const start = Math.max(0, position - SNIPPET_RADIUS);
+  const end = Math.min(pageText.length, position + match.length + SNIPPET_RADIUS);
+  const snippet = pageText.substring(start, end).replace(/\s+/g, " ").trim();
+  // Adjust the match start within the (possibly whitespace-collapsed) snippet:
+  const rawPrefix = pageText.substring(start, position);
+  const collapsedPrefix = rawPrefix.replace(/\s+/g, " ").trimStart();
+  return {
+    pageNumber,
+    position,
+    match,
+    snippet,
+    snippetMatchStart: collapsedPrefix.length
+  };
+}
