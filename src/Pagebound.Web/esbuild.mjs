@@ -1,9 +1,13 @@
 // =============================================================================
 // Pagebound — esbuild build for JavaScript-interop modules
 // ----------------------------------------------------------------------------
-// Bundles TypeScript bridges (pdfjs-bridge, ...) for use from Blazor WASM via
-// IJSRuntime, and copies the pdf.worker file into wwwroot/js/ so PDF.js can
-// reach it at the same origin.
+// Bundles TypeScript bridges (pdfjs, shortcuts, ...) for use from Blazor WASM
+// via IJSRuntime, and copies the pdf.worker file into wwwroot/js/ so PDF.js
+// can reach it at the same origin.
+//
+// Each bridge becomes its own IIFE bundle with a distinct global name so the
+// JS-Interop calls on the C# side stay namespaced (e.g. pageboundPdf.loadPdf,
+// pageboundShortcuts.register).
 // =============================================================================
 
 import { build, context } from "esbuild";
@@ -17,7 +21,6 @@ const watch = process.argv.includes("--watch");
 const sharedOptions = {
   bundle: true,
   format: "iife",
-  globalName: "pageboundPdf",
   platform: "browser",
   target: ["es2022"],
   sourcemap: true,
@@ -25,12 +28,19 @@ const sharedOptions = {
   logLevel: "info"
 };
 
-/** @type {import('esbuild').BuildOptions[]} */
+/** @type {Array<import('esbuild').BuildOptions>} */
 const builds = [
   {
     ...sharedOptions,
+    globalName: "pageboundPdf",
     entryPoints: [resolve(__dirname, "wwwroot/js/pdfjs-bridge.ts")],
     outfile: resolve(__dirname, "wwwroot/js/pdfjs-bridge.js")
+  },
+  {
+    ...sharedOptions,
+    globalName: "pageboundShortcuts",
+    entryPoints: [resolve(__dirname, "wwwroot/js/shortcuts-bridge.ts")],
+    outfile: resolve(__dirname, "wwwroot/js/shortcuts-bridge.js")
   }
 ];
 

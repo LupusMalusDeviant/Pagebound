@@ -31,9 +31,10 @@ COPY src/ /src/
 
 # Drop the JS sources into the same layout the .csproj expects, replacing them
 # with the just-built outputs from the jsbuild stage.
-COPY --from=jsbuild /web/wwwroot/css/app.css           /src/Pagebound.Web/wwwroot/css/app.css
-COPY --from=jsbuild /web/wwwroot/js/pdfjs-bridge.js    /src/Pagebound.Web/wwwroot/js/pdfjs-bridge.js
-COPY --from=jsbuild /web/wwwroot/js/pdf.worker.min.mjs /src/Pagebound.Web/wwwroot/js/pdf.worker.min.mjs
+COPY --from=jsbuild /web/wwwroot/css/app.css              /src/Pagebound.Web/wwwroot/css/app.css
+COPY --from=jsbuild /web/wwwroot/js/pdfjs-bridge.js       /src/Pagebound.Web/wwwroot/js/pdfjs-bridge.js
+COPY --from=jsbuild /web/wwwroot/js/shortcuts-bridge.js   /src/Pagebound.Web/wwwroot/js/shortcuts-bridge.js
+COPY --from=jsbuild /web/wwwroot/js/pdf.worker.min.mjs    /src/Pagebound.Web/wwwroot/js/pdf.worker.min.mjs
 
 WORKDIR /src/Pagebound.Web
 RUN dotnet restore Pagebound.Web.csproj

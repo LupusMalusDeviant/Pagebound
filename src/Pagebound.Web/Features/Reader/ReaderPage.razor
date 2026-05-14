@@ -1,6 +1,8 @@
 @page "/reader"
 @using Microsoft.AspNetCore.Components.Forms
+@using Microsoft.JSInterop
 @inject IPdfRenderer Renderer
+@inject IJSRuntime JS
 @implements IAsyncDisposable
 
 <PageTitle>Reader — Pagebound</PageTitle>
@@ -44,8 +46,9 @@
                     <input @bind="_searchQuery"
                            @bind:event="oninput"
                            type="search"
+                           data-pb-search-input
                            class="flex-1 min-w-0 rounded border border-pb-border bg-pb-bg px-3 py-1.5 text-sm"
-                           placeholder="Im Dokument suchen …"
+                           placeholder="Im Dokument suchen …  (Strg+F)"
                            disabled="@_isSearching"
                            aria-label="Suchbegriff" />
                     <button type="submit"
@@ -173,6 +176,24 @@
                 <div class="text-sm text-pb-fg-muted py-12">Rendere …</div>
             }
         </figure>
+
+        <p class="max-w-4xl mx-auto mt-4 text-xs text-pb-fg-muted">
+            Tastatur:
+            <kbd class="rounded border border-pb-border px-1.5 py-0.5">←</kbd>
+            <kbd class="rounded border border-pb-border px-1.5 py-0.5">→</kbd>
+            Seitenwechsel ·
+            <kbd class="rounded border border-pb-border px-1.5 py-0.5">Pos1</kbd>
+            <kbd class="rounded border border-pb-border px-1.5 py-0.5">Ende</kbd>
+            erste / letzte Seite ·
+            <kbd class="rounded border border-pb-border px-1.5 py-0.5">Strg+F</kbd>
+            Suche ·
+            <kbd class="rounded border border-pb-border px-1.5 py-0.5">Esc</kbd>
+            Zurücksetzen ·
+            <kbd class="rounded border border-pb-border px-1.5 py-0.5">Strg+ +</kbd>
+            <kbd class="rounded border border-pb-border px-1.5 py-0.5">Strg+ −</kbd>
+            <kbd class="rounded border border-pb-border px-1.5 py-0.5">Strg+0</kbd>
+            Zoom
+        </p>
     }
     else if (!_isLoading)
     {
@@ -184,6 +205,8 @@
 
 @code {
     private const long MaxFileSize = 100L * 1024 * 1024; // 100 MB Demo-Limit
+    private const string ShortcutsJs = "pageboundShortcuts";
+    private const string SearchInputSelector = "[data-pb-search-input]";
 
     // Interner PDF.js-Scale für den User-Faktor "100 %" (1.0).
     // Damit ergibt der Default eine gut lesbare Render-Auflösung; alle weiteren
@@ -209,6 +232,10 @@
     private IReadOnlyList<SearchHit>? _searchHits;
     private string _lastSearched = string.Empty;
     private bool _pdfHasNoTextLayer;
+
+    // Tastatur-Shortcuts (NFA-031 Tastatur-Navigation)
+    private DotNetObjectReference<ReaderPage>? _dotNetRef;
+    private bool _shortcutsRegistered;
 
     private double InternalScale => BaseScale * _zoomFactor;
 
@@ -357,8 +384,106 @@
         await RenderCurrentPageAsync();
     }
 
+    // --- Tastatur-Shortcuts -------------------------------------------------
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || _shortcutsRegistered) return;
+        _dotNetRef = DotNetObjectReference.Create(this);
+        try
+        {
+            await JS.InvokeVoidAsync($"{ShortcutsJs}.register", _dotNetRef);
+            _shortcutsRegistered = true;
+        }
+        catch (JSException)
+        {
+            // shortcuts-bridge.js noch nicht geparsed — bei einem späteren
+            // Render-Zyklus erneut versuchen.
+            _dotNetRef.Dispose();
+            _dotNetRef = null;
+        }
+    }
+
+    [JSInvokable]
+    public async Task HandleShortcut(string shortcut)
+    {
+        switch (shortcut)
+        {
+            case "page-prev":
+                await PreviousPage();
+                break;
+            case "page-next":
+                await NextPage();
+                break;
+            case "page-first":
+                if (_handle is not null) await GoToPageAsync(1);
+                break;
+            case "page-last":
+                if (_handle is not null) await GoToPageAsync(_handle.PageCount);
+                break;
+            case "focus-search":
+                if (_handle is not null)
+                {
+                    await JS.InvokeVoidAsync($"{ShortcutsJs}.focusElement", SearchInputSelector);
+                }
+                break;
+            case "clear-search":
+                if (_searchHits is not null || !string.IsNullOrEmpty(_searchQuery))
+                {
+                    ClearSearchState();
+                }
+                break;
+            case "zoom-in":
+                await StepZoom(+1);
+                break;
+            case "zoom-out":
+                await StepZoom(-1);
+                break;
+            case "zoom-reset":
+                await SetZoom(1.0);
+                break;
+        }
+
+        // Blazor rendert nach JSInvokable-Methoden nicht automatisch — wir
+        // triggern einen Re-Render, damit UI-Zustand sichtbar wird.
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task StepZoom(int direction)
+    {
+        var currentIdx = Array.FindIndex(_zoomLevels, z => Math.Abs(z - _zoomFactor) < 0.001);
+        if (currentIdx < 0)
+        {
+            // Aktueller Faktor liegt nicht auf einer Stufe → finde nächstgelegene.
+            currentIdx = Array.FindIndex(_zoomLevels, z => z >= _zoomFactor);
+            if (currentIdx < 0) currentIdx = _zoomLevels.Length - 1;
+        }
+        var nextIdx = Math.Clamp(currentIdx + direction, 0, _zoomLevels.Length - 1);
+        if (nextIdx == currentIdx) return;
+        await SetZoom(_zoomLevels[nextIdx]);
+    }
+
     public async ValueTask DisposeAsync()
     {
+        if (_shortcutsRegistered)
+        {
+            try
+            {
+                await JS.InvokeVoidAsync($"{ShortcutsJs}.unregister");
+            }
+            catch (JSDisconnectedException)
+            {
+                // Browser-Circuit ist weg, ignorieren.
+            }
+            catch (JSException)
+            {
+                // Bridge möglicherweise nicht mehr geladen.
+            }
+            _shortcutsRegistered = false;
+        }
+        _dotNetRef?.Dispose();
+        _dotNetRef = null;
+
         if (_handle is not null)
         {
             try
