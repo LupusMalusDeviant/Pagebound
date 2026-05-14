@@ -1,0 +1,40 @@
+# =============================================================================
+# Pagebound — Docker build context ignore
+# =============================================================================
+
+# Build artifacts
+**/bin/
+**/obj/
+**/publish/
+**/*.user
+**/.vs/
+**/.vscode/
+**/.idea/
+
+# Node
+**/node_modules/
+**/npm-debug.log
+**/.npm/
+
+# Tailwind + esbuild Outputs (werden im Build-Stage neu erzeugt)
+src/Pagebound.Web/wwwroot/css/app.css
+src/Pagebound.Web/wwwroot/css/app.css.map
+src/Pagebound.Web/wwwroot/js/pdfjs-bridge.js
+src/Pagebound.Web/wwwroot/js/pdfjs-bridge.js.map
+src/Pagebound.Web/wwwroot/js/pdf.worker.min.mjs
+
+# Tests, Doku, Git
+tests/
+docs/
+.git/
+.github/
+CHANGELOG.md
+CODE_OF_CONDUCT.md
+CONTRIBUTING.md
+README.md
+NOTICE
+LICENSE
+
+# OS
+.DS_Store
+Thumbs.db
