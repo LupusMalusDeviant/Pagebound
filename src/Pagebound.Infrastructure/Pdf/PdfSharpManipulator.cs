@@ -1,21 +1,41 @@
+using PdfSharpCore.Fonts;
 using PdfSharpCore.Pdf;
 using PdfSharpCore.Pdf.IO;
-using Pagebound.Core.Abstractions;
-using Pagebound.Core.Domain;
 
 namespace Pagebound.Infrastructure.Pdf;
 
 /// <summary>
-/// PDF-Manipulation auf Basis von PdfSharpCore (MIT, läuft in Blazor WASM).
+/// PDF-Seitenoperationen auf Basis von PdfSharpCore (MIT): Merge, Split,
+/// Reorder, Delete, Rotate.
 ///
-/// Implementiert die typischen Seiten-Operationen aus FA-020 bis FA-024.
-/// Komprimierung (FA-026) und Verschlüsselung (FA-027) sind in dieser
-/// Iteration als <see cref="NotImplementedException"/> markiert; sie kommen
-/// in einer späteren Iteration (Release 0.8) — siehe ADR-004 Mitigation
-/// für AES-256.
+/// Wird als Composition-Target vom <see cref="JsPdfLibManipulator"/> genutzt —
+/// der implementiert das volle <c>IPdfManipulator</c>-Interface und delegiert
+/// hierher nur die Operationen, die in Blazor WASM stabil laufen.
+///
+/// Bewusst NICHT hier: Embed/Compress/Encrypt. Embed läuft über pdf-lib (JS),
+/// weil PdfSharpCores Save-Pfad intern <c>MD5.Create()</c> ruft und der
+/// WASM-CryptoConfig MD5 nicht kennt. Compress/Encrypt kommen in Release 0.8
+/// (FA-026/FA-027), siehe ADR-004.
 /// </summary>
-public sealed class PdfSharpManipulator : IPdfManipulator
+public sealed class PdfSharpManipulator
 {
+    static PdfSharpManipulator()
+    {
+        // PdfSharpCore greift beim Save / bei XGraphics auf den globalen
+        // FontResolver zu — auch wenn wir gar keinen Text zeichnen. Auf
+        // Blazor WASM ist der Default nicht implementiert; schon das Lesen
+        // des Getters wirft NotImplementedException. Setter unconditional
+        // aufrufen, evtl. Setter-Fehler schlucken.
+        try
+        {
+            GlobalFontSettings.FontResolver = new NoopFontResolver();
+        }
+        catch
+        {
+            // Best-effort.
+        }
+    }
+
     public async Task<byte[]> MergeAsync(
         IReadOnlyList<Stream> pdfs,
         CancellationToken cancellationToken)
@@ -141,8 +161,8 @@ public sealed class PdfSharpManipulator : IPdfManipulator
 
         await using var buffered = await CopyToSeekableAsync(pdf, cancellationToken).ConfigureAwait(false);
 
-        // Rotation ändert nur Metadaten der einzelnen Pages; wir können das
-        // Dokument im Modify-Modus öffnen und in-place schreiben.
+        // Rotation ändert nur Metadaten der einzelnen Pages; wir öffnen das
+        // Dokument im Modify-Modus und schreiben in-place.
         using var doc = PdfReader.Open(buffered, PdfDocumentOpenMode.Modify);
         foreach (var (oneBasedIndex, degrees) in rotationDegrees)
         {
@@ -155,23 +175,6 @@ public sealed class PdfSharpManipulator : IPdfManipulator
         }
         return Save(doc);
     }
-
-    public Task<byte[]> CompressAsync(
-        Stream pdf,
-        CompressionOptions options,
-        IProgress<int>? progress,
-        CancellationToken cancellationToken) =>
-        throw new NotImplementedException(
-            "CompressAsync folgt in Release 0.8 (FA-026). Erste Iteration: " +
-            "Re-Encoding eingebetteter Bilder mit wählbarer JPEG-Qualität.");
-
-    public Task<byte[]> EncryptAsync(
-        Stream pdf,
-        EncryptionOptions options,
-        CancellationToken cancellationToken) =>
-        throw new NotImplementedException(
-            "EncryptAsync folgt in Release 0.8 (FA-027). PdfSharpCore liefert " +
-            "AES-128; AES-256 erfordert eigenständige Erweiterung (ADR-004).");
 
     // --- Helpers --------------------------------------------------------------
 
@@ -193,5 +196,21 @@ public sealed class PdfSharpManipulator : IPdfManipulator
         await source.CopyToAsync(ms, ct).ConfigureAwait(false);
         ms.Position = 0;
         return ms;
+    }
+
+    /// <summary>
+    /// Minimaler FontResolver-Stub. PdfSharpCore ruft ihn intern auf —
+    /// solange wir keinen Text rendern, wird er nie nach Glyphen gefragt.
+    /// Für Release 0.8 (echtes Text-Rendering) wird das durch einen Resolver
+    /// ersetzt, der die Tailwind-Standardfonts bereitstellt.
+    /// </summary>
+    private sealed class NoopFontResolver : IFontResolver
+    {
+        public string DefaultFontName => "Arial";
+
+        public byte[]? GetFont(string faceName) => null;
+
+        public FontResolverInfo? ResolveTypeface(string familyName, bool isBold, bool isItalic)
+            => new FontResolverInfo(familyName ?? "Arial", isBold, isItalic);
     }
 }

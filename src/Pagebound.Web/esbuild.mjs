@@ -47,6 +47,12 @@ const builds = [
     globalName: "pageboundStorage",
     entryPoints: [resolve(__dirname, "wwwroot/js/storage-bridge.ts")],
     outfile: resolve(__dirname, "wwwroot/js/storage-bridge.js")
+  },
+  {
+    ...sharedOptions,
+    globalName: "pageboundPdfManipulator",
+    entryPoints: [resolve(__dirname, "wwwroot/js/pdf-manipulator-bridge.ts")],
+    outfile: resolve(__dirname, "wwwroot/js/pdf-manipulator-bridge.js")
   }
 ];
 

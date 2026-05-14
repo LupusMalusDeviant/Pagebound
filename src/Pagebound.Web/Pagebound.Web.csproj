@@ -6,6 +6,14 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <OverrideHtmlAssetPlaceholders>true</OverrideHtmlAssetPlaceholders>
     <ServiceWorkerAssetsManifest>service-worker-assets.js</ServiceWorkerAssetsManifest>
+    <!--
+      Trimming aus: PdfSharpCore nutzt intern Reflection (Type.GetType auf
+      Dictionary-Subtypes im Save-Pfad, Font-/Image-Resolver-Lookups), die
+      beim Publish ohne Roots wegoptimiert werden. Solange wir keine
+      gezielten TrimmerRoots-Descriptors pflegen, ist die Bundle-Differenz
+      akzeptabel.
+    -->
+    <PublishTrimmed>false</PublishTrimmed>
   </PropertyGroup>
 
   <ItemGroup>

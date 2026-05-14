@@ -4,9 +4,12 @@ namespace Pagebound.Core.Abstractions;
 
 /// <summary>
 /// PDF-Manipulationen ohne erneutes Rendering: Seiten zusammenfügen,
-/// aufteilen, neu sortieren, löschen, drehen, komprimieren, verschlüsseln.
-/// Default-Implementierung (PdfSharpManipulator) basiert auf PdfSharpCore.
-/// Erfüllt FA-020 bis FA-027.
+/// aufteilen, neu sortieren, löschen, drehen, komprimieren, verschlüsseln,
+/// Signaturen einbetten.
+///
+/// Default-Implementierung im Web-Pfad ist <c>JsPdfLibManipulator</c>:
+/// Signatur-Embed läuft via pdf-lib (JS-Interop), Seiten-Operationen
+/// delegieren an <c>PdfSharpManipulator</c>. Erfüllt FA-015 + FA-020 bis FA-027.
 /// </summary>
 public interface IPdfManipulator
 {
@@ -44,4 +47,31 @@ public interface IPdfManipulator
         Stream pdf,
         EncryptionOptions options,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Bettet die übergebenen Signaturen als sichtbares Bild in die jeweilige
+    /// PDF-Seite ein und schreibt die Signer-Metadaten in das Info-Dictionary
+    /// (Standard <c>/Author</c> sowie eigene <c>/Pagebound:Signature:i:*</c>-Keys).
+    /// Erfüllt den "Signatur ist auch im PDF, nicht nur in der Sidecar"-Teil
+    /// von FA-015.
+    /// </summary>
+    Task<byte[]> EmbedSignaturesAsync(
+        Stream pdf,
+        IReadOnlyList<EmbeddedSignature> signatures,
+        CancellationToken cancellationToken);
 }
+
+/// <summary>
+/// Eine Signatur, wie sie der <see cref="IPdfManipulator"/> in eine PDF einbetten soll.
+/// Position in 0..1-Page-Fractions, Bilddaten als rohe PNG-Bytes.
+/// </summary>
+public sealed record EmbeddedSignature(
+    int PageNumber,
+    byte[] ImageBytes,
+    double X,
+    double Y,
+    double Width,
+    double Height,
+    DateTimeOffset SignedAt,
+    SignerInfo Signer,
+    string? IntegrityHash);

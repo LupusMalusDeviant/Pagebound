@@ -28,7 +28,11 @@ builder.Services.AddScoped(_ => new HttpClient
 builder.Services.AddSingleton<IHashService, Sha256HashService>();
 builder.Services.AddSingleton<ITelemetryService, NoOpTelemetryService>();
 builder.Services.AddScoped<IPdfRenderer, PdfJsRenderer>();
-builder.Services.AddScoped<IPdfManipulator, PdfSharpManipulator>();
+// PdfSharpManipulator als Composition-Target — JsPdfLibManipulator delegiert
+// alle Nicht-Embed-Operationen daran weiter. EmbedSignatures geht über pdf-lib
+// (JS-Interop), weil PdfSharpCores Save-Pfad in WASM auf MD5.Create() crasht.
+builder.Services.AddScoped<PdfSharpManipulator>();
+builder.Services.AddScoped<IPdfManipulator, JsPdfLibManipulator>();
 builder.Services.AddScoped<IStorageService, IndexedDbStorage>();
 builder.Services.AddScoped<IAnnotationService, AnnotationService>();
 builder.Services.AddScoped<IMarkdownExporter, MarkdownExporter>();

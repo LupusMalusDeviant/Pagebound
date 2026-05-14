@@ -261,6 +261,68 @@ export function dragElementToFraction(
 }
 
 /**
+ * Live-resize an element inside a container by dragging its bottom-right
+ * corner. Companion to `dragElementToFraction`. Used for the signature
+ * resize handle (FA-015).
+ *
+ * Live-writes width / height as percent of the container during pointermove,
+ * clamps so the element does not leave the container nor go below a tiny
+ * minimum, and reports the final 0..1 fractions back to C# at pointerup.
+ */
+export function resizeElementToFraction(
+  elementSelector: string,
+  containerSelector: string,
+  startClientX: number,
+  startClientY: number,
+  minWidthFrac: number,
+  minHeightFrac: number,
+  dotNetRef: DotNetRef,
+  callbackMethod: string,
+  callbackArg: string
+): void {
+  const element = document.querySelector(elementSelector);
+  const container = document.querySelector(containerSelector);
+  if (!(element instanceof HTMLElement) || !(container instanceof HTMLElement)) {
+    return;
+  }
+
+  const containerRect = container.getBoundingClientRect();
+  const elementRect = element.getBoundingClientRect();
+  if (containerRect.width <= 0 || containerRect.height <= 0) return;
+
+  const leftFrac = (elementRect.left - containerRect.left) / containerRect.width;
+  const topFrac = (elementRect.top - containerRect.top) / containerRect.height;
+
+  let finalW = elementRect.width / containerRect.width;
+  let finalH = elementRect.height / containerRect.height;
+
+  const clamp = (v: number, min: number, max: number) =>
+    Math.max(min, Math.min(max, v));
+
+  const onMove = (e: PointerEvent) => {
+    e.preventDefault();
+    // Mauszeiger relativ zum Container.
+    const cursorXFrac = (e.clientX - containerRect.left) / containerRect.width;
+    const cursorYFrac = (e.clientY - containerRect.top) / containerRect.height;
+    finalW = clamp(cursorXFrac - leftFrac, minWidthFrac, 1 - leftFrac);
+    finalH = clamp(cursorYFrac - topFrac, minHeightFrac, 1 - topFrac);
+    element.style.width = `${(finalW * 100).toFixed(3)}%`;
+    element.style.height = `${(finalH * 100).toFixed(3)}%`;
+  };
+
+  const onUp = () => {
+    document.removeEventListener("pointermove", onMove);
+    document.removeEventListener("pointerup", onUp);
+    document.removeEventListener("pointercancel", onUp);
+    void dotNetRef.invokeMethodAsync(callbackMethod, callbackArg, finalW, finalH);
+  };
+
+  document.addEventListener("pointermove", onMove);
+  document.addEventListener("pointerup", onUp);
+  document.addEventListener("pointercancel", onUp);
+}
+
+/**
  * Trigger a file download from in-memory text. Used by the Markdown export
  * (FA-080) and likely by future sidecar / image exports. We stay on the
  * blob+object-url pattern so very large strings don't have to live inside

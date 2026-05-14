@@ -41,6 +41,10 @@ public static class SignatureAnnotation
     public const string PayloadKeyIntegrityHash = "integrityHash";
     public const string PayloadKeyHashAlgorithm = "hashAlgorithm";
     public const string PayloadKeyHashScope = "hashScope";
+    public const string PayloadKeySignerName = "signerName";
+    public const string PayloadKeySignerEmail = "signerEmail";
+    public const string PayloadKeySignerReason = "signerReason";
+    public const string PayloadKeySignerLocation = "signerLocation";
 
     public const string HashAlgorithmSha256 = "sha256";
     public const string DefaultHashScope = "pdf+annotations-snapshot";
@@ -54,12 +58,13 @@ public static class SignatureAnnotation
         double width,
         double height,
         DateTimeOffset signedAt,
-        string? integrityHash = null) =>
+        string? integrityHash = null,
+        SignerInfo? signer = null) =>
         new(
             pdfId,
             AnnotationType.Signature,
             pageNumber,
-            BuildPayload(imageDataUrl, x, y, width, height, signedAt, integrityHash));
+            BuildPayload(imageDataUrl, x, y, width, height, signedAt, integrityHash, signer));
 
     public static Annotation WithIntegrityHash(Annotation existing, string integrityHash)
     {
@@ -70,9 +75,18 @@ public static class SignatureAnnotation
             GetWidth(existing),
             GetHeight(existing),
             GetSignedAt(existing),
-            integrityHash);
+            integrityHash,
+            GetSigner(existing));
         return existing with { UpdatedAt = DateTimeOffset.UtcNow, Payload = payload };
     }
+
+    public static SignerInfo GetSigner(Annotation annotation) => new(
+        Name: GetString(annotation.Payload, PayloadKeySignerName),
+        Email: NullIfEmpty(GetString(annotation.Payload, PayloadKeySignerEmail)),
+        Reason: NullIfEmpty(GetString(annotation.Payload, PayloadKeySignerReason)),
+        Location: NullIfEmpty(GetString(annotation.Payload, PayloadKeySignerLocation)));
+
+    private static string? NullIfEmpty(string value) => string.IsNullOrWhiteSpace(value) ? null : value;
 
     public static string GetImageDataUrl(Annotation annotation) => GetString(annotation.Payload, PayloadKeyImage);
     public static double GetX(Annotation annotation) => GetDouble(annotation.Payload, PayloadKeyX);
@@ -101,7 +115,8 @@ public static class SignatureAnnotation
         double width,
         double height,
         DateTimeOffset signedAt,
-        string? integrityHash) =>
+        string? integrityHash,
+        SignerInfo? signer) =>
         new Dictionary<string, object?>
         {
             [PayloadKeyImage] = imageDataUrl,
@@ -112,7 +127,11 @@ public static class SignatureAnnotation
             [PayloadKeySignedAt] = signedAt.ToString("yyyy-MM-ddTHH:mm:ss.fffZ", System.Globalization.CultureInfo.InvariantCulture),
             [PayloadKeyIntegrityHash] = integrityHash,
             [PayloadKeyHashAlgorithm] = HashAlgorithmSha256,
-            [PayloadKeyHashScope] = DefaultHashScope
+            [PayloadKeyHashScope] = DefaultHashScope,
+            [PayloadKeySignerName] = signer?.Name ?? string.Empty,
+            [PayloadKeySignerEmail] = signer?.Email ?? string.Empty,
+            [PayloadKeySignerReason] = signer?.Reason ?? string.Empty,
+            [PayloadKeySignerLocation] = signer?.Location ?? string.Empty
         };
 
     private static double GetDouble(IReadOnlyDictionary<string, object?> payload, string key)

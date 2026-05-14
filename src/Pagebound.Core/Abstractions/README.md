@@ -9,7 +9,7 @@ Verbindliches Architekturprinzip: **Interface-First** (siehe [ADR-001](../../../
 | Interface | Erfüllt | Implementierung in |
 |---|---|---|
 | `IPdfRenderer` | FA-001, FA-003, FA-004, FA-005, FA-006, FA-007, FA-008 | `Pagebound.Infrastructure/Pdf/PdfJsRenderer` |
-| `IPdfManipulator` | FA-020 bis FA-027 | `Pagebound.Infrastructure/Pdf/PdfSharpManipulator` |
+| `IPdfManipulator` | FA-015, FA-020 bis FA-027 | `Pagebound.Infrastructure/Pdf/JsPdfLibManipulator` (Embed via pdf-lib) + `PdfSharpManipulator` (Seitenoperationen) |
 | `IPdfBuilder` | FA-025 | `Pagebound.Infrastructure/Pdf/PdfSharpBuilder` |
 | `IAnnotationService` | FA-010 bis FA-014, FA-018 | `Pagebound.Infrastructure/Annotations/` |
 | `ISignatureService` | FA-015, FA-016, FA-017, FA-042 | `Pagebound.Infrastructure/Signature/` |
