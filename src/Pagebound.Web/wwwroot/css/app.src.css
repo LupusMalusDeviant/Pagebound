@@ -110,6 +110,93 @@
 }
 
 /* =============================================================================
+   Markdown-Rendering (FA-012)
+   ----------------------------------------------------------------------------
+   Minimal Typo-Styling für Markdig-Output in Sticky-Note-Vorschau und (später)
+   Highlight-Notizen / Markdown-Export-Preview.
+   ============================================================================= */
+.pb-markdown h1,
+.pb-markdown h2,
+.pb-markdown h3,
+.pb-markdown h4 {
+  font-weight: 600;
+  line-height: 1.2;
+  margin-top: 0.6em;
+  margin-bottom: 0.25em;
+}
+.pb-markdown h1 { font-size: 1.15em; }
+.pb-markdown h2 { font-size: 1.08em; }
+.pb-markdown h3 { font-size: 1.02em; }
+.pb-markdown h4 { font-size: 1em; }
+
+.pb-markdown p { margin: 0.35em 0; }
+
+.pb-markdown ul,
+.pb-markdown ol {
+  padding-left: 1.25em;
+  margin: 0.25em 0;
+}
+.pb-markdown ul { list-style: disc outside; }
+.pb-markdown ol { list-style: decimal outside; }
+.pb-markdown li { margin: 0.1em 0; }
+
+.pb-markdown code {
+  background: var(--pb-bg);
+  padding: 0 0.3em;
+  border-radius: 0.25em;
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+}
+.pb-markdown pre {
+  background: var(--pb-bg);
+  padding: 0.5em 0.6em;
+  border-radius: 0.35em;
+  overflow-x: auto;
+  margin: 0.4em 0;
+}
+.pb-markdown pre code {
+  background: transparent;
+  padding: 0;
+}
+
+.pb-markdown a {
+  color: var(--pb-accent);
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+.pb-markdown a:hover { opacity: 0.85; }
+
+.pb-markdown blockquote {
+  border-left: 2px solid var(--pb-border);
+  padding-left: 0.6em;
+  margin: 0.4em 0;
+  color: var(--pb-fg-muted);
+}
+
+.pb-markdown strong { font-weight: 600; }
+.pb-markdown em { font-style: italic; }
+
+.pb-markdown hr {
+  border: 0;
+  border-top: 1px solid var(--pb-border);
+  margin: 0.6em 0;
+}
+
+.pb-markdown table {
+  border-collapse: collapse;
+  margin: 0.4em 0;
+}
+.pb-markdown th,
+.pb-markdown td {
+  border: 1px solid var(--pb-border);
+  padding: 0.25em 0.5em;
+}
+.pb-markdown th {
+  font-weight: 600;
+  background: var(--pb-surface);
+}
+
+/* =============================================================================
    Blazor-Error-Bar (von Blazor erwartete .styles.css-kompatible Klasse)
    ============================================================================= */
 #blazor-error-ui.pb-error-bar {

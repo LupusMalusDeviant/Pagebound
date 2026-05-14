@@ -1,5 +1,6 @@
 @page "/reader"
 @using System.Globalization
+@using Markdig
 @using Microsoft.AspNetCore.Components.Forms
 @using Microsoft.AspNetCore.Components.Web
 @using Microsoft.JSInterop
@@ -392,23 +393,50 @@
                         // Pin sitzt unten → Popover nach oben flippen.
                         var translateX = noteX > 0.55 ? "calc(-100% - 8px)" : "8px";
                         var translateY = noteY > 0.65 ? "calc(-100% + 8px)" : "-8px";
-                        <div class="absolute z-10 w-72 rounded-lg border border-pb-border bg-pb-surface shadow-xl p-3"
+                        <div class="absolute z-10 w-80 rounded-lg border border-pb-border bg-pb-surface shadow-xl p-3"
                              style="@($"left:{editLeft}%; top:{editTop}%; transform: translate({translateX}, {translateY})")"
                              @onclick:stopPropagation>
-                            <div class="flex items-center justify-between mb-2">
+                            <div class="flex items-center justify-between mb-2 gap-2">
                                 <span class="text-xs text-pb-fg-muted">Notiz · Seite @_editingAnnotation.PageNumber</span>
-                                <button type="button"
-                                        class="text-pb-fg-muted hover:text-pb-fg text-sm"
-                                        @onclick="CancelEditing"
-                                        aria-label="Schließen">
-                                    ✕
-                                </button>
+                                <div class="flex items-center gap-1">
+                                    <button type="button"
+                                            class="text-xs text-pb-fg-muted hover:text-pb-fg rounded border border-pb-border px-1.5 py-0.5"
+                                            @onclick="ToggleEditorPreview"
+                                            title="@(_editorPreviewMode ? "Zum Bearbeiten umschalten" : "Markdown-Vorschau anzeigen")">
+                                        @(_editorPreviewMode ? "Bearbeiten" : "Vorschau")
+                                    </button>
+                                    <button type="button"
+                                            class="text-pb-fg-muted hover:text-pb-fg text-sm"
+                                            @onclick="CancelEditing"
+                                            aria-label="Schließen">
+                                        ✕
+                                    </button>
+                                </div>
                             </div>
-                            <textarea @bind="_editingContent"
-                                      @bind:event="oninput"
-                                      class="w-full h-28 rounded border border-pb-border bg-pb-bg px-2 py-1 text-sm resize-none"
-                                      placeholder="Markdown wird in einer späteren Iteration gerendert …"
-                                      aria-label="Notiz-Inhalt"></textarea>
+
+                            @if (_editorPreviewMode)
+                            {
+                                @if (string.IsNullOrWhiteSpace(_editingContent))
+                                {
+                                    <p class="h-28 rounded border border-pb-border bg-pb-bg px-2 py-1 text-sm text-pb-fg-muted italic">
+                                        Keine Notiz erfasst.
+                                    </p>
+                                }
+                                else
+                                {
+                                    <div class="pb-markdown h-28 overflow-y-auto rounded border border-pb-border bg-pb-bg px-2 py-1 text-sm">
+                                        @RenderMarkdown(_editingContent)
+                                    </div>
+                                }
+                            }
+                            else
+                            {
+                                <textarea @bind="_editingContent"
+                                          @bind:event="oninput"
+                                          class="w-full h-28 rounded border border-pb-border bg-pb-bg px-2 py-1 text-sm resize-none font-mono"
+                                          placeholder="**Markdown** wird unterstützt …"
+                                          aria-label="Notiz-Inhalt"></textarea>
+                            }
                             <div class="mt-2 flex gap-2 justify-end">
                                 <button type="button"
                                         class="rounded border border-red-300/40 px-2 py-1 text-xs text-red-400 hover:bg-red-50/10"
@@ -511,6 +539,26 @@
     // Outline (FA-006)
     private PdfOutline? _outline;
     private bool _outlineOpen;
+
+    // Notiz-Editor-Modus (FA-012 Markdown-Live-Preview)
+    private bool _editorPreviewMode;
+
+    // Markdig-Pipeline ohne raw HTML (XSS-Schutz für NFA-025).
+    // Static damit die Pipeline einmal pro App-Lifetime gebaut wird.
+    private static readonly MarkdownPipeline MarkdownPipeline =
+        new MarkdownPipelineBuilder()
+            .UseAdvancedExtensions()
+            .DisableHtml()
+            .Build();
+
+    private static MarkupString RenderMarkdown(string source)
+    {
+        if (string.IsNullOrWhiteSpace(source))
+        {
+            return new MarkupString(string.Empty);
+        }
+        return new MarkupString(Markdown.ToHtml(source, MarkdownPipeline));
+    }
 
     private static readonly string[] HighlightPalette =
     {
@@ -793,6 +841,13 @@
     {
         _editingAnnotation = annotation;
         _editingContent = StickyNoteAnnotation.GetContent(annotation);
+        // Vorhandener Inhalt → erst lesen, sonst direkt schreiben.
+        _editorPreviewMode = !string.IsNullOrWhiteSpace(_editingContent);
+    }
+
+    private void ToggleEditorPreview()
+    {
+        _editorPreviewMode = !_editorPreviewMode;
     }
 
     private async Task SaveEditingAnnotationAsync()
