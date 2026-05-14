@@ -281,3 +281,29 @@ export function downloadFile(
   document.body.removeChild(link);
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
+
+/**
+ * Binary variant of downloadFile: takes Base64-encoded bytes and produces a
+ * proper binary Blob with the given mime type. Used by the PDF-tools save
+ * action (FA-020..024) so the resulting PDF is byte-perfect.
+ */
+export function downloadBytes(
+  filename: string,
+  base64: string,
+  mimeType: string
+): void {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  const blob = new Blob([bytes], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}

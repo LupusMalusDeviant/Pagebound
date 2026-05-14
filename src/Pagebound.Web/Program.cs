@@ -28,6 +28,7 @@ builder.Services.AddScoped(_ => new HttpClient
 builder.Services.AddSingleton<IHashService, Sha256HashService>();
 builder.Services.AddSingleton<ITelemetryService, NoOpTelemetryService>();
 builder.Services.AddScoped<IPdfRenderer, PdfJsRenderer>();
+builder.Services.AddScoped<IPdfManipulator, PdfSharpManipulator>();
 builder.Services.AddScoped<IStorageService, IndexedDbStorage>();
 builder.Services.AddScoped<IAnnotationService, AnnotationService>();
 builder.Services.AddScoped<IMarkdownExporter, MarkdownExporter>();
