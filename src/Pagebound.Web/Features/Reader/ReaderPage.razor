@@ -7,6 +7,7 @@
 @inject IPdfRenderer Renderer
 @inject IHashService Hasher
 @inject IAnnotationService Annotations
+@inject IMarkdownExporter MarkdownExporter
 @inject IJSRuntime JS
 @implements IAsyncDisposable
 
@@ -193,6 +194,17 @@
                     @if (_outline is null && _handle is not null)
                     {
                         <span class="ml-1 text-xs text-pb-fg-muted">(leer)</span>
+                    }
+                </button>
+                <button type="button"
+                        class="rounded border border-pb-border bg-pb-bg px-2 py-0.5 text-pb-fg-muted hover:text-pb-fg disabled:opacity-40 disabled:cursor-not-allowed"
+                        disabled="@(_isExporting || _annotations.Count == 0)"
+                        title="@(_annotations.Count == 0 ? "Noch keine Annotationen zum Exportieren" : "Highlights + Notizen als Markdown exportieren (Obsidian-kompatibel)")"
+                        @onclick="ExportMarkdownAsync">
+                    @(_isExporting ? "Exportiere …" : "📤 Markdown")
+                    @if (!_isExporting && _annotations.Count > 0)
+                    {
+                        <span class="ml-1 text-xs">(@_annotations.Count)</span>
                     }
                 </button>
             </div>
@@ -525,6 +537,8 @@
     private const string PdfImageSelector = "[data-pb-pdf-image]";
     private const string PageCanvasSelector = "[data-pb-page-canvas]";
     private PdfId? _currentPdfId;
+    private string? _currentFilename;
+    private bool _isExporting;
     private IReadOnlyList<Annotation> _annotations = Array.Empty<Annotation>();
     private AnnotationMode _annotationMode = AnnotationMode.Select;
     private Annotation? _editingAnnotation;
@@ -605,6 +619,7 @@
                 _handle = null;
             }
 
+            _currentFilename = e.File.Name;
             await using var stream = e.File.OpenReadStream(MaxFileSize);
             await using var buffer = new MemoryStream();
             await stream.CopyToAsync(buffer);
@@ -653,6 +668,8 @@
     {
         _annotations = Array.Empty<Annotation>();
         _currentPdfId = null;
+        _currentFilename = null;
+        _isExporting = false;
         _annotationMode = AnnotationMode.Select;
         _editingAnnotation = null;
         _editingContent = string.Empty;
@@ -887,6 +904,56 @@
     }
 
     private sealed record NormalizedPosition(double X, double Y);
+
+    // --- Markdown-Export (FA-080, FA-081, FA-082) ---------------------------
+
+    private async Task ExportMarkdownAsync()
+    {
+        if (_currentPdfId is null || _handle is null) return;
+        if (_isExporting) return;
+
+        _isExporting = true;
+        _errorMessage = null;
+        try
+        {
+            var options = new MarkdownExportOptions(
+                Title: _handle.Title,
+                SourceFilename: _currentFilename,
+                PageCount: _handle.PageCount,
+                IncludeHighlights: true,
+                IncludeNotes: true,
+                IncludeYamlFrontmatter: true,
+                UseWikilinks: true);
+
+            var content = await MarkdownExporter.ExportAsync(
+                _currentPdfId.Value,
+                options,
+                CancellationToken.None);
+
+            var baseName = !string.IsNullOrWhiteSpace(_currentFilename)
+                ? System.IO.Path.GetFileNameWithoutExtension(_currentFilename)
+                : (_handle.Title ?? "pagebound-export");
+            // Auf Safe-Zeichen reduzieren, damit der Browser-Download-Dialog
+            // den Vorschlag nicht heimlich umbenennt.
+            var safeBase = string.Concat(baseName.Select(c =>
+                char.IsLetterOrDigit(c) || c is '_' or '-' or '.' or ' ' ? c : '_'));
+            var downloadFilename = $"{safeBase}.md";
+
+            await JS.InvokeVoidAsync(
+                "pageboundShortcuts.downloadFile",
+                downloadFilename,
+                content,
+                "text/markdown");
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Markdown-Export fehlgeschlagen: {ex.Message}";
+        }
+        finally
+        {
+            _isExporting = false;
+        }
+    }
 
     // --- Text-Highlight (FA-010 + FA-018 Inline-Toolbar) --------------------
 

@@ -186,3 +186,25 @@ export function getCurrentTextSelection(
 export function clearSelection(): void {
   window.getSelection()?.removeAllRanges();
 }
+
+/**
+ * Trigger a file download from in-memory text. Used by the Markdown export
+ * (FA-080) and likely by future sidecar / image exports. We stay on the
+ * blob+object-url pattern so very large strings don't have to live inside
+ * a data: URL.
+ */
+export function downloadFile(
+  filename: string,
+  content: string,
+  mimeType: string = "text/plain"
+): void {
+  const blob = new Blob([content], { type: `${mimeType};charset=utf-8` });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
