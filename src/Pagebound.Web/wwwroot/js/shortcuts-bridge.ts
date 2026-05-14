@@ -118,3 +118,71 @@ export function clientPositionToFraction(
     y: Math.max(0, Math.min(1, y))
   };
 }
+
+export interface SelectionFractionRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface SelectionInContainer {
+  text: string;
+  rects: SelectionFractionRect[];
+  anchorX: number;
+  anchorY: number;
+}
+
+/**
+ * Read the current text selection and project its bounding rectangles into
+ * 0..1 fractions of the element matched by the given selector. Returns null
+ * when there is no live selection or it does not intersect the container.
+ *
+ * Used by the Highlight feature (FA-010) to translate a Browser
+ * selection over the PDF text layer into a stored HighlightAnnotation.
+ */
+export function getCurrentTextSelection(
+  containerSelector: string
+): SelectionInContainer | null {
+  const container = document.querySelector(containerSelector);
+  if (!(container instanceof HTMLElement)) return null;
+
+  const selection = window.getSelection();
+  if (!selection || selection.isCollapsed || selection.rangeCount === 0) return null;
+
+  // We require the selection to live inside the container; otherwise this
+  // event is not "ours" (e.g. user selected text in the sidebar).
+  const range = selection.getRangeAt(0);
+  if (!container.contains(range.startContainer) || !container.contains(range.endContainer)) {
+    return null;
+  }
+
+  const text = selection.toString();
+  if (text.trim().length === 0) return null;
+
+  const containerRect = container.getBoundingClientRect();
+  if (containerRect.width <= 0 || containerRect.height <= 0) return null;
+
+  const clientRects = Array.from(range.getClientRects());
+  const rects: SelectionFractionRect[] = clientRects
+    .filter((r) => r.width > 0 && r.height > 0)
+    .map((r) => ({
+      x: (r.left - containerRect.left) / containerRect.width,
+      y: (r.top - containerRect.top) / containerRect.height,
+      width: r.width / containerRect.width,
+      height: r.height / containerRect.height
+    }))
+    .filter((r) => r.width > 0 && r.height > 0);
+
+  if (rects.length === 0) return null;
+
+  // Anchor point for an inline toolbar: top-center of the first rect.
+  const anchorX = rects[0].x + rects[0].width / 2;
+  const anchorY = rects[0].y;
+
+  return { text, rects, anchorX, anchorY };
+}
+
+export function clearSelection(): void {
+  window.getSelection()?.removeAllRanges();
+}

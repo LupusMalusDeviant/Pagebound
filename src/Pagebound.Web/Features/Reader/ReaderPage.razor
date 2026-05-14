@@ -186,17 +186,131 @@
         </div>
 
         <figure class="mt-6 flex justify-center rounded-lg border border-pb-border bg-pb-bg p-4 overflow-auto">
-            @if (_rasterDataUrl is not null)
+            @if (_rasterDataUrl is not null && _renderedPage is not null)
             {
-                <div class="relative inline-block @(_annotationMode == AnnotationMode.StickyNote ? "cursor-crosshair" : "")">
+                var pageW = _renderedPage.PageWidthPt;
+                var pageH = _renderedPage.PageHeightPt;
+                var maxWidthPx = _renderedPage.WidthPx;
+                var canvasStyle = string.Format(
+                    CultureInfo.InvariantCulture,
+                    "container-type:size; aspect-ratio:{0}/{1}; width:min(100%, {2}px)",
+                    pageW, pageH, maxWidthPx);
+                <div data-pb-page-canvas
+                     class="relative @(_annotationMode == AnnotationMode.StickyNote ? "cursor-crosshair" : "cursor-text")"
+                     style="@canvasStyle"
+                     @onclick="HandlePdfClickAsync"
+                     @onmouseup="HandleCanvasMouseUpAsync">
                     <img src="@_rasterDataUrl"
                          data-pb-pdf-image
                          alt="@($"Seite {_currentPage} von {_handle.PageCount}")"
-                         class="max-w-full h-auto shadow-sm block select-none"
-                         @onclick="HandlePdfClickAsync" />
+                         class="block w-full h-full shadow-sm select-none pointer-events-none"
+                         draggable="false" />
+
+                    @* Text-Layer (transparent + selectable) für FA-005 Suche-Highlighting und FA-010 Highlight-Selection.
+                       Im Sticky-Note-Modus deaktiviert (pointer-events-none + select-none), damit Klicks aufs PDF
+                       direkt auf das Canvas-Div durchschlagen und einen Pin setzen können. *@
+                    @if (_pageTextItems.Count > 0)
+                    {
+                        var textLayerClass = _annotationMode == AnnotationMode.StickyNote
+                            ? "absolute inset-0 leading-none whitespace-pre select-none pointer-events-none"
+                            : "absolute inset-0 leading-none whitespace-pre select-text";
+                        <div class="@textLayerClass" aria-hidden="true">
+                            @foreach (var item in _pageTextItems)
+                            {
+                                var leftPct = (item.X / pageW * 100).ToString("F3", CultureInfo.InvariantCulture);
+                                var topPct = (item.Y / pageH * 100).ToString("F3", CultureInfo.InvariantCulture);
+                                var widthPct = (item.Width / pageW * 100).ToString("F3", CultureInfo.InvariantCulture);
+                                var fontCqh = (item.Height / pageH * 100).ToString("F3", CultureInfo.InvariantCulture);
+                                <span class="absolute text-transparent origin-top-left"
+                                      style="@($"left:{leftPct}%; top:{topPct}%; width:{widthPct}%; font-size:{fontCqh}cqh")">@item.Text</span>
+                            }
+                        </div>
+                    }
+
+                    @* Highlight-Layer (über Text, semi-transparent, klickbar zur Bearbeitung) *@
+                    @foreach (var hl in HighlightsOnCurrentPage)
+                    {
+                        var highlight = hl;
+                        var color = HighlightAnnotation.GetColor(highlight);
+                        foreach (var rect in HighlightAnnotation.GetRects(highlight))
+                        {
+                            var rLeft = (rect.X * 100).ToString("F3", CultureInfo.InvariantCulture);
+                            var rTop = (rect.Y * 100).ToString("F3", CultureInfo.InvariantCulture);
+                            var rWidth = (rect.Width * 100).ToString("F3", CultureInfo.InvariantCulture);
+                            var rHeight = (rect.Height * 100).ToString("F3", CultureInfo.InvariantCulture);
+                            <button type="button"
+                                    class="absolute cursor-pointer border-0 p-0"
+                                    style="@($"left:{rLeft}%; top:{rTop}%; width:{rWidth}%; height:{rHeight}%; background-color:{color}; mix-blend-mode:multiply; opacity:0.85")"
+                                    aria-label="Markierter Text bearbeiten"
+                                    title="@HighlightAnnotation.GetText(highlight)"
+                                    @onclick="@(() => OpenHighlightEditor(highlight))"
+                                    @onclick:stopPropagation></button>
+                        }
+                    }
+
+                    @* Inline-Toolbar bei Selection (FA-018) *@
+                    @if (_pendingSelection is not null && _editingHighlight is null)
+                    {
+                        var anchorLeft = (_pendingSelection.AnchorX * 100).ToString("F2", CultureInfo.InvariantCulture);
+                        var anchorTop = (_pendingSelection.AnchorY * 100).ToString("F2", CultureInfo.InvariantCulture);
+                        <div class="absolute z-20 flex items-center gap-1 rounded-md border border-pb-border bg-pb-surface px-2 py-1 shadow-lg"
+                             style="@($"left:{anchorLeft}%; top:{anchorTop}%; transform: translate(-50%, calc(-100% - 6px))")"
+                             @onmousedown:preventDefault
+                             @onclick:stopPropagation>
+                            <span class="text-xs text-pb-fg-muted mr-1">Markieren:</span>
+                            @foreach (var color in HighlightPalette)
+                            {
+                                var c = color;
+                                <button type="button"
+                                        class="w-5 h-5 rounded-full border border-pb-border hover:scale-110 transition-transform"
+                                        style="@($"background-color:{c}")"
+                                        title="@c"
+                                        aria-label="@($"Mit Farbe {c} markieren")"
+                                        @onclick="@(() => HighlightPendingSelectionAsync(c))"></button>
+                            }
+                            <button type="button"
+                                    class="ml-1 px-1 text-pb-fg-muted hover:text-pb-fg text-sm"
+                                    @onclick="DismissSelection"
+                                    aria-label="Auswahl verwerfen">✕</button>
+                        </div>
+                    }
+
+                    @* Highlight-Editor (Click auf bereits gesetzten Highlight) *@
+                    @if (_editingHighlight is not null && _editingHighlight.PageNumber == _currentPage)
+                    {
+                        var firstRect = HighlightAnnotation.GetRects(_editingHighlight).FirstOrDefault();
+                        if (firstRect is not null)
+                        {
+                            var editLeft = (firstRect.X * 100).ToString("F2", CultureInfo.InvariantCulture);
+                            var editTop = (firstRect.Y * 100).ToString("F2", CultureInfo.InvariantCulture);
+                            <div class="absolute z-20 flex items-center gap-1 rounded-md border border-pb-border bg-pb-surface px-2 py-1 shadow-lg"
+                                 style="@($"left:{editLeft}%; top:{editTop}%; transform: translate(0, calc(-100% - 6px))")"
+                                 @onclick:stopPropagation>
+                                <span class="text-xs text-pb-fg-muted mr-1">Farbe:</span>
+                                @foreach (var color in HighlightPalette)
+                                {
+                                    var c = color;
+                                    var isCurrent = HighlightAnnotation.GetColor(_editingHighlight) == c;
+                                    <button type="button"
+                                            class="@($"w-5 h-5 rounded-full border hover:scale-110 transition-transform {(isCurrent ? "border-pb-accent" : "border-pb-border")}")"
+                                            style="@($"background-color:{c}")"
+                                            @onclick="@(() => ChangeHighlightColorAsync(c))"></button>
+                                }
+                                <button type="button"
+                                        class="ml-1 rounded border border-red-300/40 px-2 py-0.5 text-xs text-red-400 hover:bg-red-50/10"
+                                        @onclick="DeleteEditingHighlightAsync">
+                                    Löschen
+                                </button>
+                                <button type="button"
+                                        class="ml-1 px-1 text-pb-fg-muted hover:text-pb-fg text-sm"
+                                        @onclick="CancelHighlightEditing"
+                                        aria-label="Schließen">✕</button>
+                            </div>
+                        }
+                    }
 
                     @* Pins für alle Sticky Notes auf der aktuellen Seite *@
-                    @foreach (var note in AnnotationsOnCurrentPage)
+                    @foreach (var note in StickyNotesOnCurrentPage)
                     {
                         var n = note;
                         var leftPct = (StickyNoteAnnotation.GetX(n) * 100).ToString("F2", CultureInfo.InvariantCulture);
@@ -321,22 +435,47 @@
 
     // Annotation-State (FA-011 Sticky Notes, FA-070 ff. Persistenz)
     private const string PdfImageSelector = "[data-pb-pdf-image]";
+    private const string PageCanvasSelector = "[data-pb-page-canvas]";
     private PdfId? _currentPdfId;
     private IReadOnlyList<Annotation> _annotations = Array.Empty<Annotation>();
     private AnnotationMode _annotationMode = AnnotationMode.Select;
     private Annotation? _editingAnnotation;
     private string _editingContent = string.Empty;
 
+    // Text-Layer + Highlight-State (FA-010 Highlight, FA-018 Inline-Toolbar)
+    private RenderedPage? _renderedPage;
+    private IReadOnlyList<TextItem> _pageTextItems = Array.Empty<TextItem>();
+    private SelectionDto? _pendingSelection;
+    private Annotation? _editingHighlight;
+
+    private static readonly string[] HighlightPalette =
+    {
+        HighlightAnnotation.DefaultColor, // gelb
+        "#bbf7d0", // green-200
+        "#bae6fd", // sky-200
+        "#fbcfe8", // pink-200
+        "#ddd6fe"  // violet-200
+    };
+
     private double InternalScale => BaseScale * _zoomFactor;
 
-    private IEnumerable<Annotation> AnnotationsOnCurrentPage =>
-        _annotations.Where(a => a.PageNumber == _currentPage);
+    private IEnumerable<Annotation> StickyNotesOnCurrentPage =>
+        _annotations.Where(a => a.Type == AnnotationType.StickyNote && a.PageNumber == _currentPage);
+
+    private IEnumerable<Annotation> HighlightsOnCurrentPage =>
+        _annotations.Where(a => a.Type == AnnotationType.Highlight && a.PageNumber == _currentPage);
 
     private enum AnnotationMode
     {
         Select,
         StickyNote
     }
+
+    private sealed record SelectionDto(
+        string Text,
+        IReadOnlyList<HighlightRect> Rects,
+        double AnchorX,
+        double AnchorY);
 
     private async Task HandleFileSelected(InputFileChangeEventArgs e)
     {
@@ -392,6 +531,10 @@
         _annotationMode = AnnotationMode.Select;
         _editingAnnotation = null;
         _editingContent = string.Empty;
+        _pageTextItems = Array.Empty<TextItem>();
+        _renderedPage = null;
+        _pendingSelection = null;
+        _editingHighlight = null;
     }
 
     private async Task RenderCurrentPageAsync()
@@ -399,6 +542,7 @@
         if (_handle is null) return;
 
         _isRendering = true;
+        _pendingSelection = null;
         try
         {
             var rendered = await Renderer.RenderPageAsync(
@@ -407,9 +551,22 @@
                 new RenderOptions(Scale: InternalScale),
                 CancellationToken.None);
 
+            _renderedPage = rendered;
             if (rendered.RasterBytes is not null && rendered.RasterFormat is not null)
             {
                 _rasterDataUrl = $"data:{rendered.RasterFormat};base64,{Convert.ToBase64String(rendered.RasterBytes)}";
+            }
+
+            // Text-Layer nachladen: ohne ihn ist keine Text-Selection und damit
+            // kein Highlighting möglich. Bei PDFs ohne Text-Layer (vektorisiert)
+            // kommt ein leeres Array zurück und der Layer rendert einfach nichts.
+            try
+            {
+                _pageTextItems = await Renderer.ExtractTextAsync(_handle, _currentPage, CancellationToken.None);
+            }
+            catch
+            {
+                _pageTextItems = Array.Empty<TextItem>();
             }
         }
         catch (Exception ex)
@@ -597,6 +754,91 @@
 
     private sealed record NormalizedPosition(double X, double Y);
 
+    // --- Text-Highlight (FA-010 + FA-018 Inline-Toolbar) --------------------
+
+    private async Task HandleCanvasMouseUpAsync(MouseEventArgs e)
+    {
+        // Im Sticky-Note-Modus übernimmt der img-Click-Handler;
+        // außerdem wollen wir keine Selection-Toolbar, wenn der Editor offen ist.
+        if (_annotationMode != AnnotationMode.Select) return;
+        if (_editingAnnotation is not null) return;
+        if (_currentPdfId is null) return;
+
+        var selection = await JS.InvokeAsync<SelectionDto?>(
+            "pageboundShortcuts.getCurrentTextSelection",
+            PageCanvasSelector);
+
+        if (selection is null || selection.Rects.Count == 0 || string.IsNullOrWhiteSpace(selection.Text))
+        {
+            _pendingSelection = null;
+            return;
+        }
+        _pendingSelection = selection;
+    }
+
+    private async Task HighlightPendingSelectionAsync(string color)
+    {
+        if (_pendingSelection is null) return;
+        if (_currentPdfId is null) return;
+
+        var newAnnotation = HighlightAnnotation.Create(
+            _currentPdfId.Value,
+            _currentPage,
+            _pendingSelection.Rects,
+            _pendingSelection.Text,
+            color);
+
+        var saved = await Annotations.CreateAsync(newAnnotation, CancellationToken.None);
+        _annotations = _annotations.Append(saved).ToList();
+        _pendingSelection = null;
+
+        // Browser-Selection aufheben, damit die Toolbar sicher verschwindet
+        // und der Highlight optisch im Vordergrund stehen kann.
+        try
+        {
+            await JS.InvokeVoidAsync("pageboundShortcuts.clearSelection");
+        }
+        catch (JSException)
+        {
+            // Ignorieren, harmlose Edge-Case bei sehr früher Tab-Disposal.
+        }
+    }
+
+    private void DismissSelection()
+    {
+        _pendingSelection = null;
+    }
+
+    private void OpenHighlightEditor(Annotation highlight)
+    {
+        _editingHighlight = highlight;
+    }
+
+    private void CancelHighlightEditing()
+    {
+        _editingHighlight = null;
+    }
+
+    private async Task ChangeHighlightColorAsync(string color)
+    {
+        if (_editingHighlight is null) return;
+        var updated = HighlightAnnotation.WithColor(_editingHighlight, color);
+        var saved = await Annotations.UpdateAsync(updated, CancellationToken.None);
+        _annotations = _annotations
+            .Select(a => a.Id.Value == saved.Id.Value ? saved : a)
+            .ToList();
+        _editingHighlight = saved;
+    }
+
+    private async Task DeleteEditingHighlightAsync()
+    {
+        if (_editingHighlight is null) return;
+        var id = _editingHighlight.Id;
+        await Annotations.DeleteAsync(id, CancellationToken.None);
+        _annotations = _annotations.Where(a => a.Id.Value != id.Value).ToList();
+        _editingHighlight = null;
+    }
+
     // --- Tastatur-Shortcuts -------------------------------------------------
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -641,7 +883,15 @@
                 }
                 break;
             case "clear-search":
-                if (_searchHits is not null || !string.IsNullOrEmpty(_searchQuery))
+                if (_pendingSelection is not null)
+                {
+                    _pendingSelection = null;
+                }
+                else if (_editingHighlight is not null)
+                {
+                    _editingHighlight = null;
+                }
+                else if (_searchHits is not null || !string.IsNullOrEmpty(_searchQuery))
                 {
                     ClearSearchState();
                 }

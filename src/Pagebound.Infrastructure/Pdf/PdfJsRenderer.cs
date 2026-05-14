@@ -74,7 +74,9 @@ public sealed class PdfJsRenderer : IPdfRenderer
             result.WidthPx,
             result.HeightPx,
             raster,
-            result.RasterFormat);
+            result.RasterFormat,
+            result.PageWidthPt,
+            result.PageHeightPt);
     }
 
     public async Task<IReadOnlyList<TextItem>> ExtractTextAsync(
@@ -163,7 +165,9 @@ public sealed class PdfJsRenderer : IPdfRenderer
         int WidthPx,
         int HeightPx,
         string RasterBase64,
-        string RasterFormat);
+        string RasterFormat,
+        double PageWidthPt,
+        double PageHeightPt);
 
     private sealed record TextItemDto(string Text, double X, double Y, double Width, double Height);
 

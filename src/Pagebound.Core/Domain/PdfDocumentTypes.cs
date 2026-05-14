@@ -17,7 +17,9 @@ public sealed record RenderedPage(
     int WidthPx,
     int HeightPx,
     byte[]? RasterBytes,
-    string? RasterFormat);
+    string? RasterFormat,
+    double PageWidthPt,
+    double PageHeightPt);
 
 public sealed record TextItem(
     string Text,

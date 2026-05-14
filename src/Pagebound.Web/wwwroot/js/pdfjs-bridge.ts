@@ -30,6 +30,8 @@ export interface RenderResult {
   heightPx: number;
   rasterBase64: string;
   rasterFormat: "image/png";
+  pageWidthPt: number;
+  pageHeightPt: number;
 }
 
 function newId(): string {
@@ -82,6 +84,7 @@ export async function renderPage(
   const doc = requireDoc(handleId);
   const page: PDFPageProxy = await doc.getPage(pageNumber);
   const viewport = page.getViewport({ scale });
+  const baseViewport = page.getViewport({ scale: 1 });
   const widthPx = Math.ceil(viewport.width);
   const heightPx = Math.ceil(viewport.height);
 
@@ -99,7 +102,15 @@ export async function renderPage(
   const dataUrl = canvas.toDataURL("image/png");
   const rasterBase64 = dataUrl.substring(dataUrl.indexOf(",") + 1);
 
-  return { pageNumber, widthPx, heightPx, rasterBase64, rasterFormat: "image/png" };
+  return {
+    pageNumber,
+    widthPx,
+    heightPx,
+    rasterBase64,
+    rasterFormat: "image/png",
+    pageWidthPt: baseViewport.width,
+    pageHeightPt: baseViewport.height
+  };
 }
 
 export async function unload(handleId: string): Promise<void> {
