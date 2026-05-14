@@ -137,11 +137,30 @@ public sealed class PdfJsRenderer : IPdfRenderer
             .ToList();
     }
 
-    public Task<PdfOutline?> GetOutlineAsync(
+    public async Task<PdfOutline?> GetOutlineAsync(
         PdfDocumentHandle handle,
-        CancellationToken cancellationToken) =>
-        throw new NotImplementedException(
-            "GetOutlineAsync folgt in Release 0.2 (FA-006).");
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(handle);
+
+        var raw = await _js.InvokeAsync<OutlineEntryDto[]>(
+            $"{JsModuleId}.getOutline",
+            cancellationToken,
+            handle.Id)
+            .ConfigureAwait(false);
+
+        if (raw is null || raw.Length == 0) return null;
+
+        return new PdfOutline(raw.Select(MapEntry).ToList());
+
+        static PdfOutlineEntry MapEntry(OutlineEntryDto dto) =>
+            new(
+                dto.Title ?? string.Empty,
+                dto.PageNumber,
+                (dto.Children ?? Array.Empty<OutlineEntryDto>())
+                    .Select(MapEntry)
+                    .ToList());
+    }
 
     public async Task UnloadAsync(PdfDocumentHandle handle)
     {
@@ -177,4 +196,9 @@ public sealed class PdfJsRenderer : IPdfRenderer
         string Match,
         string Snippet,
         int SnippetMatchStart);
+
+    private sealed record OutlineEntryDto(
+        string Title,
+        int? PageNumber,
+        OutlineEntryDto[] Children);
 }

@@ -183,9 +183,52 @@
                     📝 Notiz
                 </button>
             </div>
+            <div class="flex items-center gap-2">
+                <button type="button"
+                        class="@($"rounded border px-2 py-0.5 {(_outlineOpen ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted")}")"
+                        title="Inhaltsverzeichnis ein- bzw. ausblenden"
+                        @onclick="@(() => _outlineOpen = !_outlineOpen)">
+                    📑 Inhalt
+                    @if (_outline is null && _handle is not null)
+                    {
+                        <span class="ml-1 text-xs text-pb-fg-muted">(leer)</span>
+                    }
+                </button>
+            </div>
         </div>
 
-        <figure class="mt-6 flex justify-center rounded-lg border border-pb-border bg-pb-bg p-4 overflow-auto">
+        <div class="mt-6 flex gap-4 items-start">
+
+        @if (_outlineOpen)
+        {
+            <aside class="w-64 shrink-0 rounded-lg border border-pb-border bg-pb-surface p-3 max-h-[80vh] overflow-y-auto"
+                   aria-label="Inhaltsverzeichnis">
+                <div class="flex items-center justify-between mb-2">
+                    <h3 class="text-sm font-medium">Inhaltsverzeichnis</h3>
+                    <button type="button"
+                            class="text-pb-fg-muted hover:text-pb-fg text-xs"
+                            @onclick="@(() => _outlineOpen = false)"
+                            aria-label="Inhaltsverzeichnis schließen">
+                        ✕
+                    </button>
+                </div>
+                @if (_outline is null)
+                {
+                    <p class="text-xs text-pb-fg-muted italic">Diese PDF hat kein Inhaltsverzeichnis.</p>
+                }
+                else
+                {
+                    <ul class="text-sm">
+                        @foreach (var entry in _outline.Entries)
+                        {
+                            <OutlineNode Entry="entry" OnNavigate="GoToPageAsync" />
+                        }
+                    </ul>
+                }
+            </aside>
+        }
+
+        <figure class="flex-1 min-w-0 flex justify-center rounded-lg border border-pb-border bg-pb-bg p-4 overflow-visible">
             @if (_rasterDataUrl is not null && _renderedPage is not null)
             {
                 var pageW = _renderedPage.PageWidthPt;
@@ -253,8 +296,13 @@
                     {
                         var anchorLeft = (_pendingSelection.AnchorX * 100).ToString("F2", CultureInfo.InvariantCulture);
                         var anchorTop = (_pendingSelection.AnchorY * 100).ToString("F2", CultureInfo.InvariantCulture);
+                        // Bei Selection ganz oben auf der Seite klappt die Toolbar
+                        // nach unten, sonst nach oben (Default).
+                        var toolbarTranslateY = _pendingSelection.AnchorY < 0.08
+                            ? "8px"
+                            : "calc(-100% - 6px)";
                         <div class="absolute z-20 flex items-center gap-1 rounded-md border border-pb-border bg-pb-surface px-2 py-1 shadow-lg"
-                             style="@($"left:{anchorLeft}%; top:{anchorTop}%; transform: translate(-50%, calc(-100% - 6px))")"
+                             style="@($"left:{anchorLeft}%; top:{anchorTop}%; transform: translate(-50%, {toolbarTranslateY})")"
                              @onmousedown:preventDefault
                              @onclick:stopPropagation>
                             <span class="text-xs text-pb-fg-muted mr-1">Markieren:</span>
@@ -283,8 +331,12 @@
                         {
                             var editLeft = (firstRect.X * 100).ToString("F2", CultureInfo.InvariantCulture);
                             var editTop = (firstRect.Y * 100).ToString("F2", CultureInfo.InvariantCulture);
+                            // Highlight oben → Toolbar unter dem Rechteck.
+                            var hlTranslateY = firstRect.Y < 0.08
+                                ? $"calc({firstRect.Height * 100:F2}% + 6px)"
+                                : "calc(-100% - 6px)";
                             <div class="absolute z-20 flex items-center gap-1 rounded-md border border-pb-border bg-pb-surface px-2 py-1 shadow-lg"
-                                 style="@($"left:{editLeft}%; top:{editTop}%; transform: translate(0, calc(-100% - 6px))")"
+                                 style="@($"left:{editLeft}%; top:{editTop}%; transform: translate(0, {hlTranslateY})")"
                                  @onclick:stopPropagation>
                                 <span class="text-xs text-pb-fg-muted mr-1">Farbe:</span>
                                 @foreach (var color in HighlightPalette)
@@ -332,10 +384,16 @@
                     @* Editor-Popover für aktuelle Notiz *@
                     @if (_editingAnnotation is not null && _editingAnnotation.PageNumber == _currentPage)
                     {
-                        var editLeft = (StickyNoteAnnotation.GetX(_editingAnnotation) * 100).ToString("F2", CultureInfo.InvariantCulture);
-                        var editTop = (StickyNoteAnnotation.GetY(_editingAnnotation) * 100).ToString("F2", CultureInfo.InvariantCulture);
+                        var noteX = StickyNoteAnnotation.GetX(_editingAnnotation);
+                        var noteY = StickyNoteAnnotation.GetY(_editingAnnotation);
+                        var editLeft = (noteX * 100).ToString("F2", CultureInfo.InvariantCulture);
+                        var editTop = (noteY * 100).ToString("F2", CultureInfo.InvariantCulture);
+                        // Pin sitzt rechts → Popover nach links flippen, damit es nicht überhängt.
+                        // Pin sitzt unten → Popover nach oben flippen.
+                        var translateX = noteX > 0.55 ? "calc(-100% - 8px)" : "8px";
+                        var translateY = noteY > 0.65 ? "calc(-100% + 8px)" : "-8px";
                         <div class="absolute z-10 w-72 rounded-lg border border-pb-border bg-pb-surface shadow-xl p-3"
-                             style="@($"left:{editLeft}%; top:{editTop}%; transform: translate(8px, -8px)")"
+                             style="@($"left:{editLeft}%; top:{editTop}%; transform: translate({translateX}, {translateY})")"
                              @onclick:stopPropagation>
                             <div class="flex items-center justify-between mb-2">
                                 <span class="text-xs text-pb-fg-muted">Notiz · Seite @_editingAnnotation.PageNumber</span>
@@ -372,6 +430,8 @@
                 <div class="text-sm text-pb-fg-muted py-12">Rendere …</div>
             }
         </figure>
+
+        </div> @* /flex-Wrapper Outline+PDF *@
 
         <p class="max-w-4xl mx-auto mt-4 text-xs text-pb-fg-muted">
             Tastatur:
@@ -448,6 +508,10 @@
     private SelectionDto? _pendingSelection;
     private Annotation? _editingHighlight;
 
+    // Outline (FA-006)
+    private PdfOutline? _outline;
+    private bool _outlineOpen;
+
     private static readonly string[] HighlightPalette =
     {
         HighlightAnnotation.DefaultColor, // gelb
@@ -510,6 +574,19 @@
 
             _annotations = await Annotations.GetForDocumentAsync(_currentPdfId.Value, CancellationToken.None);
 
+            // Outline ist optional: viele PDFs haben keinen TOC. In dem Fall
+            // bleibt _outline null und die Sidebar zeigt einen Hinweis statt
+            // einer leeren Baumstruktur.
+            try
+            {
+                _outline = await Renderer.GetOutlineAsync(_handle, CancellationToken.None);
+            }
+            catch
+            {
+                _outline = null;
+            }
+            _outlineOpen = _outline is not null;
+
             await RenderCurrentPageAsync();
         }
         catch (Exception ex)
@@ -535,6 +612,8 @@
         _renderedPage = null;
         _pendingSelection = null;
         _editingHighlight = null;
+        _outline = null;
+        _outlineOpen = false;
     }
 
     private async Task RenderCurrentPageAsync()

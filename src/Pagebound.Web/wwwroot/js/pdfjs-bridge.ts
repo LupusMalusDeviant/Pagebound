@@ -113,6 +113,60 @@ export async function renderPage(
   };
 }
 
+export interface OutlineEntryDto {
+  title: string;
+  pageNumber: number | null;
+  children: OutlineEntryDto[];
+}
+
+interface RawOutlineItem {
+  title: string;
+  dest: unknown;
+  items: RawOutlineItem[];
+}
+
+/**
+ * Builds the table-of-contents tree (FA-006). PDF.js returns destinations
+ * either as an inline array referencing a page object, or as a named
+ * destination string that needs to be resolved via `doc.getDestination`.
+ * Either way, the final page index comes from `doc.getPageIndex(pageRef)`.
+ * Missing or unresolvable destinations are reported with `pageNumber: null`
+ * so the UI can still render the entry as a section heading.
+ */
+export async function getOutline(handleId: string): Promise<OutlineEntryDto[]> {
+  const doc = requireDoc(handleId);
+  const raw = (await doc.getOutline()) as unknown as RawOutlineItem[] | null;
+  if (!raw || raw.length === 0) return [];
+
+  async function resolvePage(dest: unknown): Promise<number | null> {
+    if (!dest) return null;
+    try {
+      const resolved =
+        typeof dest === "string" ? await doc.getDestination(dest) : dest;
+      if (!Array.isArray(resolved) || resolved.length === 0) return null;
+      const pageRef = resolved[0];
+      const pageIndex = await doc.getPageIndex(pageRef as never);
+      return pageIndex + 1;
+    } catch {
+      return null;
+    }
+  }
+
+  async function convert(items: RawOutlineItem[]): Promise<OutlineEntryDto[]> {
+    const out: OutlineEntryDto[] = [];
+    for (const item of items) {
+      const pageNumber = await resolvePage(item.dest);
+      const children = item.items && item.items.length > 0
+        ? await convert(item.items)
+        : [];
+      out.push({ title: item.title, pageNumber, children });
+    }
+    return out;
+  }
+
+  return convert(raw);
+}
+
 export async function unload(handleId: string): Promise<void> {
   const doc = documents.get(handleId);
   if (!doc) return;
