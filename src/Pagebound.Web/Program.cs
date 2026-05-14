@@ -31,6 +31,7 @@ builder.Services.AddScoped<IPdfRenderer, PdfJsRenderer>();
 builder.Services.AddScoped<IStorageService, IndexedDbStorage>();
 builder.Services.AddScoped<IAnnotationService, AnnotationService>();
 builder.Services.AddScoped<IMarkdownExporter, MarkdownExporter>();
+builder.Services.AddScoped<IIntegrityService, IntegrityService>();
 
 // TODO Release 0.1: ISidecarService, IThemeService, ILocalizationService.
 //   Jede Registrierung kommt mit ihrer Implementation; die Interfaces stehen bereits.

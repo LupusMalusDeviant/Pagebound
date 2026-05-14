@@ -188,6 +188,79 @@ export function clearSelection(): void {
 }
 
 /**
+ * Live-drag an element inside a container, snapping to the container's 0..1
+ * fraction grid. Used to move PNG signatures around the PDF canvas (FA-015).
+ *
+ * Behaviour:
+ *  - At mousedown, the caller captures the start clientX/clientY and passes
+ *    them in; we compute the offset between mouse and element top-left so
+ *    the element follows the cursor naturally (no jump on first pointermove).
+ *  - During pointermove we write live left/top CSS in percent of the
+ *    container, so the element follows the cursor at 60 fps without a
+ *    Blazor round-trip per event.
+ *  - At pointerup we drop the listeners, clamp the final fractions into
+ *    [0, 1 - element-extent] so the element stays inside the container,
+ *    and call back into C# (dotNetRef.invokeMethodAsync(callbackMethod,
+ *    callbackArg, finalX, finalY)) so the page can persist the move.
+ */
+export function dragElementToFraction(
+  elementSelector: string,
+  containerSelector: string,
+  startClientX: number,
+  startClientY: number,
+  dotNetRef: DotNetRef,
+  callbackMethod: string,
+  callbackArg: string
+): void {
+  const element = document.querySelector(elementSelector);
+  const container = document.querySelector(containerSelector);
+  if (!(element instanceof HTMLElement) || !(container instanceof HTMLElement)) {
+    return;
+  }
+
+  const containerRect = container.getBoundingClientRect();
+  const elementRect = element.getBoundingClientRect();
+  if (containerRect.width <= 0 || containerRect.height <= 0) return;
+
+  // How far inside the element the cursor grabbed — keeps the grab point
+  // aligned with the cursor for the whole drag.
+  const grabOffsetX = startClientX - elementRect.left;
+  const grabOffsetY = startClientY - elementRect.top;
+
+  // Element extent as 0..1 fraction; used to clamp the top-left so the
+  // element never leaves the container.
+  const elementWidthFrac = elementRect.width / containerRect.width;
+  const elementHeightFrac = elementRect.height / containerRect.height;
+
+  let finalX = (elementRect.left - containerRect.left) / containerRect.width;
+  let finalY = (elementRect.top - containerRect.top) / containerRect.height;
+
+  const clamp = (v: number, min: number, max: number) =>
+    Math.max(min, Math.min(max, v));
+
+  const onMove = (e: PointerEvent) => {
+    e.preventDefault();
+    const rawX = (e.clientX - grabOffsetX - containerRect.left) / containerRect.width;
+    const rawY = (e.clientY - grabOffsetY - containerRect.top) / containerRect.height;
+    finalX = clamp(rawX, 0, Math.max(0, 1 - elementWidthFrac));
+    finalY = clamp(rawY, 0, Math.max(0, 1 - elementHeightFrac));
+    element.style.left = `${(finalX * 100).toFixed(3)}%`;
+    element.style.top = `${(finalY * 100).toFixed(3)}%`;
+  };
+
+  const onUp = () => {
+    document.removeEventListener("pointermove", onMove);
+    document.removeEventListener("pointerup", onUp);
+    document.removeEventListener("pointercancel", onUp);
+    void dotNetRef.invokeMethodAsync(callbackMethod, callbackArg, finalX, finalY);
+  };
+
+  document.addEventListener("pointermove", onMove);
+  document.addEventListener("pointerup", onUp);
+  document.addEventListener("pointercancel", onUp);
+}
+
+/**
  * Trigger a file download from in-memory text. Used by the Markdown export
  * (FA-080) and likely by future sidecar / image exports. We stay on the
  * blob+object-url pattern so very large strings don't have to live inside

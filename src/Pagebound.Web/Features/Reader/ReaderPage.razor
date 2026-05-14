@@ -8,6 +8,7 @@
 @inject IHashService Hasher
 @inject IAnnotationService Annotations
 @inject IMarkdownExporter MarkdownExporter
+@inject IIntegrityService Integrity
 @inject IJSRuntime JS
 @implements IAsyncDisposable
 
@@ -184,6 +185,32 @@
                         title="Klick aufs PDF erstellt eine neue Notiz">
                     📝 Notiz
                 </button>
+                @if (_activeSignatureImage is null)
+                {
+                    <label class="rounded border border-pb-border bg-pb-bg px-2 py-0.5 text-pb-fg-muted hover:text-pb-fg cursor-pointer"
+                           title="PNG/JPG-Signatur laden, dann zum Platzieren auf das PDF klicken">
+                        ✍️ Signatur laden
+                        <InputFile OnChange="HandleSignatureImageSelectedAsync"
+                                   accept=".png,.jpg,.jpeg,image/png,image/jpeg"
+                                   class="hidden" />
+                    </label>
+                }
+                else
+                {
+                    <button type="button"
+                            class="@($"rounded border px-2 py-0.5 {(_annotationMode == AnnotationMode.Signature ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted")}")"
+                            @onclick="@(() => SetAnnotationMode(AnnotationMode.Signature))"
+                            title="Klick aufs PDF platziert die geladene Signatur">
+                        ✍️ @(_activeSignatureFilename ?? "Signatur") platzieren
+                    </button>
+                    <button type="button"
+                            class="text-xs text-pb-fg-muted hover:text-pb-fg px-1"
+                            @onclick="ClearActiveSignature"
+                            title="Signatur entladen"
+                            aria-label="Signatur entladen">
+                        ✕
+                    </button>
+                }
             </div>
             <div class="flex items-center gap-2">
                 <button type="button"
@@ -372,6 +399,65 @@
                                         aria-label="Schließen">✕</button>
                             </div>
                         }
+                    }
+
+                    @* Signaturen (FA-015) — PNG-Bild mit Integritäts-Status-Badge *@
+                    @foreach (var sig in SignaturesOnCurrentPage)
+                    {
+                        var signature = sig;
+                        var sigLeft = (SignatureAnnotation.GetX(signature) * 100).ToString("F3", CultureInfo.InvariantCulture);
+                        var sigTop = (SignatureAnnotation.GetY(signature) * 100).ToString("F3", CultureInfo.InvariantCulture);
+                        var sigWidth = (SignatureAnnotation.GetWidth(signature) * 100).ToString("F3", CultureInfo.InvariantCulture);
+                        var sigHeight = (SignatureAnnotation.GetHeight(signature) * 100).ToString("F3", CultureInfo.InvariantCulture);
+                        var status = _signatureStatuses.GetValueOrDefault(signature.Id.Value, SignatureIntegrityStatus.NoHash);
+                        var ringClass = status switch
+                        {
+                            SignatureIntegrityStatus.Valid => "ring-2 ring-green-400/70",
+                            SignatureIntegrityStatus.Invalid => "ring-2 ring-red-400/80",
+                            _ => "ring-1 ring-amber-400/50"
+                        };
+                        var badgeBg = status switch
+                        {
+                            SignatureIntegrityStatus.Valid => "bg-green-500",
+                            SignatureIntegrityStatus.Invalid => "bg-red-500",
+                            _ => "bg-amber-500"
+                        };
+                        var badgeIcon = status switch
+                        {
+                            SignatureIntegrityStatus.Valid => "✓",
+                            SignatureIntegrityStatus.Invalid => "!",
+                            _ => "?"
+                        };
+                        var badgeTitle = status switch
+                        {
+                            SignatureIntegrityStatus.Valid => "Integrität geprüft — PDF + Annotationen unverändert seit Signatur",
+                            SignatureIntegrityStatus.Invalid => "Integrität verletzt — PDF oder Annotationen wurden nach der Signatur verändert",
+                            _ => "Kein Integritäts-Hash gespeichert"
+                        };
+                        var signedAtLabel = SignatureAnnotation.GetSignedAt(signature).ToLocalTime().ToString("yyyy-MM-dd HH:mm");
+                        <div data-pb-signature-id="@signature.Id.Value"
+                             class="absolute @ringClass rounded bg-white/40 cursor-move select-none touch-none"
+                             style="@($"left:{sigLeft}%; top:{sigTop}%; width:{sigWidth}%; height:{sigHeight}%")"
+                             title="@($"Signatur von {signedAtLabel} — {badgeTitle} (Ziehen zum Verschieben)")"
+                             @onmousedown="@((MouseEventArgs e) => HandleSignatureMouseDownAsync(e, signature))"
+                             @onmousedown:stopPropagation
+                             @onclick:stopPropagation>
+                            <img src="@SignatureAnnotation.GetImageDataUrl(signature)"
+                                 alt="Signatur"
+                                 draggable="false"
+                                 class="w-full h-full object-contain pointer-events-none" />
+                            <span class="absolute -top-2 -right-2 w-5 h-5 rounded-full text-xs text-white flex items-center justify-center shadow @badgeBg pointer-events-none"
+                                  aria-label="@badgeTitle">@badgeIcon</span>
+                            <button type="button"
+                                    class="absolute -bottom-2 -left-2 w-5 h-5 rounded-full bg-pb-surface border border-pb-border text-xs text-pb-fg-muted hover:text-red-500 flex items-center justify-center shadow"
+                                    @onclick="@(() => DeleteSignatureAsync(signature))"
+                                    @onclick:stopPropagation
+                                    @onmousedown:stopPropagation
+                                    title="Signatur entfernen"
+                                    aria-label="Signatur entfernen">
+                                ✕
+                            </button>
+                        </div>
                     }
 
                     @* Pins für alle Sticky Notes auf der aktuellen Seite *@
@@ -594,8 +680,18 @@
     private enum AnnotationMode
     {
         Select,
-        StickyNote
+        StickyNote,
+        Signature
     }
+
+    // Signatur-State (FA-015/016/017)
+    private string? _activeSignatureImage; // Data-URL
+    private string? _activeSignatureFilename;
+    private const int MaxSignatureBytes = 2 * 1024 * 1024; // 2 MB
+    private Dictionary<string, SignatureIntegrityStatus> _signatureStatuses = new();
+
+    private IEnumerable<Annotation> SignaturesOnCurrentPage =>
+        _annotations.Where(a => a.Type == AnnotationType.Signature && a.PageNumber == _currentPage);
 
     private sealed record SelectionDto(
         string Text,
@@ -636,6 +732,7 @@
             _currentPage = 1;
 
             _annotations = await Annotations.GetForDocumentAsync(_currentPdfId.Value, CancellationToken.None);
+            await RecomputeSignatureStatusesAsync();
 
             // Outline ist optional: viele PDFs haben keinen TOC. In dem Fall
             // bleibt _outline null und die Sidebar zeigt einen Hinweis statt
@@ -679,6 +776,9 @@
         _editingHighlight = null;
         _outline = null;
         _outlineOpen = false;
+        _activeSignatureImage = null;
+        _activeSignatureFilename = null;
+        _signatureStatuses.Clear();
     }
 
     private async Task RenderCurrentPageAsync()
@@ -825,8 +925,15 @@
             await SaveEditingAnnotationAsync();
         }
 
-        if (_annotationMode != AnnotationMode.StickyNote) return;
         if (_currentPdfId is null || _handle is null) return;
+
+        if (_annotationMode == AnnotationMode.Signature)
+        {
+            await PlaceSignatureAsync(e);
+            return;
+        }
+
+        if (_annotationMode != AnnotationMode.StickyNote) return;
 
         var fraction = await JS.InvokeAsync<NormalizedPosition?>(
             "pageboundShortcuts.clientPositionToFraction",
@@ -852,6 +959,7 @@
         // Nach dem Erstellen zurück zum Select-Modus — verhindert versehentliche
         // Mehrfach-Erstellung beim Weiterklicken.
         _annotationMode = AnnotationMode.Select;
+        await RecomputeSignatureStatusesAsync();
     }
 
     private void OpenEditor(Annotation annotation)
@@ -881,6 +989,7 @@
             _annotations = _annotations
                 .Select(a => a.Id.Value == saved.Id.Value ? saved : a)
                 .ToList();
+            await RecomputeSignatureStatusesAsync();
         }
 
         _editingAnnotation = null;
@@ -895,6 +1004,7 @@
         _annotations = _annotations.Where(a => a.Id.Value != idToRemove.Value).ToList();
         _editingAnnotation = null;
         _editingContent = string.Empty;
+        await RecomputeSignatureStatusesAsync();
     }
 
     private void CancelEditing()
@@ -904,6 +1014,190 @@
     }
 
     private sealed record NormalizedPosition(double X, double Y);
+
+    // --- PNG-Signatur + Integrität (FA-015, FA-016, FA-017) -----------------
+
+    private async Task HandleSignatureImageSelectedAsync(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        _errorMessage = null;
+
+        if (file.Size > MaxSignatureBytes)
+        {
+            _errorMessage = $"Signaturbild ist zu groß (max {MaxSignatureBytes / 1024} KB).";
+            return;
+        }
+        if (!file.ContentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+        {
+            _errorMessage = "Bitte eine Bilddatei (PNG / JPG) auswählen.";
+            return;
+        }
+
+        try
+        {
+            await using var stream = file.OpenReadStream(MaxSignatureBytes);
+            await using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms);
+            var bytes = ms.ToArray();
+            var base64 = Convert.ToBase64String(bytes);
+            var mime = string.IsNullOrEmpty(file.ContentType) ? "image/png" : file.ContentType;
+            _activeSignatureImage = $"data:{mime};base64,{base64}";
+            _activeSignatureFilename = file.Name;
+            _annotationMode = AnnotationMode.Signature;
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Signaturbild konnte nicht geladen werden: {ex.Message}";
+            _activeSignatureImage = null;
+            _activeSignatureFilename = null;
+        }
+    }
+
+    private void ClearActiveSignature()
+    {
+        _activeSignatureImage = null;
+        _activeSignatureFilename = null;
+        if (_annotationMode == AnnotationMode.Signature)
+        {
+            _annotationMode = AnnotationMode.Select;
+        }
+    }
+
+    private async Task PlaceSignatureAsync(MouseEventArgs e)
+    {
+        if (_activeSignatureImage is null) return;
+        if (_currentPdfId is null) return;
+
+        var fraction = await JS.InvokeAsync<NormalizedPosition?>(
+            "pageboundShortcuts.clientPositionToFraction",
+            PdfImageSelector,
+            e.ClientX,
+            e.ClientY);
+        if (fraction is null) return;
+
+        // Default-Größe: 25 % Breite, 8 % Höhe — ausreichend für eine
+        // handschriftliche Unterschrift. Klick ist Top-Left der Signatur.
+        const double width = 0.25;
+        const double height = 0.08;
+        var x = Math.Min(fraction.X, 1 - width);
+        var y = Math.Min(fraction.Y, 1 - height);
+        var signedAt = DateTimeOffset.UtcNow;
+
+        var newAnnotation = SignatureAnnotation.Create(
+            _currentPdfId.Value,
+            _currentPage,
+            _activeSignatureImage,
+            x, y, width, height,
+            signedAt);
+
+        // Erst Annotation anlegen — damit wir eine echte ID haben.
+        var created = await Annotations.CreateAsync(newAnnotation, CancellationToken.None);
+
+        // Hash berechnen über pdfHash + Bestand vor dieser Signatur + Zeitstempel.
+        var hash = await Integrity.ComputeSignatureHashAsync(
+            _currentPdfId.Value,
+            created,
+            _annotations, // _annotations enthält noch nicht 'created'
+            signedAt,
+            CancellationToken.None);
+
+        // Hash zurück in die Signatur schreiben.
+        var withHash = SignatureAnnotation.WithIntegrityHash(created, hash);
+        var saved = await Annotations.UpdateAsync(withHash, CancellationToken.None);
+
+        _annotations = _annotations.Append(saved).ToList();
+        _signatureStatuses[saved.Id.Value] = SignatureIntegrityStatus.Valid;
+
+        // Nach Platzieren: zurück zum Select-Modus, Signatur bleibt geladen
+        // damit weitere Platzierungen mit derselben Unterschrift möglich sind.
+        _annotationMode = AnnotationMode.Select;
+    }
+
+    private async Task RecomputeSignatureStatusesAsync()
+    {
+        if (_currentPdfId is null)
+        {
+            _signatureStatuses.Clear();
+            return;
+        }
+
+        var newStatuses = new Dictionary<string, SignatureIntegrityStatus>();
+        foreach (var sig in _annotations.Where(a => a.Type == AnnotationType.Signature))
+        {
+            var status = await Integrity.VerifySignatureAsync(
+                _currentPdfId.Value,
+                sig,
+                _annotations,
+                CancellationToken.None);
+            newStatuses[sig.Id.Value] = status;
+        }
+        _signatureStatuses = newStatuses;
+    }
+
+    private async Task DeleteSignatureAsync(Annotation signature)
+    {
+        await Annotations.DeleteAsync(signature.Id, CancellationToken.None);
+        _annotations = _annotations.Where(a => a.Id.Value != signature.Id.Value).ToList();
+        _signatureStatuses.Remove(signature.Id.Value);
+        await RecomputeSignatureStatusesAsync();
+    }
+
+    private async Task HandleSignatureMouseDownAsync(MouseEventArgs e, Annotation signature)
+    {
+        if (_dotNetRef is null) return;
+        // Linke Maustaste nur; ohne diese Prüfung würde Rechtsklick auch
+        // einen Drag-Listener registrieren.
+        if (e.Button != 0) return;
+        try
+        {
+            await JS.InvokeVoidAsync(
+                "pageboundShortcuts.dragElementToFraction",
+                $"[data-pb-signature-id=\"{signature.Id.Value}\"]",
+                PageCanvasSelector,
+                e.ClientX,
+                e.ClientY,
+                _dotNetRef,
+                nameof(HandleSignatureDragCompleteAsync),
+                signature.Id.Value);
+        }
+        catch (JSException)
+        {
+            // Bridge nicht erreichbar — Drag wird einfach nicht starten.
+        }
+    }
+
+    [JSInvokable]
+    public async Task HandleSignatureDragCompleteAsync(string signatureId, double newX, double newY)
+    {
+        var signature = _annotations.FirstOrDefault(a =>
+            a.Id.Value == signatureId && a.Type == AnnotationType.Signature);
+        if (signature is null) return;
+
+        var currentX = SignatureAnnotation.GetX(signature);
+        var currentY = SignatureAnnotation.GetY(signature);
+        // Wenn sich die Position effektiv nicht geändert hat (Klick ohne Bewegung),
+        // sparen wir uns die Persistenz.
+        if (Math.Abs(currentX - newX) < 0.0005 && Math.Abs(currentY - newY) < 0.0005)
+        {
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
+        // Position-Update — Hash bleibt valid, weil Signaturen sich gegenseitig
+        // im Canonical-String nicht enthalten (siehe IntegrityService).
+        var payload = signature.Payload.ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
+        payload[SignatureAnnotation.PayloadKeyX] = newX;
+        payload[SignatureAnnotation.PayloadKeyY] = newY;
+        var updated = signature with
+        {
+            UpdatedAt = DateTimeOffset.UtcNow,
+            Payload = payload
+        };
+        var saved = await Annotations.UpdateAsync(updated, CancellationToken.None);
+        _annotations = _annotations.Select(a => a.Id.Value == saved.Id.Value ? saved : a).ToList();
+
+        await InvokeAsync(StateHasChanged);
+    }
 
     // --- Markdown-Export (FA-080, FA-081, FA-082) ---------------------------
 
@@ -1003,6 +1297,8 @@
         {
             // Ignorieren, harmlose Edge-Case bei sehr früher Tab-Disposal.
         }
+
+        await RecomputeSignatureStatusesAsync();
     }
 
     private void DismissSelection()
@@ -1038,6 +1334,7 @@
         await Annotations.DeleteAsync(id, CancellationToken.None);
         _annotations = _annotations.Where(a => a.Id.Value != id.Value).ToList();
         _editingHighlight = null;
+        await RecomputeSignatureStatusesAsync();
     }
 
     // --- Tastatur-Shortcuts -------------------------------------------------
