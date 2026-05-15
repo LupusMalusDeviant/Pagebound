@@ -357,12 +357,13 @@ export async function renderTextLayerToContainer(
   const page = await doc.getPage(pageNumber);
   const viewport = page.getViewport({ scale: 1 });
 
-  // Container braucht die pb-textLayer-CSS-Klasse — die enthält die
-  // CSS-Custom-Properties (--min-font-size, --text-scale-factor) und die
-  // Selector-Regeln (color:transparent, font-size: calc(...)), ohne die
-  // PDF.js' Spans als schwarzer, riesiger System-Font sichtbar wären.
+  // Container muss die pb-textLayer-CSS-Klasse tragen (kommt aus dem Razor-
+  // Markup, damit Blazor sie bei Re-Renders nicht überschreibt — wenn wir die
+  // hier per classList.add setzen würden, kickt der nächste Werkzeug-Wechsel
+  // den `color: transparent`-Style raus und der Text-Layer wird wieder
+  // sichtbar). Wir kümmern uns hier nur um die dynamischen Teile: innerHTML
+  // leeren, --total-scale-factor setzen.
   container.innerHTML = "";
-  container.classList.add("pb-textLayer");
   // setLayerDimensions in PDF.js setzt width = `calc(var(--total-scale-factor)
   // * pageWidth px)` — wir müssen --total-scale-factor auf das tatsächliche
   // Verhältnis Display-Width/PDF-Width setzen.
@@ -407,7 +408,8 @@ export function clearTextLayer(containerSelector: string): void {
   const container = document.querySelector(containerSelector);
   if (container instanceof HTMLElement) {
     container.innerHTML = "";
-    container.classList.remove("pb-textLayer");
+    // pb-textLayer-Klasse nicht entfernen — Razor verwaltet sie. --total-scale-factor
+    // räumen wir aber auf, damit ein späterer native-Render wieder sauber neu setzt.
     container.style.removeProperty("--total-scale-factor");
   }
 }

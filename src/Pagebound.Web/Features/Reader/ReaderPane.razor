@@ -561,8 +561,12 @@
                     }
                     else
                     {
+                        @* pb-textLayer-Klasse muss als statischer Wert im Razor-Markup stehen —
+                           sonst überschreibt Blazor sie bei jedem Re-Render (z.B. Werkzeug-Wechsel)
+                           und die `color:transparent`-Regel auf den PDF.js-Spans greift nicht mehr,
+                           wodurch der Text-Layer plötzlich wieder sichtbar wird. *@
                         <div data-pb-native-text-layer
-                             class="@($"absolute inset-0 leading-none {textLayerInteractiveCss}")"
+                             class="@($"pb-textLayer {textLayerInteractiveCss}")"
                              aria-hidden="true"></div>
                     }
 

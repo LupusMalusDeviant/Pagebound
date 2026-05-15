@@ -235,7 +235,13 @@
    Window-Resize sorgt der ResizeObserver in pdfjs-bridge.renderTextLayerToContainer
    für die Aktualisierung.
 ============================================================================= */
-.pb-textLayer {
+/* Selektoren auf das data-Attribut zusätzlich zur Klasse — das data-Attribut
+   ist im Razor-Markup statisch gesetzt und kann von Blazor's class-Diffing
+   nicht weggewischt werden (das war der Bug, dass beim Mode-Wechsel der
+   text-Layer plötzlich wieder sichtbar wurde, weil die pb-textLayer-Klasse
+   aus dem JS-classList.add weg war). */
+.pb-textLayer,
+[data-pb-native-text-layer] {
   position: absolute;
   text-align: initial;
   inset: 0;
@@ -255,8 +261,9 @@
   --min-font-size-inv: calc(1 / var(--min-font-size));
 }
 
-.pb-textLayer :is(span, br) {
-  color: transparent;
+.pb-textLayer :is(span, br),
+[data-pb-native-text-layer] :is(span, br) {
+  color: transparent !important;
   position: absolute;
   white-space: pre;
   cursor: text;
@@ -264,7 +271,9 @@
 }
 
 .pb-textLayer > :not(.markedContent),
-.pb-textLayer .markedContent span:not(.markedContent) {
+.pb-textLayer .markedContent span:not(.markedContent),
+[data-pb-native-text-layer] > :not(.markedContent),
+[data-pb-native-text-layer] .markedContent span:not(.markedContent) {
   z-index: 1;
   --font-height: 0;
   font-size: calc(var(--text-scale-factor) * var(--font-height));
@@ -273,13 +282,7 @@
   transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
 }
 
-.pb-textLayer .markedContent {
+.pb-textLayer .markedContent,
+[data-pb-native-text-layer] .markedContent {
   display: contents;
-}
-
-/* Modus: Selection deaktiviert (Sticky-Note + Drawing-Modus) */
-.pb-textLayer.pb-textLayer--inert :is(span, br) {
-  cursor: default;
-  user-select: none;
-  pointer-events: none;
 }

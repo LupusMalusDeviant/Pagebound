@@ -3,29 +3,127 @@
 
 <PageTitle>@L.T("app.title")</PageTitle>
 
-<section class="mx-auto max-w-3xl px-6 py-12">
-    <h1 class="text-3xl font-bold tracking-tight">@L.T("app.title")</h1>
-    <p class="mt-2 text-pb-fg-muted">
-        @L.T("app.tagline")
-        <span class="inline-block rounded bg-pb-accent/10 px-2 py-0.5 text-xs font-medium text-pb-accent">
-            @L.T("app.preAlpha")
-        </span>
-    </p>
+<section class="mx-auto max-w-5xl px-6 py-12">
 
-    <div class="mt-8 rounded-lg border border-pb-border bg-pb-surface p-6">
-        <h2 class="text-lg font-semibold">@L.T("home.nextUp")</h2>
+    @* Hero *@
+    <header>
+        <div class="flex items-baseline gap-3 flex-wrap">
+            <h1 class="text-4xl font-bold tracking-tight">@L.T("app.title")</h1>
+            <span class="inline-block rounded bg-pb-accent/10 px-2 py-0.5 text-xs font-medium text-pb-accent">
+                @L.T("app.preAlpha")
+            </span>
+        </div>
+        <p class="mt-4 text-base text-pb-fg-muted max-w-3xl">@L.T("home.hero.lead")</p>
+        <div class="mt-6 flex flex-wrap gap-2">
+            <a href="/reader"
+               class="inline-block rounded bg-pb-accent px-4 py-2 text-sm text-white hover:opacity-90">
+                @L.T("home.hero.ctaReader")
+            </a>
+            <a href="/library"
+               class="inline-block rounded border border-pb-border bg-pb-surface px-4 py-2 text-sm text-pb-fg hover:bg-pb-bg">
+                @L.T("home.hero.ctaLibrary")
+            </a>
+            <a href="/tools"
+               class="inline-block rounded border border-pb-border bg-pb-surface px-4 py-2 text-sm text-pb-fg hover:bg-pb-bg">
+                @L.T("home.hero.ctaTools")
+            </a>
+        </div>
+    </header>
+
+    @* USP-Cards (FA-015 Signature, FA-070 Sidecar, FA-080 Markdown) *@
+    <section class="mt-12">
+        <h2 class="text-lg font-semibold text-pb-fg-muted uppercase tracking-wide text-xs">
+            @L.T("home.usp.heading")
+        </h2>
+        <div class="mt-3 grid gap-4 sm:grid-cols-3">
+            <article class="rounded-lg border border-pb-border bg-pb-surface p-4">
+                <div class="text-2xl">📝</div>
+                <h3 class="mt-2 text-sm font-semibold">@L.T("home.usp.signature.title")</h3>
+                <p class="mt-1 text-xs text-pb-fg-muted leading-relaxed">@L.T("home.usp.signature.body")</p>
+            </article>
+            <article class="rounded-lg border border-pb-border bg-pb-surface p-4">
+                <div class="text-2xl">📚</div>
+                <h3 class="mt-2 text-sm font-semibold">@L.T("home.usp.library.title")</h3>
+                <p class="mt-1 text-xs text-pb-fg-muted leading-relaxed">@L.T("home.usp.library.body")</p>
+            </article>
+            <article class="rounded-lg border border-pb-border bg-pb-surface p-4">
+                <div class="text-2xl">🔗</div>
+                <h3 class="mt-2 text-sm font-semibold">@L.T("home.usp.markdown.title")</h3>
+                <p class="mt-1 text-xs text-pb-fg-muted leading-relaxed">@L.T("home.usp.markdown.body")</p>
+            </article>
+        </div>
+    </section>
+
+    @* Built-in Features *@
+    <section class="mt-12 rounded-lg border border-pb-border bg-pb-surface p-6">
+        <h2 class="text-lg font-semibold">@L.T("home.builtin.heading")</h2>
         <ul class="mt-3 space-y-2 text-sm">
-            <li>📄 @L.T("home.feature.pdfOpen") <span class="text-pb-fg-muted">(Release 0.1)</span></li>
-            <li>🖊️ @L.T("home.feature.highlight") <span class="text-pb-fg-muted">(Release 0.1 – 0.2)</span></li>
-            <li>📚 @L.T("home.feature.library") <span class="text-pb-fg-muted">(Release 0.5)</span></li>
-            <li>🔒 @L.T("home.feature.signature") <span class="text-pb-fg-muted">(Release 0.4)</span></li>
-            <li>🔗 @L.T("home.feature.markdown") <span class="text-pb-fg-muted">(Release 0.7)</span></li>
+            <li>📄 @L.T("home.builtin.viewer")</li>
+            <li>🖍 @L.T("home.builtin.annotations")</li>
+            <li>✍️ @L.T("home.builtin.signature")</li>
+            <li>🛠 @L.T("home.builtin.tools")</li>
+            <li>🔍 @L.T("home.builtin.ocr")</li>
+            <li>🪟 @L.T("home.builtin.viewerExtras")</li>
         </ul>
-        <p class="mt-4 text-sm text-pb-fg-muted">
+    </section>
+
+    @* Roadmap *@
+    <section class="mt-8">
+        <h2 class="text-lg font-semibold">@L.T("home.status.heading")</h2>
+        <div class="mt-3 overflow-x-auto rounded-lg border border-pb-border bg-pb-surface">
+            <table class="w-full text-sm">
+                <tbody class="divide-y divide-pb-border">
+                    @foreach (var (release, label, status, statusColor) in RoadmapRows())
+                    {
+                        <tr>
+                            <th scope="row" class="text-left px-3 py-2 align-top w-16 font-medium">@release</th>
+                            <td class="px-3 py-2 text-pb-fg-muted">@label</td>
+                            <td class="px-3 py-2 w-32 text-right">
+                                <span class="@($"inline-block rounded px-2 py-0.5 text-xs font-medium {statusColor}")">
+                                    @status
+                                </span>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        <p class="mt-4 text-xs text-pb-fg-muted">
             @((MarkupString)L.T("home.releaseHint", new Dictionary<string, object>
             {
-                ["0"] = "<code class=\"rounded bg-pb-bg px-1 py-0.5 text-xs\">docs/02-lastenheft.md</code>"
+                ["0"] = "<code class=\"rounded bg-pb-bg px-1 py-0.5\">docs/03-pflichtenheft.md</code>"
             }))
         </p>
-    </div>
+    </section>
+
+    @* Anti-Tracking-Hinweis *@
+    <section class="mt-8 rounded-lg border border-pb-border bg-pb-bg p-4 text-xs text-pb-fg-muted">
+        <strong class="text-pb-fg">@L.T("home.privacy.title").</strong>
+        @L.T("home.privacy.body")
+    </section>
 </section>
+
+@code {
+    // Roadmap-Tabelle: erste Spalte Release-Nr, zweite Spalte was drin ist, dritte Spalte Status.
+    // Reihenfolge entspricht docs/02-lastenheft.md Abschnitt 6.
+    private IEnumerable<(string Release, string Label, string Status, string Color)> RoadmapRows()
+    {
+        var done = L.T("home.status.done");
+        var partial = L.T("home.status.partial");
+        var pending = L.T("home.status.pending");
+        var greenPill = "bg-green-500/15 text-green-400";
+        var amberPill = "bg-amber-500/15 text-amber-400";
+        var grayPill = "bg-pb-fg-muted/10 text-pb-fg-muted";
+
+        yield return ("0.1", L.T("home.builtin.viewer"), done, greenPill);
+        yield return ("0.2", L.T("home.builtin.annotations"), done, greenPill);
+        yield return ("0.3", L.T("home.builtin.tools"), done, greenPill);
+        yield return ("0.4", L.T("home.usp.signature.title"), done, greenPill);
+        yield return ("0.5", L.T("home.usp.library.title"), partial, amberPill);
+        yield return ("0.6", "Multi-PDF Split-View", partial, amberPill);
+        yield return ("0.7", L.T("home.usp.markdown.title"), done, greenPill);
+        yield return ("0.8", "AcroForms / Encrypt / Bild→PDF / Compress", partial, amberPill);
+        yield return ("0.9", L.T("home.builtin.ocr"), partial, amberPill);
+        yield return ("1.0", "Polish, A11y, Konvertierungen, Tests", pending, grayPill);
+    }
+}
