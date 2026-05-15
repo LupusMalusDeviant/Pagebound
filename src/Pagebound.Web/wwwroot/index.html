@@ -16,6 +16,25 @@
     <link rel="apple-touch-icon" sizes="512x512" href="icon-512.png" />
     <link rel="apple-touch-icon" sizes="192x192" href="icon-192.png" />
     <script type="importmap"></script>
+    <script>
+        // Pre-boot Theme + Sprache (FA-100/101): noch vor Blazor das gespeicherte
+        // Theme/Sprache aufs <html>-Element setzen, damit der erste Paint schon
+        // mit den richtigen CSS-Variablen läuft (kein Flash of Unstyled Content).
+        (function () {
+            try {
+                var t = window.localStorage.getItem("pb.theme");
+                if (t && t.toLowerCase() !== "auto") {
+                    document.documentElement.setAttribute("data-theme", t.toLowerCase());
+                }
+                var lang = window.localStorage.getItem("pb.lang");
+                if (lang) {
+                    document.documentElement.setAttribute("lang", lang);
+                }
+            } catch (e) {
+                // localStorage gesperrt (Privatsphäre-Modus o.ä.) — Auto-Defaults greifen.
+            }
+        })();
+    </script>
 </head>
 
 <body class="bg-pb-bg text-pb-fg antialiased">

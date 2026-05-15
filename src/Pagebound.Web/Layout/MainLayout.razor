@@ -1,46 +1,63 @@
 @inherits LayoutComponentBase
+@implements IDisposable
+@inject IThemeService Theme
+@inject ILocalizationService L
 
 <div class="flex h-screen w-screen overflow-hidden bg-pb-bg text-pb-fg">
 
     @* Library-Sidebar — auto-collapse beim Lesen, hier vorerst Stub *@
     <aside class="hidden md:flex w-64 flex-col border-r border-pb-border bg-pb-surface"
-           aria-label="Library">
+           aria-label="@L.T("nav.library")">
         <div class="px-4 py-3 border-b border-pb-border">
             <a href="/" class="block">
-                <h1 class="text-lg font-semibold tracking-tight">Pagebound</h1>
-                <p class="text-xs text-pb-fg-muted">Pre-Alpha</p>
+                <h1 class="text-lg font-semibold tracking-tight">@L.T("app.title")</h1>
+                <p class="text-xs text-pb-fg-muted">@L.T("app.preAlpha")</p>
             </a>
         </div>
-        <nav class="flex-1 overflow-y-auto p-2 text-sm space-y-1" aria-label="Hauptnavigation">
+        <nav class="flex-1 overflow-y-auto p-2 text-sm space-y-1" aria-label="@L.T("nav.heading")">
             <NavLink href="/"
                      Match="NavLinkMatch.All"
                      class="block px-2 py-1.5 rounded hover:bg-pb-bg"
                      ActiveClass="bg-pb-bg font-medium text-pb-accent">
-                Start
+                @L.T("nav.start")
             </NavLink>
             <NavLink href="/reader"
                      class="block px-2 py-1.5 rounded hover:bg-pb-bg"
                      ActiveClass="bg-pb-bg font-medium text-pb-accent">
-                Reader (Demo)
+                @L.T("nav.reader")
             </NavLink>
             <NavLink href="/tools"
                      class="block px-2 py-1.5 rounded hover:bg-pb-bg"
                      ActiveClass="bg-pb-bg font-medium text-pb-accent">
-                PDF-Werkzeuge
+                @L.T("nav.tools")
             </NavLink>
-            <div class="mt-4 px-2 text-xs uppercase tracking-wide text-pb-fg-muted">Library</div>
+            <div class="mt-4 px-2 text-xs uppercase tracking-wide text-pb-fg-muted">@L.T("nav.library")</div>
             <span class="block px-2 py-1 text-pb-fg-muted italic">
-                Folgt in Release 0.5.
+                @L.T("nav.libraryComingSoon")
             </span>
         </nav>
     </aside>
 
     @* Hauptbereich (Tabs + Content) *@
     <main class="flex-1 flex flex-col min-w-0" role="main">
-        @* Tab-Leiste — vorerst Stub *@
-        <header class="flex items-center justify-between border-b border-pb-border px-4 h-12">
-            <div class="text-sm text-pb-fg-muted">Tabs — folgt</div>
-            <div class="text-xs text-pb-fg-muted">v0.0.0-pre</div>
+        @* Tab-Leiste — vorerst Stub, rechts Theme + Sprache + Version (FA-100/101) *@
+        <header class="flex items-center justify-between border-b border-pb-border px-4 h-12 gap-3">
+            <div class="text-sm text-pb-fg-muted">@L.T("tabs.comingSoon")</div>
+            <div class="flex items-center gap-2 text-xs">
+                <button type="button"
+                        class="px-2 py-1 rounded border border-pb-border text-pb-fg-muted hover:text-pb-fg hover:bg-pb-surface"
+                        title="@L.T("theme.cycle.title")"
+                        @onclick="CycleThemeAsync">
+                    @ThemeGlyph(Theme.CurrentTheme) @ThemeLabel(Theme.CurrentTheme)
+                </button>
+                <button type="button"
+                        class="px-2 py-1 rounded border border-pb-border text-pb-fg-muted hover:text-pb-fg hover:bg-pb-surface uppercase"
+                        title="@L.T("lang.toggle.title")"
+                        @onclick="ToggleLanguageAsync">
+                    @L.CurrentLanguage
+                </button>
+                <span class="text-pb-fg-muted">@L.T("app.version")</span>
+            </div>
         </header>
 
         <article class="flex-1 overflow-auto">
@@ -48,3 +65,53 @@
         </article>
     </main>
 </div>
+
+@code {
+    protected override void OnInitialized()
+    {
+        Theme.ThemeChanged += OnThemeChanged;
+    }
+
+    public void Dispose()
+    {
+        Theme.ThemeChanged -= OnThemeChanged;
+    }
+
+    private void OnThemeChanged(ThemeName _) => InvokeAsync(StateHasChanged);
+
+    private async Task CycleThemeAsync()
+    {
+        var next = Theme.CurrentTheme switch
+        {
+            ThemeName.Auto => ThemeName.Light,
+            ThemeName.Light => ThemeName.Dark,
+            ThemeName.Dark => ThemeName.Sepia,
+            _ => ThemeName.Auto
+        };
+        await Theme.SetThemeAsync(next, CancellationToken.None);
+    }
+
+    private async Task ToggleLanguageAsync()
+    {
+        // Aktuell nur DE ↔ EN — wenn weitere Sprachen dazukommen, hier auf
+        // einen Dropdown umstellen statt zyklisch.
+        var next = L.CurrentLanguage == "de" ? "en" : "de";
+        await L.SetLanguageAsync(next, CancellationToken.None);
+    }
+
+    private static string ThemeGlyph(ThemeName name) => name switch
+    {
+        ThemeName.Light => "☀",
+        ThemeName.Dark => "🌙",
+        ThemeName.Sepia => "📜",
+        _ => "🌓"
+    };
+
+    private string ThemeLabel(ThemeName name) => name switch
+    {
+        ThemeName.Light => L.T("theme.light"),
+        ThemeName.Dark => L.T("theme.dark"),
+        ThemeName.Sepia => L.T("theme.sepia"),
+        _ => L.T("theme.auto")
+    };
+}

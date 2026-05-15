@@ -611,6 +611,53 @@ export function stopDrawingCapture(): void {
  * proper binary Blob with the given mime type. Used by the PDF-tools save
  * action (FA-020..024) so the resulting PDF is byte-perfect.
  */
+/**
+ * Theme-Switch (FA-100): setzt das `data-theme`-Attribut am <html>-Element
+ * passend zu den CSS-Variablen in `app.src.css`. Ein leerer Name entfernt
+ * das Attribut wieder, dann greift der `prefers-color-scheme`-Fallback.
+ */
+export function applyTheme(name: string): void {
+  const html = document.documentElement;
+  if (name) {
+    html.setAttribute("data-theme", name);
+  } else {
+    html.removeAttribute("data-theme");
+  }
+}
+
+/** Sprache (FA-101) als `lang`-Attribut am <html>-Element setzen. */
+export function applyLang(code: string): void {
+  if (code) {
+    document.documentElement.setAttribute("lang", code);
+  }
+}
+
+/** Voller Seiten-Reload — z.B. nach Sprachwechsel (alles soll neu rendern). */
+export function reload(): void {
+  window.location.reload();
+}
+
+/**
+ * Robuste localStorage-Wrapper. Direktes `IJSRuntime.InvokeAsync("localStorage.getItem", ...)`
+ * funktioniert in Blazor WASM nicht zuverlässig — die Bridge ruft die Methode dort
+ * ohne korrektes `this`-Binding auf. Hier explizit auf `window.localStorage`.
+ */
+export function getStorage(key: string): string | null {
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+export function setStorage(key: string, value: string): void {
+  try {
+    window.localStorage.setItem(key, value);
+  } catch {
+    // Private-Mode / disabled storage — silently ignore.
+  }
+}
+
 export function downloadBytes(
   filename: string,
   base64: string,

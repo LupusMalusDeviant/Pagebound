@@ -8,7 +8,10 @@ self.addEventListener('fetch', event => event.respondWith(onFetch(event)));
 
 const cacheNamePrefix = 'offline-cache-';
 const cacheName = `${cacheNamePrefix}${self.assetsManifest.version}`;
-const offlineAssetsInclude = [ /\.dll$/, /\.pdb$/, /\.wasm/, /\.html/, /\.js$/, /\.json$/, /\.css$/, /\.woff$/, /\.png$/, /\.jpe?g$/, /\.gif$/, /\.ico$/, /\.blat$/, /\.dat$/, /\.webmanifest$/ ];
+// JSON bewusst ausgeklammert: die i18n-Bundles in /resources/*.json wechseln
+// zur Laufzeit (FA-101) — wenn sie im offline-Cache liegen, liefert der SW
+// nach Sprachwechsel wieder das alte Bundle. Stattdessen immer vom Netz holen.
+const offlineAssetsInclude = [ /\.dll$/, /\.pdb$/, /\.wasm/, /\.html/, /\.js$/, /\.css$/, /\.woff$/, /\.png$/, /\.jpe?g$/, /\.gif$/, /\.ico$/, /\.blat$/, /\.dat$/, /\.webmanifest$/ ];
 const offlineAssetsExclude = [ /^service-worker\.js$/ ];
 
 // Replace with your base path if you are hosting on a subfolder. Ensure there is a trailing '/'.
@@ -25,6 +28,14 @@ async function onInstall(event) {
         .filter(asset => !offlineAssetsExclude.some(pattern => pattern.test(asset.url)))
         .map(asset => new Request(asset.url, { integrity: asset.hash, cache: 'no-cache' }));
     await caches.open(cacheName).then(cache => cache.addAll(assetsRequests));
+
+    // skipWaiting: neue SW-Version übernimmt sofort, ohne darauf zu warten,
+    // dass alle Tabs geschlossen werden. Ohne das bleibt der alte SW aktiv
+    // und liefert das Vorgänger-Bundle aus — ein Klick auf "Sprache" hätte
+    // im UI dann keine Wirkung, weil das gecachte JSON / Razor-Code zurück
+    // an den Client geht. Akzeptabler Trade-off im Pre-Alpha: leichtes Risiko
+    // schemainkompatibler Live-Updates gegen drastisch bessere UX bei Releases.
+    self.skipWaiting();
 }
 
 async function onActivate(event) {
@@ -35,11 +46,23 @@ async function onActivate(event) {
     await Promise.all(cacheKeys
         .filter(key => key.startsWith(cacheNamePrefix) && key !== cacheName)
         .map(key => caches.delete(key)));
+
+    // Sofort die Kontrolle über alle offenen Clients übernehmen — Pendant zu
+    // skipWaiting(), damit der erste Reload nach einem Update wirklich den
+    // neuen Code sieht.
+    await self.clients.claim();
 }
 
 async function onFetch(event) {
     let cachedResponse = null;
     if (event.request.method === 'GET') {
+        // i18n-Bundles immer frisch vom Netz holen (s.o.), damit der nächste
+        // Boot nach einem Sprachwechsel garantiert das richtige Bundle bekommt.
+        const url = new URL(event.request.url);
+        if (url.pathname.startsWith('/resources/') && url.pathname.endsWith('.json')) {
+            return fetch(event.request);
+        }
+
         // For all navigation requests, try to serve index.html from cache,
         // unless that request is for an offline resource.
         // If you need some URLs to be server-rendered, edit the following check to exclude those URLs

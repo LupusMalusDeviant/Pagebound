@@ -11,23 +11,23 @@
 @inject IMarkdownExporter MarkdownExporter
 @inject IIntegrityService Integrity
 @inject IStorageService Storage
+@inject ILocalizationService L
 @inject IJSRuntime JS
 @implements IAsyncDisposable
 
-<PageTitle>Reader — Pagebound</PageTitle>
+<PageTitle>@L.T("reader.pageTitle")</PageTitle>
 
 <section class="mx-auto max-w-[1800px] px-4 sm:px-6 lg:px-8 py-8">
     <header class="max-w-4xl mx-auto mb-6">
-        <h1 class="text-2xl font-bold">Reader (Demo)</h1>
+        <h1 class="text-2xl font-bold">@L.T("reader.heading")</h1>
         <p class="mt-1 text-sm text-pb-fg-muted">
-            Erste vertikale Skelett-Iteration für Release 0.1.
-            Volltext-Suche, Outline, Highlights folgen.
+            @L.T("reader.subheading")
         </p>
     </header>
 
     <div class="max-w-4xl mx-auto rounded-lg border border-pb-border bg-pb-surface p-4">
         <label class="flex flex-col gap-2 text-sm">
-            <span class="font-medium">PDF auswählen</span>
+            <span class="font-medium">@L.T("reader.choosePdf")</span>
             <InputFile OnChange="HandleFileSelected"
                        accept=".pdf"
                        class="block text-sm file:mr-3 file:rounded file:border-0 file:bg-pb-accent file:px-3 file:py-1.5 file:text-white file:cursor-pointer cursor-pointer" />
@@ -43,7 +43,7 @@
 
         @if (_isLoading)
         {
-            <div class="mt-3 text-sm text-pb-fg-muted" aria-live="polite">Lade …</div>
+            <div class="mt-3 text-sm text-pb-fg-muted" aria-live="polite">@L.T("app.loadingShort")</div>
         }
     </div>
 
@@ -57,32 +57,32 @@
                            type="search"
                            data-pb-search-input
                            class="flex-1 min-w-0 rounded border border-pb-border bg-pb-bg px-3 py-1.5 text-sm"
-                           placeholder="Im Dokument suchen …  (Strg+F)"
+                           placeholder="@L.T("reader.search.placeholder")"
                            disabled="@_isSearching"
-                           aria-label="Suchbegriff" />
+                           aria-label="@L.T("reader.search.label")" />
                     <button type="submit"
                             class="rounded bg-pb-accent px-3 py-1.5 text-sm text-white disabled:opacity-40"
                             disabled="@(_isSearching || string.IsNullOrWhiteSpace(_searchQuery))">
-                        @(_isSearching ? "Suche …" : "Suchen")
+                        @(_isSearching ? L.T("reader.search.searching") : L.T("reader.search.button"))
                     </button>
                     @if (_searchHits is not null)
                     {
                         <button type="button"
                                 class="rounded border border-pb-border px-2 py-1 text-xs text-pb-fg-muted hover:text-pb-fg"
                                 @onclick="ClearSearch"
-                                aria-label="Suche zurücksetzen">
-                            Zurücksetzen
+                                aria-label="@L.T("reader.search.resetAria")">
+                            @L.T("reader.search.reset")
                         </button>
                     }
                 </div>
                 <div class="mt-2 flex gap-4 text-xs text-pb-fg-muted">
                     <label class="flex items-center gap-1 cursor-pointer">
                         <input type="checkbox" @bind="_matchCase" class="rounded" />
-                        Groß-/Kleinschreibung
+                        @L.T("reader.search.matchCase")
                     </label>
                     <label class="flex items-center gap-1 cursor-pointer">
                         <input type="checkbox" @bind="_wholeWord" class="rounded" />
-                        Ganzes Wort
+                        @L.T("reader.search.wholeWord")
                     </label>
                 </div>
             </form>
@@ -93,24 +93,17 @@
                     @if (_pdfHasNoTextLayer)
                     {
                         <div class="rounded border border-amber-300/40 bg-amber-50/10 px-3 py-2 text-pb-fg">
-                            <div class="font-medium">Diese PDF enthält keinen durchsuchbaren Text.</div>
-                            <p class="mt-1 text-pb-fg-muted">
-                                Wahrscheinlich wurde der Text als Vektor-Pfade gerendert
-                                (typisch für stilisierte Designer-Layouts aus Illustrator,
-                                InDesign oder Figma). Eine Volltext-Suche ist erst möglich,
-                                wenn der Text per OCR erkannt wird — das ist als
-                                Funktion <span class="font-mono">FA-050</span> in
-                                <span class="font-medium">Release 0.9</span> geplant.
-                            </p>
+                            <div class="font-medium">@L.T("reader.search.noTextLayer.title")</div>
+                            <p class="mt-1 text-pb-fg-muted">@L.T("reader.search.noTextLayer.body")</p>
                         </div>
                     }
                     else if (_searchHits.Count == 0)
                     {
-                        <span class="text-pb-fg-muted">Keine Treffer für „<span class="font-medium">@_lastSearched</span>".</span>
+                        <span class="text-pb-fg-muted">@L.T("reader.search.noHits", new Dictionary<string, object> { ["query"] = _lastSearched })</span>
                     }
                     else
                     {
-                        <span><span class="font-medium">@_searchHits.Count</span> Treffer für „<span class="font-medium">@_lastSearched</span>":</span>
+                        <span>@L.T("reader.search.hitsCount", new Dictionary<string, object> { ["count"] = _searchHits.Count, ["query"] = _lastSearched })</span>
                         <ul class="mt-2 max-h-64 overflow-y-auto divide-y divide-pb-border border border-pb-border rounded">
                             @foreach (var hit in _searchHits)
                             {
@@ -122,7 +115,7 @@
                                     <button type="button"
                                             class="block w-full text-left p-2 hover:bg-pb-bg"
                                             @onclick="@(() => GoToPageAsync(hit.PageNumber))">
-                                        <div class="text-xs text-pb-fg-muted">Seite @hit.PageNumber</div>
+                                        <div class="text-xs text-pb-fg-muted">@L.T("reader.search.hitPage", new Dictionary<string, object> { ["page"] = hit.PageNumber })</div>
                                         <div class="text-sm">
                                             @snippetBefore<mark class="bg-pb-accent/20 text-pb-fg rounded px-0.5">@snippetMatch</mark>@snippetAfter
                                         </div>
@@ -137,31 +130,31 @@
 
         <div class="max-w-4xl mx-auto mt-6 flex items-center justify-between gap-3">
             <div class="text-sm">
-                <span class="font-medium">@(_handle.Title ?? "Ohne Titel")</span>
-                <span class="text-pb-fg-muted"> · @_handle.PageCount Seiten</span>
+                <span class="font-medium">@(_handle.Title ?? L.T("common.untitled"))</span>
+                <span class="text-pb-fg-muted"> · @_handle.PageCount @L.T("reader.pages")</span>
             </div>
-            <nav class="flex items-center gap-2" aria-label="Seitennavigation">
+            <nav class="flex items-center gap-2" aria-label="@L.T("reader.pageNav")">
                 <button type="button"
                         class="rounded border border-pb-border px-3 py-1 text-sm disabled:opacity-40"
                         disabled="@(_currentPage <= 1 || _isRendering)"
                         @onclick="PreviousPage">
-                    ‹ Zurück
+                    @L.T("reader.prev")
                 </button>
                 <span class="text-sm tabular-nums">
-                    Seite @_currentPage / @_handle.PageCount
+                    @L.T("reader.pageOfCount", new Dictionary<string, object> { ["current"] = _currentPage, ["total"] = _handle.PageCount })
                 </span>
                 <button type="button"
                         class="rounded border border-pb-border px-3 py-1 text-sm disabled:opacity-40"
                         disabled="@(_currentPage >= _handle.PageCount || _isRendering)"
                         @onclick="NextPage">
-                    Weiter ›
+                    @L.T("reader.next")
                 </button>
             </nav>
         </div>
 
         <div class="max-w-4xl mx-auto mt-3 flex flex-wrap items-center gap-4 text-sm">
             <div class="flex flex-wrap items-center gap-2">
-                <span class="text-pb-fg-muted">Zoom:</span>
+                <span class="text-pb-fg-muted">@L.T("reader.zoom.label")</span>
                 @foreach (var z in _zoomLevels)
                 {
                     var current = z;
@@ -174,24 +167,24 @@
                 }
             </div>
             <div class="flex items-center gap-2">
-                <span class="text-pb-fg-muted">Werkzeug:</span>
+                <span class="text-pb-fg-muted">@L.T("reader.tool.label")</span>
                 <button type="button"
                         class="@($"rounded border px-2 py-0.5 {(_annotationMode == AnnotationMode.Select ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted")}")"
                         @onclick="@(() => SetAnnotationMode(AnnotationMode.Select))"
-                        title="Auswahl-Modus (kein neuer Pin bei Klick)">
-                    Auswählen
+                        title="@L.T("reader.tool.select.title")">
+                    @L.T("reader.tool.select")
                 </button>
                 <button type="button"
                         class="@($"rounded border px-2 py-0.5 {(_annotationMode == AnnotationMode.StickyNote ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted")}")"
                         @onclick="@(() => SetAnnotationMode(AnnotationMode.StickyNote))"
-                        title="Klick aufs PDF erstellt eine neue Notiz">
-                    📝 Notiz
+                        title="@L.T("reader.tool.note.title")">
+                    @L.T("reader.tool.note")
                 </button>
                 @if (_activeSignatureImage is null)
                 {
                     <label class="rounded border border-pb-border bg-pb-bg px-2 py-0.5 text-pb-fg-muted hover:text-pb-fg cursor-pointer"
-                           title="PNG/JPG-Signatur laden, dann zum Platzieren auf das PDF klicken">
-                        ✍️ Signatur laden
+                           title="@L.T("reader.tool.signature.loadTitle")">
+                        @L.T("reader.tool.signature.load")
                         <InputFile OnChange="HandleSignatureImageSelectedAsync"
                                    accept=".png,.jpg,.jpeg,image/png,image/jpeg"
                                    class="hidden" />
@@ -202,22 +195,22 @@
                     <button type="button"
                             class="@($"rounded border px-2 py-0.5 {(_annotationMode == AnnotationMode.Signature ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted")}")"
                             @onclick="@(() => SetAnnotationMode(AnnotationMode.Signature))"
-                            title="Klick aufs PDF platziert die geladene Signatur">
-                        ✍️ @(_activeSignatureFilename ?? "Signatur") platzieren
+                            title="@L.T("reader.tool.signature.placeTitle")">
+                        @L.T("reader.tool.signature.placeFormat", new Dictionary<string, object> { ["name"] = _activeSignatureFilename ?? L.T("reader.tool.signature.defaultName") })
                     </button>
                     <button type="button"
                             class="text-xs text-pb-fg-muted hover:text-pb-fg px-1"
                             @onclick="ClearActiveSignature"
-                            title="Signatur entladen"
-                            aria-label="Signatur entladen">
+                            title="@L.T("reader.tool.signature.unload")"
+                            aria-label="@L.T("reader.tool.signature.unload")">
                         ✕
                     </button>
                 }
                 <button type="button"
                         class="@($"rounded border px-2 py-0.5 text-pb-fg-muted hover:text-pb-fg {(_signerPanelOpen ? "border-pb-accent text-pb-accent" : "border-pb-border")}")"
                         @onclick="@(() => _signerPanelOpen = !_signerPanelOpen)"
-                        title="Unterzeichner-Daten — werden in die Signatur und beim Signiert-Speichern in die PDF-Metadaten geschrieben">
-                    👤 @(string.IsNullOrWhiteSpace(_signer.Name) ? "Unterzeichner …" : _signer.Name)
+                        title="@L.T("reader.signer.toggleTitle")">
+                    @(string.IsNullOrWhiteSpace(_signer.Name) ? L.T("reader.signer.toggleEmpty") : "👤 " + _signer.Name)
                 </button>
                 @if (_annotations.Any(a => a.Type == AnnotationType.Signature))
                 {
@@ -225,63 +218,63 @@
                             class="rounded border border-pb-border bg-pb-bg px-2 py-0.5 text-pb-fg-muted hover:text-pb-fg disabled:opacity-40"
                             disabled="@_isSavingSignedPdf"
                             @onclick="ExportSignedPdfAsync"
-                            title="PDF mit allen platzierten Signaturen und Signer-Metadaten als neue Datei herunterladen">
-                        @(_isSavingSignedPdf ? "Speichere …" : "📥 Signiert speichern")
+                            title="@L.T("reader.signed.saveTitle")">
+                        @(_isSavingSignedPdf ? L.T("reader.signed.saving") : L.T("reader.signed.save"))
                     </button>
                 }
-                <span class="text-pb-fg-muted ml-2">Zeichnen:</span>
+                <span class="text-pb-fg-muted ml-2">@L.T("reader.draw.label")</span>
                 <button type="button"
                         class="@($"rounded border px-2 py-0.5 {(_annotationMode == AnnotationMode.Pen ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted")}")"
                         @onclick="@(() => SetAnnotationMode(AnnotationMode.Pen))"
-                        title="Freihand-Zeichnen mit Maus/Stift (FA-013)">
-                    ✏️ Stift
+                        title="@L.T("reader.draw.pen.title")">
+                    @L.T("reader.draw.pen")
                 </button>
                 <button type="button"
                         class="@($"rounded border px-2 py-0.5 {(_annotationMode == AnnotationMode.RectShape ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted")}")"
                         @onclick="@(() => SetAnnotationMode(AnnotationMode.RectShape))"
-                        title="Rechteck aufziehen (FA-014)">
-                    ▭ Rechteck
+                        title="@L.T("reader.draw.rect.title")">
+                    @L.T("reader.draw.rect")
                 </button>
                 <button type="button"
                         class="@($"rounded border px-2 py-0.5 {(_annotationMode == AnnotationMode.ArrowShape ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted")}")"
                         @onclick="@(() => SetAnnotationMode(AnnotationMode.ArrowShape))"
-                        title="Pfeil ziehen (FA-014)">
-                    ↗ Pfeil
+                        title="@L.T("reader.draw.arrow.title")">
+                    @L.T("reader.draw.arrow")
                 </button>
                 <button type="button"
                         class="@($"rounded border px-2 py-0.5 {(_annotationMode == AnnotationMode.LineShape ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted")}")"
                         @onclick="@(() => SetAnnotationMode(AnnotationMode.LineShape))"
-                        title="Linie ziehen (FA-014)">
-                    ╱ Linie
+                        title="@L.T("reader.draw.line.title")">
+                    @L.T("reader.draw.line")
                 </button>
             </div>
             @if (IsDrawingMode(_annotationMode))
             {
                 <div class="max-w-4xl mx-auto mt-1 flex flex-wrap items-center gap-3 text-xs text-pb-fg-muted">
-                    <span>Farbe:</span>
-                    @foreach (var (label, css) in DrawPalette)
+                    <span>@L.T("reader.draw.color")</span>
+                    @foreach (var (labelKey, css) in DrawPalette)
                     {
                         var c = css;
-                        var l = label;
+                        var label = L.T(labelKey);
                         var isActive = string.Equals(_drawColor, c, StringComparison.OrdinalIgnoreCase);
                         <button type="button"
                                 class="@($"w-6 h-6 rounded-full border {(isActive ? "border-pb-accent ring-2 ring-pb-accent/40" : "border-pb-border")} hover:scale-110 transition-transform")"
                                 style="@($"background-color:{c}")"
-                                title="@l"
-                                aria-label="@($"Stiftfarbe {l}")"
+                                title="@label"
+                                aria-label="@L.T("reader.draw.color.aria", new Dictionary<string, object> { ["label"] = label })"
                                 @onclick="@(() => SetDrawColor(c))"></button>
                     }
-                    <span class="ml-2">Stärke:</span>
-                    @foreach (var (label, fraction) in DrawStrokeWidths)
+                    <span class="ml-2">@L.T("reader.draw.width")</span>
+                    @foreach (var (labelKey, fraction) in DrawStrokeWidths)
                     {
                         var f = fraction;
-                        var l = label;
+                        var label = L.T(labelKey);
                         var isActive = Math.Abs(_drawStrokeWidth - f) < 1e-6;
                         <button type="button"
                                 class="@($"rounded border px-2 py-0.5 {(isActive ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted")}")"
-                                title="@($"Strichstärke {l}")"
+                                title="@L.T("reader.draw.width.title", new Dictionary<string, object> { ["label"] = label })"
                                 @onclick="@(() => SetDrawStrokeWidth(f))">
-                            @l
+                            @label
                         </button>
                     }
                 </div>
@@ -289,20 +282,20 @@
             <div class="flex items-center gap-2">
                 <button type="button"
                         class="@($"rounded border px-2 py-0.5 {(_outlineOpen ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted")}")"
-                        title="Inhaltsverzeichnis ein- bzw. ausblenden"
+                        title="@L.T("reader.outline.toggleTitle")"
                         @onclick="@(() => _outlineOpen = !_outlineOpen)">
-                    📑 Inhalt
+                    @L.T("reader.outline.toggle")
                     @if (_outline is null && _handle is not null)
                     {
-                        <span class="ml-1 text-xs text-pb-fg-muted">(leer)</span>
+                        <span class="ml-1 text-xs text-pb-fg-muted">@L.T("reader.outline.empty")</span>
                     }
                 </button>
                 <button type="button"
                         class="rounded border border-pb-border bg-pb-bg px-2 py-0.5 text-pb-fg-muted hover:text-pb-fg disabled:opacity-40 disabled:cursor-not-allowed"
                         disabled="@(_isExporting || _annotations.Count == 0)"
-                        title="@(_annotations.Count == 0 ? "Noch keine Annotationen zum Exportieren" : "Highlights + Notizen als Markdown exportieren (Obsidian-kompatibel)")"
+                        title="@(_annotations.Count == 0 ? L.T("reader.export.empty") : L.T("reader.export.title"))"
                         @onclick="ExportMarkdownAsync">
-                    @(_isExporting ? "Exportiere …" : "📤 Markdown")
+                    @(_isExporting ? L.T("common.exportingProgress") : L.T("reader.export.button"))
                     @if (!_isExporting && _annotations.Count > 0)
                     {
                         <span class="ml-1 text-xs">(@_annotations.Count)</span>
@@ -315,39 +308,39 @@
         {
             <div class="max-w-4xl mx-auto mt-2 rounded-lg border border-pb-border bg-pb-surface p-3">
                 <div class="flex items-center justify-between mb-2">
-                    <span class="text-sm font-medium">Unterzeichner-Daten</span>
-                    <span class="text-xs text-pb-fg-muted">werden in der Sidecar und beim „Signiert speichern" ins PDF-Info-Dictionary geschrieben</span>
+                    <span class="text-sm font-medium">@L.T("reader.signer.panel.heading")</span>
+                    <span class="text-xs text-pb-fg-muted">@L.T("reader.signer.panel.subheading")</span>
                 </div>
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
                     <label class="flex flex-col gap-1">
-                        <span class="text-xs text-pb-fg-muted">Name <span class="text-red-400">*</span></span>
+                        <span class="text-xs text-pb-fg-muted">@L.T("reader.signer.name") <span class="text-red-400">*</span></span>
                         <input type="text"
                                class="rounded border border-pb-border bg-pb-bg px-2 py-1"
-                               placeholder="Max Mustermann"
+                               placeholder="@L.T("reader.signer.name.placeholder")"
                                value="@_signer.Name"
                                @oninput="@(e => _signer = _signer with { Name = e.Value?.ToString() ?? string.Empty })" />
                     </label>
                     <label class="flex flex-col gap-1">
-                        <span class="text-xs text-pb-fg-muted">E-Mail</span>
+                        <span class="text-xs text-pb-fg-muted">@L.T("reader.signer.email")</span>
                         <input type="email"
                                class="rounded border border-pb-border bg-pb-bg px-2 py-1"
-                               placeholder="max@example.com"
+                               placeholder="@L.T("reader.signer.email.placeholder")"
                                value="@(_signer.Email ?? string.Empty)"
                                @oninput="@(e => _signer = _signer with { Email = NullIfBlank(e.Value?.ToString()) })" />
                     </label>
                     <label class="flex flex-col gap-1">
-                        <span class="text-xs text-pb-fg-muted">Begründung / Anlass</span>
+                        <span class="text-xs text-pb-fg-muted">@L.T("reader.signer.reason")</span>
                         <input type="text"
                                class="rounded border border-pb-border bg-pb-bg px-2 py-1"
-                               placeholder="Vertragsannahme, Auftragsbestätigung, …"
+                               placeholder="@L.T("reader.signer.reason.placeholder")"
                                value="@(_signer.Reason ?? string.Empty)"
                                @oninput="@(e => _signer = _signer with { Reason = NullIfBlank(e.Value?.ToString()) })" />
                     </label>
                     <label class="flex flex-col gap-1">
-                        <span class="text-xs text-pb-fg-muted">Ort</span>
+                        <span class="text-xs text-pb-fg-muted">@L.T("reader.signer.location")</span>
                         <input type="text"
                                class="rounded border border-pb-border bg-pb-bg px-2 py-1"
-                               placeholder="Berlin, Stralsund, …"
+                               placeholder="@L.T("reader.signer.location.placeholder")"
                                value="@(_signer.Location ?? string.Empty)"
                                @oninput="@(e => _signer = _signer with { Location = NullIfBlank(e.Value?.ToString()) })" />
                     </label>
@@ -356,14 +349,14 @@
                     <button type="button"
                             class="text-xs text-pb-fg-muted hover:text-pb-fg"
                             @onclick="@(() => _signerPanelOpen = false)">
-                        Schließen
+                        @L.T("common.close")
                     </button>
                     <button type="button"
                             class="rounded bg-pb-accent px-3 py-1 text-xs text-white disabled:opacity-40"
                             disabled="@(!_signer.IsComplete)"
                             @onclick="SaveSignerToStorageAsync"
-                            title="Daten für alle weiteren Signaturen merken (im Browser)">
-                        Merken
+                            title="@L.T("reader.signer.rememberTitle")">
+                        @L.T("reader.signer.remember")
                     </button>
                 </div>
             </div>
@@ -374,19 +367,19 @@
         @if (_outlineOpen)
         {
             <aside class="w-64 shrink-0 rounded-lg border border-pb-border bg-pb-surface p-3 max-h-[80vh] overflow-y-auto"
-                   aria-label="Inhaltsverzeichnis">
+                   aria-label="@L.T("reader.outline.heading")">
                 <div class="flex items-center justify-between mb-2">
-                    <h3 class="text-sm font-medium">Inhaltsverzeichnis</h3>
+                    <h3 class="text-sm font-medium">@L.T("reader.outline.heading")</h3>
                     <button type="button"
                             class="text-pb-fg-muted hover:text-pb-fg text-xs"
                             @onclick="@(() => _outlineOpen = false)"
-                            aria-label="Inhaltsverzeichnis schließen">
+                            aria-label="@L.T("reader.outline.closeAria")">
                         ✕
                     </button>
                 </div>
                 @if (_outline is null)
                 {
-                    <p class="text-xs text-pb-fg-muted italic">Diese PDF hat kein Inhaltsverzeichnis.</p>
+                    <p class="text-xs text-pb-fg-muted italic">@L.T("reader.outline.noOutline")</p>
                 }
                 else
                 {
@@ -417,7 +410,7 @@
                      @onmouseup="HandleCanvasMouseUpAsync">
                     <img src="@_rasterDataUrl"
                          data-pb-pdf-image
-                         alt="@($"Seite {_currentPage} von {_handle.PageCount}")"
+                         alt="@L.T("reader.imageAlt", new Dictionary<string, object> { ["current"] = _currentPage, ["total"] = _handle.PageCount })"
                          class="block w-full h-full shadow-sm select-none pointer-events-none"
                          draggable="false" />
 
@@ -456,7 +449,7 @@
                             <button type="button"
                                     class="absolute cursor-pointer border-0 p-0"
                                     style="@($"left:{rLeft}%; top:{rTop}%; width:{rWidth}%; height:{rHeight}%; background-color:{color}; mix-blend-mode:multiply; opacity:0.85")"
-                                    aria-label="Markierter Text bearbeiten"
+                                    aria-label="@L.T("reader.highlight.editAria")"
                                     title="@HighlightAnnotation.GetText(highlight)"
                                     @onclick="@(() => OpenHighlightEditor(highlight))"
                                     @onclick:stopPropagation></button>
@@ -578,18 +571,18 @@
                              style="@($"left:{anchorLeftPct}%; top:{anchorTopPct}%; transform: translate(-50%, {translateY})")"
                              @onclick:stopPropagation>
                             <span class="text-xs text-pb-fg-muted mr-1">
-                                @(_editingDrawing.Type == AnnotationType.Ink ? "Stift" : "Form")
+                                @(_editingDrawing.Type == AnnotationType.Ink ? L.T("reader.draw.kind.ink") : L.T("reader.draw.kind.shape"))
                             </span>
                             <button type="button"
                                     class="px-2 py-0.5 text-xs rounded border border-pb-border text-pb-fg-muted hover:text-pb-fg"
                                     @onclick="DeleteEditingDrawingAsync"
-                                    title="Löschen">
-                                🗑 Löschen
+                                    title="@L.T("common.delete")">
+                                @L.T("common.deleteIcon")
                             </button>
                             <button type="button"
                                     class="ml-1 px-1 text-pb-fg-muted hover:text-pb-fg text-sm"
                                     @onclick="@(() => _editingDrawing = null)"
-                                    aria-label="Auswahl verwerfen">✕</button>
+                                    aria-label="@L.T("common.deleteAria")">✕</button>
                         </div>
                     }
 
@@ -607,7 +600,7 @@
                              style="@($"left:{anchorLeft}%; top:{anchorTop}%; transform: translate(-50%, {toolbarTranslateY})")"
                              @onmousedown:preventDefault
                              @onclick:stopPropagation>
-                            <span class="text-xs text-pb-fg-muted mr-1">Markieren:</span>
+                            <span class="text-xs text-pb-fg-muted mr-1">@L.T("reader.highlight.markLabel")</span>
                             @foreach (var color in HighlightPalette)
                             {
                                 var c = color;
@@ -615,13 +608,13 @@
                                         class="w-5 h-5 rounded-full border border-pb-border hover:scale-110 transition-transform"
                                         style="@($"background-color:{c}")"
                                         title="@c"
-                                        aria-label="@($"Mit Farbe {c} markieren")"
+                                        aria-label="@L.T("reader.highlight.colorButtonAria", new Dictionary<string, object> { ["color"] = c })"
                                         @onclick="@(() => HighlightPendingSelectionAsync(c))"></button>
                             }
                             <button type="button"
                                     class="ml-1 px-1 text-pb-fg-muted hover:text-pb-fg text-sm"
                                     @onclick="DismissSelection"
-                                    aria-label="Auswahl verwerfen">✕</button>
+                                    aria-label="@L.T("common.deleteAria")">✕</button>
                         </div>
                     }
 
@@ -640,7 +633,7 @@
                             <div class="absolute z-20 flex items-center gap-1 rounded-md border border-pb-border bg-pb-surface px-2 py-1 shadow-lg"
                                  style="@($"left:{editLeft}%; top:{editTop}%; transform: translate(0, {hlTranslateY})")"
                                  @onclick:stopPropagation>
-                                <span class="text-xs text-pb-fg-muted mr-1">Farbe:</span>
+                                <span class="text-xs text-pb-fg-muted mr-1">@L.T("reader.highlight.colorLabel")</span>
                                 @foreach (var color in HighlightPalette)
                                 {
                                     var c = color;
@@ -653,12 +646,12 @@
                                 <button type="button"
                                         class="ml-1 rounded border border-red-300/40 px-2 py-0.5 text-xs text-red-400 hover:bg-red-50/10"
                                         @onclick="DeleteEditingHighlightAsync">
-                                    Löschen
+                                    @L.T("common.delete")
                                 </button>
                                 <button type="button"
                                         class="ml-1 px-1 text-pb-fg-muted hover:text-pb-fg text-sm"
                                         @onclick="CancelHighlightEditing"
-                                        aria-label="Schließen">✕</button>
+                                        aria-label="@L.T("common.close")">✕</button>
                             </div>
                         }
                     }
@@ -692,20 +685,21 @@
                         };
                         var badgeTitle = status switch
                         {
-                            SignatureIntegrityStatus.Valid => "Integrität geprüft — PDF + Annotationen unverändert seit Signatur",
-                            SignatureIntegrityStatus.Invalid => "Integrität verletzt — PDF oder Annotationen wurden nach der Signatur verändert",
-                            _ => "Kein Integritäts-Hash gespeichert"
+                            SignatureIntegrityStatus.Valid => L.T("reader.signature.statusValid"),
+                            SignatureIntegrityStatus.Invalid => L.T("reader.signature.statusInvalid"),
+                            _ => L.T("reader.signature.statusNoHash")
                         };
                         var signedAtLabel = SignatureAnnotation.GetSignedAt(signature).ToLocalTime().ToString("yyyy-MM-dd HH:mm");
+                        var dragTitle = L.T("reader.signature.dragTitle", new Dictionary<string, object> { ["date"] = signedAtLabel, ["status"] = badgeTitle });
                         <div data-pb-signature-id="@signature.Id.Value"
                              class="absolute @ringClass rounded bg-white/40 cursor-move select-none touch-none"
                              style="@($"left:{sigLeft}%; top:{sigTop}%; width:{sigWidth}%; height:{sigHeight}%")"
-                             title="@($"Signatur von {signedAtLabel} — {badgeTitle} (Ziehen zum Verschieben)")"
+                             title="@dragTitle"
                              @onmousedown="@((MouseEventArgs e) => HandleSignatureMouseDownAsync(e, signature))"
                              @onmousedown:stopPropagation
                              @onclick:stopPropagation>
                             <img src="@SignatureAnnotation.GetImageDataUrl(signature)"
-                                 alt="Signatur"
+                                 alt="@L.T("reader.signature.alt")"
                                  draggable="false"
                                  class="w-full h-full object-contain pointer-events-none" />
                             <span class="absolute -top-2 -right-2 w-5 h-5 rounded-full text-xs text-white flex items-center justify-center shadow @badgeBg pointer-events-none"
@@ -715,16 +709,16 @@
                                     @onclick="@(() => DeleteSignatureAsync(signature))"
                                     @onclick:stopPropagation
                                     @onmousedown:stopPropagation
-                                    title="Signatur entfernen"
-                                    aria-label="Signatur entfernen">
+                                    title="@L.T("reader.signature.removeTitle")"
+                                    aria-label="@L.T("reader.signature.removeTitle")">
                                 ✕
                             </button>
                             <div class="absolute -bottom-2 -right-2 w-5 h-5 rounded-full bg-pb-surface border border-pb-border text-xs text-pb-fg-muted hover:text-pb-accent flex items-center justify-center shadow cursor-nwse-resize"
                                  @onmousedown="@((MouseEventArgs e) => HandleSignatureResizeMouseDownAsync(e, signature))"
                                  @onmousedown:stopPropagation
                                  @onclick:stopPropagation
-                                 title="Größe ändern (ziehen)"
-                                 aria-label="Größe ändern">
+                                 title="@L.T("reader.signature.resizeTitle")"
+                                 aria-label="@L.T("reader.signature.resizeAria")">
                                 ↘
                             </div>
                         </div>
@@ -738,12 +732,12 @@
                         var topPct = (StickyNoteAnnotation.GetY(n) * 100).ToString("F2", CultureInfo.InvariantCulture);
                         var color = StickyNoteAnnotation.GetColor(n);
                         var preview = StickyNoteAnnotation.GetContent(n);
-                        var previewText = string.IsNullOrWhiteSpace(preview) ? "(leer)" : preview;
+                        var previewText = string.IsNullOrWhiteSpace(preview) ? L.T("common.empty") : preview;
                         <button type="button"
                                 class="absolute -translate-x-1/2 -translate-y-1/2 rounded-full border border-pb-border shadow-md w-7 h-7 flex items-center justify-center text-xs hover:scale-110 transition-transform"
                                 style="@($"left:{leftPct}%; top:{topPct}%; background-color:{color}")"
                                 title="@previewText"
-                                aria-label="@($"Notiz auf Seite {n.PageNumber}: {previewText}")"
+                                aria-label="@L.T("reader.note.pinAria", new Dictionary<string, object> { ["page"] = n.PageNumber, ["preview"] = previewText })"
                                 @onclick="@(() => OpenEditor(n))"
                                 @onclick:stopPropagation>
                             📝
@@ -765,18 +759,18 @@
                              style="@($"left:{editLeft}%; top:{editTop}%; transform: translate({translateX}, {translateY})")"
                              @onclick:stopPropagation>
                             <div class="flex items-center justify-between mb-2 gap-2">
-                                <span class="text-xs text-pb-fg-muted">Notiz · Seite @_editingAnnotation.PageNumber</span>
+                                <span class="text-xs text-pb-fg-muted">@L.T("reader.note.contextLabel", new Dictionary<string, object> { ["page"] = _editingAnnotation.PageNumber })</span>
                                 <div class="flex items-center gap-1">
                                     <button type="button"
                                             class="text-xs text-pb-fg-muted hover:text-pb-fg rounded border border-pb-border px-1.5 py-0.5"
                                             @onclick="ToggleEditorPreview"
-                                            title="@(_editorPreviewMode ? "Zum Bearbeiten umschalten" : "Markdown-Vorschau anzeigen")">
-                                        @(_editorPreviewMode ? "Bearbeiten" : "Vorschau")
+                                            title="@(_editorPreviewMode ? L.T("reader.note.toEditTitle") : L.T("reader.note.toPreviewTitle"))">
+                                        @(_editorPreviewMode ? L.T("reader.note.edit") : L.T("reader.note.preview"))
                                     </button>
                                     <button type="button"
                                             class="text-pb-fg-muted hover:text-pb-fg text-sm"
                                             @onclick="CancelEditing"
-                                            aria-label="Schließen">
+                                            aria-label="@L.T("common.close")">
                                         ✕
                                     </button>
                                 </div>
@@ -787,7 +781,7 @@
                                 @if (string.IsNullOrWhiteSpace(_editingContent))
                                 {
                                     <p class="h-28 rounded border border-pb-border bg-pb-bg px-2 py-1 text-sm text-pb-fg-muted italic">
-                                        Keine Notiz erfasst.
+                                        @L.T("reader.note.emptyPreview")
                                     </p>
                                 }
                                 else
@@ -802,19 +796,19 @@
                                 <textarea @bind="_editingContent"
                                           @bind:event="oninput"
                                           class="w-full h-28 rounded border border-pb-border bg-pb-bg px-2 py-1 text-sm resize-none font-mono"
-                                          placeholder="**Markdown** wird unterstützt …"
-                                          aria-label="Notiz-Inhalt"></textarea>
+                                          placeholder="@L.T("reader.note.placeholder")"
+                                          aria-label="@L.T("reader.note.contentAria")"></textarea>
                             }
                             <div class="mt-2 flex gap-2 justify-end">
                                 <button type="button"
                                         class="rounded border border-red-300/40 px-2 py-1 text-xs text-red-400 hover:bg-red-50/10"
                                         @onclick="DeleteEditingAnnotationAsync">
-                                    Löschen
+                                    @L.T("common.delete")
                                 </button>
                                 <button type="button"
                                         class="rounded bg-pb-accent px-3 py-1 text-xs text-white"
                                         @onclick="SaveEditingAnnotationAsync">
-                                    Speichern
+                                    @L.T("common.save")
                                 </button>
                             </div>
                         </div>
@@ -823,34 +817,34 @@
             }
             else
             {
-                <div class="text-sm text-pb-fg-muted py-12">Rendere …</div>
+                <div class="text-sm text-pb-fg-muted py-12">@L.T("common.renderingProgress")</div>
             }
         </figure>
 
         </div> @* /flex-Wrapper Outline+PDF *@
 
         <p class="max-w-4xl mx-auto mt-4 text-xs text-pb-fg-muted">
-            Tastatur:
+            @L.T("reader.shortcuts.label")
             <kbd class="rounded border border-pb-border px-1.5 py-0.5">←</kbd>
             <kbd class="rounded border border-pb-border px-1.5 py-0.5">→</kbd>
-            Seitenwechsel ·
+            @L.T("reader.shortcuts.pageChange") ·
             <kbd class="rounded border border-pb-border px-1.5 py-0.5">Pos1</kbd>
             <kbd class="rounded border border-pb-border px-1.5 py-0.5">Ende</kbd>
-            erste / letzte Seite ·
+            @L.T("reader.shortcuts.firstLast") ·
             <kbd class="rounded border border-pb-border px-1.5 py-0.5">Strg+F</kbd>
-            Suche ·
+            @L.T("reader.shortcuts.search") ·
             <kbd class="rounded border border-pb-border px-1.5 py-0.5">Esc</kbd>
-            Zurücksetzen ·
+            @L.T("reader.shortcuts.reset") ·
             <kbd class="rounded border border-pb-border px-1.5 py-0.5">Strg+ +</kbd>
             <kbd class="rounded border border-pb-border px-1.5 py-0.5">Strg+ −</kbd>
             <kbd class="rounded border border-pb-border px-1.5 py-0.5">Strg+0</kbd>
-            Zoom
+            @L.T("reader.shortcuts.zoom")
         </p>
     }
     else if (!_isLoading)
     {
         <div class="max-w-4xl mx-auto mt-6 rounded-lg border border-dashed border-pb-border p-6 text-center text-sm text-pb-fg-muted">
-            Wähle eine PDF-Datei aus, um sie zu öffnen.
+            @L.T("reader.empty")
         </div>
     }
 </section>
@@ -965,18 +959,19 @@
     // Zeichenwerkzeug-State (FA-013 Stift, FA-014 Formen).
     // Persistente Listener-Verwaltung liegt im JS (shortcuts-bridge), pro
     // pointerdown→up kommt ein Callback zurück mit den 0..1-Punkten.
-    private static readonly (string Label, string Css)[] DrawPalette =
+    // Labels als i18n-Keys; das Markup ruft L.T(labelKey) zum Anzeigen auf.
+    private static readonly (string LabelKey, string Css)[] DrawPalette =
     {
-        ("Schwarz", "#000000"),
-        ("Rot", "#dc2626"),
-        ("Blau", "#2563eb")
+        ("reader.draw.color.black", "#000000"),
+        ("reader.draw.color.red", "#dc2626"),
+        ("reader.draw.color.blue", "#2563eb")
     };
 
-    private static readonly (string Label, double Fraction)[] DrawStrokeWidths =
+    private static readonly (string LabelKey, double Fraction)[] DrawStrokeWidths =
     {
-        ("dünn", 0.002),
-        ("normal", 0.004),
-        ("dick", 0.008)
+        ("reader.draw.width.thin", 0.002),
+        ("reader.draw.width.normal", 0.004),
+        ("reader.draw.width.thick", 0.008)
     };
 
     private string _drawColor = "#000000";
