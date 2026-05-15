@@ -1167,6 +1167,28 @@
     private static string? NullIfBlank(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value;
 
+    /// <summary>
+    /// Optional: SHA-256-Hash einer PDF, die beim Mount automatisch aus
+    /// IndexedDB geladen werden soll (kommt aus dem ?pdf=-URL-Parameter
+    /// der ReaderPage-Wrapper). Wird beim Wechsel des Parameters
+    /// ausgelöst, sodass auch die Navigation zwischen Library-Einträgen
+    /// im selben Pane funktioniert.
+    /// </summary>
+    [Parameter] public string? InitialPdfHash { get; set; }
+
+    private string? _lastAutoOpenedHash;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!string.IsNullOrWhiteSpace(InitialPdfHash) && InitialPdfHash != _lastAutoOpenedHash)
+        {
+            _lastAutoOpenedHash = InitialPdfHash;
+            // Auto-Open ist best-effort: wenn die Bytes nicht (mehr) im
+            // IndexedDB liegen, bleibt der File-Picker für den User.
+            await TryAutoOpenByHashAsync(InitialPdfHash).ConfigureAwait(false);
+        }
+    }
+
     private async Task HandleFileSelected(InputFileChangeEventArgs e)
     {
         _errorMessage = null;
@@ -1177,82 +1199,10 @@
 
         try
         {
-            if (_handle is not null)
-            {
-                await Renderer.UnloadAsync(_handle);
-                _handle = null;
-            }
-
-            _currentFilename = e.File.Name;
             await using var stream = e.File.OpenReadStream(MaxFileSize);
             await using var buffer = new MemoryStream();
             await stream.CopyToAsync(buffer);
-            _originalPdfBytes = buffer.ToArray();
-            buffer.Position = 0;
-
-            // Hash zuerst: damit die Annotations dieser PDF eindeutig zugeordnet
-            // sind, auch wenn der Dateiname sich ändert oder die PDF anderswo
-            // liegt.
-            var hash = await Hasher.ComputeAsync(buffer, HashAlgorithm.Sha256, CancellationToken.None);
-            buffer.Position = 0;
-            _currentPdfId = PdfId.FromHash(hash);
-
-            _handle = await Renderer.LoadAsync(buffer, new LoadOptions(), CancellationToken.None);
-            _currentPage = 1;
-
-            _annotations = await Annotations.GetForDocumentAsync(_currentPdfId.Value, CancellationToken.None);
-            await RecomputeSignatureStatusesAsync();
-
-            // FA-060: Library trackt jede geöffnete PDF — bei Match per SHA-256
-            // wird der bestehende Eintrag aktualisiert (LastOpenedAt etc.), sonst
-            // entsteht ein neuer Eintrag. Fehler hier dürfen den PDF-Open NICHT
-            // blockieren — Library ist Komfort, nicht Pflicht.
-            try
-            {
-                var pdfMeta = new PdfMeta(
-                    Filename: _currentFilename ?? "document.pdf",
-                    FileHashSha256: hash,
-                    FileSize: _originalPdfBytes?.LongLength ?? 0,
-                    PageCount: _handle.PageCount);
-                var existing = await Library.FindByHashAsync(hash, CancellationToken.None);
-                var entry = existing is null
-                    ? new LibraryEntry(
-                        Id: LibraryEntryId.NewId(),
-                        PdfPath: _currentFilename ?? string.Empty,
-                        Title: _handle.Title ?? _currentFilename ?? "document.pdf",
-                        Author: null,
-                        Tags: Array.Empty<string>(),
-                        Rating: null,
-                        AddedAt: DateTimeOffset.UtcNow,
-                        LastOpenedAt: DateTimeOffset.UtcNow,
-                        Progress: new ReadingProgress(1, DateTimeOffset.UtcNow),
-                        PdfMeta: pdfMeta)
-                    : existing with
-                    {
-                        LastOpenedAt = DateTimeOffset.UtcNow,
-                        PdfMeta = pdfMeta
-                    };
-                await Library.AddOrUpdateAsync(entry, CancellationToken.None);
-            }
-            catch
-            {
-                // Library-Tracking ist non-essential; Fehler schlucken wir leise.
-            }
-
-            // Outline ist optional: viele PDFs haben keinen TOC. In dem Fall
-            // bleibt _outline null und die Sidebar zeigt einen Hinweis statt
-            // einer leeren Baumstruktur.
-            try
-            {
-                _outline = await Renderer.GetOutlineAsync(_handle, CancellationToken.None);
-            }
-            catch
-            {
-                _outline = null;
-            }
-            _outlineOpen = _outline is not null;
-
-            await RenderCurrentPageAsync();
+            await LoadPdfBytesAsync(buffer.ToArray(), e.File.Name).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -1265,6 +1215,128 @@
             _isLoading = false;
         }
     }
+
+    /// <summary>
+    /// Lädt eine PDF aus rohen Bytes — entweder direkt aus einem File-Picker
+    /// (HandleFileSelected) oder beim Auto-Open via Library-Klick + IndexedDB-
+    /// gespeicherten Bytes. Persistiert die Bytes für späteres One-Click-
+    /// Wiederöffnen (FA-060), wenn die Datei kleiner als <see cref="MaxPersistBytes"/>
+    /// ist; sehr große PDFs würden sonst die IndexedDB-Quota sprengen.
+    /// </summary>
+    private async Task LoadPdfBytesAsync(byte[] bytes, string filename)
+    {
+        if (_handle is not null)
+        {
+            await Renderer.UnloadAsync(_handle).ConfigureAwait(false);
+            _handle = null;
+        }
+
+        _currentFilename = filename;
+        _originalPdfBytes = bytes;
+
+        await using var buffer = new MemoryStream(bytes, writable: false);
+        var hash = await Hasher.ComputeAsync(buffer, HashAlgorithm.Sha256, CancellationToken.None).ConfigureAwait(false);
+        buffer.Position = 0;
+        _currentPdfId = PdfId.FromHash(hash);
+
+        _handle = await Renderer.LoadAsync(buffer, new LoadOptions(), CancellationToken.None).ConfigureAwait(false);
+        _currentPage = 1;
+
+        _annotations = await Annotations.GetForDocumentAsync(_currentPdfId.Value, CancellationToken.None).ConfigureAwait(false);
+        await RecomputeSignatureStatusesAsync().ConfigureAwait(false);
+
+        // FA-060: Library-Tracking + Persistenz der Bytes für späteres One-Click-Open.
+        try
+        {
+            var pdfMeta = new PdfMeta(
+                Filename: filename,
+                FileHashSha256: hash,
+                FileSize: bytes.LongLength,
+                PageCount: _handle.PageCount);
+            var existing = await Library.FindByHashAsync(hash, CancellationToken.None).ConfigureAwait(false);
+            var entry = existing is null
+                ? new LibraryEntry(
+                    Id: LibraryEntryId.NewId(),
+                    PdfPath: filename,
+                    Title: _handle.Title ?? filename,
+                    Author: null,
+                    Tags: Array.Empty<string>(),
+                    Rating: null,
+                    AddedAt: DateTimeOffset.UtcNow,
+                    LastOpenedAt: DateTimeOffset.UtcNow,
+                    Progress: new ReadingProgress(1, DateTimeOffset.UtcNow),
+                    PdfMeta: pdfMeta)
+                : existing with
+                {
+                    LastOpenedAt = DateTimeOffset.UtcNow,
+                    PdfMeta = pdfMeta
+                };
+            await Library.AddOrUpdateAsync(entry, CancellationToken.None).ConfigureAwait(false);
+
+            if (bytes.LongLength <= MaxPersistBytes)
+            {
+                await Storage.SetBytesAsync(PdfBytesKeyFor(hash), bytes, CancellationToken.None).ConfigureAwait(false);
+            }
+        }
+        catch
+        {
+            // Tracking + Persistenz sind beide non-essential; Fehler schlucken wir leise.
+        }
+
+        try
+        {
+            _outline = await Renderer.GetOutlineAsync(_handle, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch
+        {
+            _outline = null;
+        }
+        _outlineOpen = _outline is not null;
+
+        await RenderCurrentPageAsync().ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Versucht, eine PDF anhand ihres SHA-256-Hashes aus der IndexedDB-
+    /// Persistenz zu laden. Gibt <c>true</c> zurück, wenn die Bytes da waren
+    /// und erfolgreich geladen wurden — sonst <c>false</c> (z.B. nie gespeichert,
+    /// zu groß gewesen, Storage gelöscht). Der Aufrufer muss dann den File-
+    /// Picker anzeigen.
+    /// </summary>
+    public async Task<bool> TryAutoOpenByHashAsync(string hash)
+    {
+        if (string.IsNullOrWhiteSpace(hash)) return false;
+        _errorMessage = null;
+        _isLoading = true;
+        ClearSearchState();
+        ResetAnnotationState();
+        try
+        {
+            var bytes = await Storage.GetBytesAsync(PdfBytesKeyFor(hash), CancellationToken.None).ConfigureAwait(false);
+            if (bytes is null || bytes.Length == 0) return false;
+
+            var entry = await Library.FindByHashAsync(hash, CancellationToken.None).ConfigureAwait(false);
+            var filename = entry?.PdfMeta?.Filename
+                ?? entry?.Title
+                ?? "document.pdf";
+
+            await LoadPdfBytesAsync(bytes, filename).ConfigureAwait(false);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Auto-Open fehlgeschlagen: {ex.Message}";
+            return false;
+        }
+        finally
+        {
+            _isLoading = false;
+            await InvokeAsync(StateHasChanged).ConfigureAwait(false);
+        }
+    }
+
+    private const long MaxPersistBytes = 100L * 1024 * 1024; // 100 MB Cap pro PDF
+    private static string PdfBytesKeyFor(string hash) => $"pdf:bytes:{hash}";
 
     private void ResetAnnotationState()
     {

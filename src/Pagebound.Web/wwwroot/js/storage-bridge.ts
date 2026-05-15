@@ -80,6 +80,23 @@ export async function exists(key: string): Promise<boolean> {
   return count > 0;
 }
 
+/**
+ * Native byte storage — speichert die übergebene Uint8Array direkt in IndexedDB
+ * (Structured-Clone-Algorithmus ohne JSON-Roundtrip). Wird für die PDF-Bytes
+ * der Library-Einträge genutzt (FA-060), damit das Re-Öffnen einer PDF aus der
+ * Library kein erneutes Datei-Auswählen erfordert.
+ */
+export async function setBlob(key: string, bytes: Uint8Array): Promise<void> {
+  await run("readwrite", (store) => store.put(bytes, key));
+}
+
+export async function getBlob(key: string): Promise<Uint8Array | null> {
+  const value = await run<unknown>("readonly", (store) => store.get(key));
+  if (value instanceof Uint8Array) return value;
+  if (value instanceof ArrayBuffer) return new Uint8Array(value);
+  return null;
+}
+
 export async function keys(prefix: string): Promise<string[]> {
   const db = await openDb();
   return new Promise<string[]>((resolve, reject) => {

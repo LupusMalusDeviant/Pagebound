@@ -96,12 +96,29 @@ public sealed class LibraryService : ILibraryService
         try
         {
             await EnsureIndexLoadedAsync(cancellationToken).ConfigureAwait(false);
+            // Vor dem Index-Update den Eintrag holen, damit wir den PDF-Hash
+            // kennen — die persistierten PDF-Bytes liegen unter dem Hash-Key
+            // (pdf:bytes:{hash}, siehe ReaderPane.PdfBytesKeyFor). Wenn die
+            // ungelöscht bleiben würden, sammelt sich IndexedDB-Müll an.
+            var existing = await _storage.GetAsync<LibraryEntry>(KeyFor(id), cancellationToken).ConfigureAwait(false);
             var removed = _indexCache!.RemoveAll(i => i.Value == id.Value) > 0;
             if (removed)
             {
                 await _storage.DeleteAsync(KeyFor(id), cancellationToken).ConfigureAwait(false);
                 await _storage.SetAsync(IndexKey, _indexCache.Select(i => i.Value).ToList(), cancellationToken)
                     .ConfigureAwait(false);
+                if (existing?.PdfMeta is { } meta && !string.IsNullOrEmpty(meta.FileHashSha256))
+                {
+                    try
+                    {
+                        await _storage.DeleteAsync($"pdf:bytes:{meta.FileHashSha256}", cancellationToken)
+                            .ConfigureAwait(false);
+                    }
+                    catch
+                    {
+                        // Best-effort — der Eintrag selbst ist schon weg.
+                    }
+                }
             }
         }
         finally

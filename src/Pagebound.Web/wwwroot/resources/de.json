@@ -103,7 +103,7 @@
   "library.tags.label": "Tags:",
   "library.tags.clear": "Alle",
   "library.count": "{count} Einträge",
-  "library.entry.openTitle": "Im Reader öffnen — du wirst aufgefordert, die PDF erneut auszuwählen, weil der Browser kein Dateisystem hat.",
+  "library.entry.openTitle": "Im Reader öffnen — die PDF wird automatisch aus dem lokalen Cache geladen (PDFs bis 100 MB werden beim ersten Öffnen gespeichert). Falls der Cache leer ist, kommt der Datei-Auswahl-Dialog.",
   "library.entry.removeTitle": "Aus Library entfernen (Annotationen bleiben in IndexedDB)",
   "library.entry.confirmRemove": "Eintrag „{title}\" aus Library entfernen?",
   "library.entry.addedAt": "Hinzugefügt: {date}",

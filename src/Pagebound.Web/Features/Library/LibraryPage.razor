@@ -183,12 +183,19 @@
 
     private void OpenInReaderAsync(LibraryEntry entry)
     {
-        // Browser hat keinen Filesystem-Zugriff — der Reader prompts den User,
-        // die PDF erneut zu wählen. Das Hash-Matching im Reader sorgt dafür,
-        // dass dieselbe Library-Annotations + Library-Eintrag wiedergefunden
-        // werden. Library-spezifisches Auto-Open via File-System-Access-API
-        // kommt in einer späteren Iteration (Chromium-only).
-        Nav.NavigateTo("/reader");
+        // Wenn der Eintrag einen Hash kennt, geben wir ihn dem Reader via
+        // ?pdf=-Query mit — er versucht dann die Bytes aus dem IndexedDB-Cache
+        // wiederherzustellen (Auto-Open, FA-060). Wenn die Bytes nicht (mehr)
+        // gespeichert sind, fällt's still auf den normalen File-Picker zurück.
+        var hash = entry.PdfMeta?.FileHashSha256;
+        if (!string.IsNullOrWhiteSpace(hash))
+        {
+            Nav.NavigateTo($"/reader?pdf={Uri.EscapeDataString(hash)}");
+        }
+        else
+        {
+            Nav.NavigateTo("/reader");
+        }
     }
 
     private async Task OnTagKeydownAsync(KeyboardEventArgs e, LibraryEntry entry)

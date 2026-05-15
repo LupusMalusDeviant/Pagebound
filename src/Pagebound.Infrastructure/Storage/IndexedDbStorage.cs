@@ -63,6 +63,26 @@ public sealed class IndexedDbStorage : IStorageService
             key).ConfigureAwait(false);
     }
 
+    public async Task SetBytesAsync(string key, byte[] bytes, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(key);
+        ArgumentNullException.ThrowIfNull(bytes);
+        await _js.InvokeVoidAsync(
+            $"{JsModuleId}.setBlob",
+            cancellationToken,
+            key,
+            bytes).ConfigureAwait(false);
+    }
+
+    public async Task<byte[]?> GetBytesAsync(string key, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(key);
+        return await _js.InvokeAsync<byte[]?>(
+            $"{JsModuleId}.getBlob",
+            cancellationToken,
+            key).ConfigureAwait(false);
+    }
+
     public async Task<bool> ExistsAsync(string key, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrEmpty(key);
