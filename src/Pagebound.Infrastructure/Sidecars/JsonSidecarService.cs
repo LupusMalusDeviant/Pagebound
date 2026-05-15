@@ -77,7 +77,8 @@ public sealed class JsonSidecarService : ISidecarService
             Rating: null,
             AddedAt: now,
             LastOpenedAt: null,
-            Progress: null);
+            Progress: null,
+            PdfMeta: meta);
 
         var sidecar = new Sidecar(
             SchemaVersion: Sidecar.CurrentSchemaVersion,

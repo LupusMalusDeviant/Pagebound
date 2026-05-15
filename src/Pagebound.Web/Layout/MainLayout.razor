@@ -2,6 +2,8 @@
 @implements IDisposable
 @inject IThemeService Theme
 @inject ILocalizationService L
+@inject ILibraryService LibrarySvc
+@inject NavigationManager Nav
 
 <div class="flex h-screen w-screen overflow-hidden bg-pb-bg text-pb-fg">
 
@@ -31,10 +33,38 @@
                      ActiveClass="bg-pb-bg font-medium text-pb-accent">
                 @L.T("nav.tools")
             </NavLink>
-            <div class="mt-4 px-2 text-xs uppercase tracking-wide text-pb-fg-muted">@L.T("nav.library")</div>
-            <span class="block px-2 py-1 text-pb-fg-muted italic">
-                @L.T("nav.libraryComingSoon")
-            </span>
+            <div class="mt-4 px-2 text-xs uppercase tracking-wide text-pb-fg-muted flex items-center justify-between">
+                <span>@L.T("nav.library")</span>
+                @if (_recent.Count > 0)
+                {
+                    <NavLink href="/library"
+                             class="text-[10px] normal-case tracking-normal text-pb-fg-muted hover:text-pb-fg">
+                        @L.T("nav.library.viewAll")
+                    </NavLink>
+                }
+            </div>
+            @if (_recent.Count == 0)
+            {
+                <span class="block px-2 py-1 text-pb-fg-muted italic text-xs">
+                    @L.T("nav.library.empty")
+                </span>
+            }
+            else
+            {
+                <ul class="space-y-0.5">
+                    @foreach (var entry in _recent)
+                    {
+                        <li>
+                            <button type="button"
+                                    class="block w-full text-left px-2 py-1 rounded text-xs text-pb-fg-muted hover:bg-pb-bg hover:text-pb-fg truncate"
+                                    title="@entry.Title"
+                                    @onclick="@(() => Nav.NavigateTo("/library"))">
+                                @entry.Title
+                            </button>
+                        </li>
+                    }
+                </ul>
+            }
         </nav>
     </aside>
 
@@ -67,14 +97,41 @@
 </div>
 
 @code {
-    protected override void OnInitialized()
+    // "Zuletzt geöffnet" Mini-Liste in der Sidebar (FA-064).
+    private List<LibraryEntry> _recent = new();
+
+    protected override async Task OnInitializedAsync()
     {
         Theme.ThemeChanged += OnThemeChanged;
+        Nav.LocationChanged += OnLocationChanged;
+        await RefreshRecentAsync();
     }
 
     public void Dispose()
     {
         Theme.ThemeChanged -= OnThemeChanged;
+        Nav.LocationChanged -= OnLocationChanged;
+    }
+
+    private async Task RefreshRecentAsync()
+    {
+        try
+        {
+            var query = new LibraryQuery(Sort: LibrarySort.LastOpenedDesc, Take: 5);
+            _recent = (await LibrarySvc.QueryAsync(query, CancellationToken.None)).ToList();
+        }
+        catch
+        {
+            _recent = new();
+        }
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs args)
+    {
+        // Nach Navigation (z.B. zurück vom Reader) Liste neu laden, damit der
+        // gerade geöffnete Eintrag oben in der Sidebar steht.
+        _ = RefreshRecentAsync();
     }
 
     private void OnThemeChanged(ThemeName _) => InvokeAsync(StateHasChanged);

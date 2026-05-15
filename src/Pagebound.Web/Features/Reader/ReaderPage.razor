@@ -12,6 +12,7 @@
 @inject IIntegrityService Integrity
 @inject IStorageService Storage
 @inject ISidecarService Sidecar
+@inject ILibraryService Library
 @inject ILocalizationService L
 @inject IJSRuntime JS
 @implements IAsyncDisposable
@@ -1073,6 +1074,42 @@
 
             _annotations = await Annotations.GetForDocumentAsync(_currentPdfId.Value, CancellationToken.None);
             await RecomputeSignatureStatusesAsync();
+
+            // FA-060: Library trackt jede geöffnete PDF — bei Match per SHA-256
+            // wird der bestehende Eintrag aktualisiert (LastOpenedAt etc.), sonst
+            // entsteht ein neuer Eintrag. Fehler hier dürfen den PDF-Open NICHT
+            // blockieren — Library ist Komfort, nicht Pflicht.
+            try
+            {
+                var pdfMeta = new PdfMeta(
+                    Filename: _currentFilename ?? "document.pdf",
+                    FileHashSha256: hash,
+                    FileSize: _originalPdfBytes?.LongLength ?? 0,
+                    PageCount: _handle.PageCount);
+                var existing = await Library.FindByHashAsync(hash, CancellationToken.None);
+                var entry = existing is null
+                    ? new LibraryEntry(
+                        Id: LibraryEntryId.NewId(),
+                        PdfPath: _currentFilename ?? string.Empty,
+                        Title: _handle.Title ?? _currentFilename ?? "document.pdf",
+                        Author: null,
+                        Tags: Array.Empty<string>(),
+                        Rating: null,
+                        AddedAt: DateTimeOffset.UtcNow,
+                        LastOpenedAt: DateTimeOffset.UtcNow,
+                        Progress: new ReadingProgress(1, DateTimeOffset.UtcNow),
+                        PdfMeta: pdfMeta)
+                    : existing with
+                    {
+                        LastOpenedAt = DateTimeOffset.UtcNow,
+                        PdfMeta = pdfMeta
+                    };
+                await Library.AddOrUpdateAsync(entry, CancellationToken.None);
+            }
+            catch
+            {
+                // Library-Tracking ist non-essential; Fehler schlucken wir leise.
+            }
 
             // Outline ist optional: viele PDFs haben keinen TOC. In dem Fall
             // bleibt _outline null und die Sidebar zeigt einen Hinweis statt

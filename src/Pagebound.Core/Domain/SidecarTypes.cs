@@ -25,7 +25,14 @@ public sealed record LibraryEntry(
     int? Rating,
     DateTimeOffset AddedAt,
     DateTimeOffset? LastOpenedAt,
-    ReadingProgress? Progress);
+    ReadingProgress? Progress,
+    /// <summary>
+    /// PDF-Metadaten (Hash, Größe, Seitenzahl). Optional aus Rückwärtskompatibilität
+    /// mit Sidecars aus früheren Iterationen, wird aber bei jedem neuen Library-Add
+    /// zuverlässig gefüllt — der SHA-256-Hash ist die Identitäts-Quelle für
+    /// <c>FindByHashAsync</c>.
+    /// </summary>
+    PdfMeta? PdfMeta = null);
 
 public sealed record IntegrityRecord(
     HashAlgorithm Algorithm,

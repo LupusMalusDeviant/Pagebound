@@ -4,6 +4,7 @@ using Pagebound.Core.Abstractions;
 using Pagebound.Infrastructure.Annotations;
 using Pagebound.Infrastructure.Crypto;
 using Pagebound.Infrastructure.Export;
+using Pagebound.Infrastructure.Library;
 using Pagebound.Infrastructure.Localization;
 using Pagebound.Infrastructure.Pdf;
 using Pagebound.Infrastructure.Sidecars;
@@ -43,6 +44,7 @@ builder.Services.AddScoped<IIntegrityService, IntegrityService>();
 builder.Services.AddScoped<IThemeService, ThemeService>();
 builder.Services.AddScoped<ILocalizationService, LocalizationService>();
 builder.Services.AddScoped<ISidecarService, JsonSidecarService>();
+builder.Services.AddScoped<ILibraryService, LibraryService>();
 
 var host = builder.Build();
 

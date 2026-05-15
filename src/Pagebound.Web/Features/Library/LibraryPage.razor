@@ -1,0 +1,233 @@
+@page "/library"
+@using System.Globalization
+@using Microsoft.AspNetCore.Components.Web
+@inject ILibraryService Library
+@inject ILocalizationService L
+@inject NavigationManager Nav
+
+<PageTitle>@L.T("library.pageTitle")</PageTitle>
+
+<section class="mx-auto max-w-[1800px] px-4 sm:px-6 lg:px-8 py-8">
+    <header class="max-w-4xl mx-auto mb-6">
+        <h1 class="text-2xl font-bold">@L.T("library.heading")</h1>
+        <p class="mt-1 text-sm text-pb-fg-muted">@L.T("library.subheading")</p>
+    </header>
+
+    @if (_loading)
+    {
+        <div class="max-w-4xl mx-auto text-sm text-pb-fg-muted">@L.T("app.loadingShort")</div>
+    }
+    else if (_entries.Count == 0 && _allTags.Count == 0 && string.IsNullOrWhiteSpace(_search) && _selectedTags.Count == 0)
+    {
+        <div class="max-w-4xl mx-auto rounded-lg border border-dashed border-pb-border bg-pb-surface p-8 text-center">
+            <p class="text-sm text-pb-fg-muted">@L.T("library.empty")</p>
+            <a href="/reader"
+               class="mt-3 inline-block rounded bg-pb-accent px-3 py-1.5 text-sm text-white">
+                @L.T("library.emptyCta")
+            </a>
+        </div>
+    }
+    else
+    {
+        <div class="max-w-4xl mx-auto rounded-lg border border-pb-border bg-pb-surface p-3 flex flex-wrap items-center gap-2 text-sm">
+            <input @bind="_search" @bind:event="oninput" @bind:after="RefreshAsync"
+                   type="search"
+                   class="flex-1 min-w-[16rem] rounded border border-pb-border bg-pb-bg px-3 py-1.5 text-sm"
+                   placeholder="@L.T("library.search.placeholder")"
+                   aria-label="@L.T("library.search.label")" />
+
+            <span class="text-pb-fg-muted">@L.T("library.sort.label")</span>
+            <select @bind="_sort" @bind:after="RefreshAsync"
+                    class="rounded border border-pb-border bg-pb-bg px-2 py-1 text-sm">
+                <option value="@LibrarySort.LastOpenedDesc">@L.T("library.sort.lastOpened")</option>
+                <option value="@LibrarySort.AddedDesc">@L.T("library.sort.added")</option>
+                <option value="@LibrarySort.TitleAsc">@L.T("library.sort.titleAsc")</option>
+                <option value="@LibrarySort.TitleDesc">@L.T("library.sort.titleDesc")</option>
+            </select>
+
+            <span class="ml-auto text-xs text-pb-fg-muted">
+                @L.T("library.count", new Dictionary<string, object> { ["count"] = _entries.Count })
+            </span>
+        </div>
+
+        @if (_allTags.Count > 0)
+        {
+            <div class="max-w-4xl mx-auto mt-2 flex flex-wrap items-center gap-2 text-sm">
+                <span class="text-pb-fg-muted">@L.T("library.tags.label")</span>
+                <button type="button"
+                        class="@($"rounded-full border px-2 py-0.5 text-xs {(_selectedTags.Count == 0 ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted")}")"
+                        @onclick="ClearTagFilter">
+                    @L.T("library.tags.clear")
+                </button>
+                @foreach (var tag in _allTags)
+                {
+                    var t = tag;
+                    var active = _selectedTags.Contains(t);
+                    <button type="button"
+                            class="@($"rounded-full border px-2 py-0.5 text-xs {(active ? "border-pb-accent text-pb-accent bg-pb-accent/10" : "border-pb-border text-pb-fg-muted hover:text-pb-fg")}")"
+                            @onclick="@(() => ToggleTagFilter(t))">
+                        #@t
+                    </button>
+                }
+            </div>
+        }
+
+        <ul class="max-w-4xl mx-auto mt-4 divide-y divide-pb-border rounded-lg border border-pb-border bg-pb-surface">
+            @foreach (var item in _entries)
+            {
+                var entry = item;
+                var pageCount = entry.PdfMeta?.PageCount ?? 0;
+                <li class="p-4 hover:bg-pb-bg/40">
+                    <div class="flex items-start gap-3">
+                        <div class="flex-1 min-w-0">
+                            <button type="button"
+                                    class="text-left font-medium text-pb-fg hover:text-pb-accent truncate block w-full"
+                                    title="@L.T("library.entry.openTitle")"
+                                    @onclick="@(() => OpenInReaderAsync(entry))">
+                                @entry.Title
+                            </button>
+                            <div class="mt-1 flex flex-wrap items-center gap-3 text-xs text-pb-fg-muted">
+                                @if (pageCount > 0)
+                                {
+                                    <span>@L.T("library.entry.pageCount", new Dictionary<string, object> { ["count"] = pageCount })</span>
+                                }
+                                @if (entry.PdfMeta is { } meta && meta.FileSize > 0)
+                                {
+                                    <span>@L.T("library.entry.fileSize", new Dictionary<string, object> { ["size"] = FormatSize(meta.FileSize) })</span>
+                                }
+                                <span>@L.T("library.entry.addedAt", new Dictionary<string, object> { ["date"] = FormatDate(entry.AddedAt) })</span>
+                                <span>
+                                    @(entry.LastOpenedAt is { } lo
+                                        ? L.T("library.entry.lastOpenedAt", new Dictionary<string, object> { ["date"] = FormatDate(lo) })
+                                        : L.T("library.entry.neverOpened"))
+                                </span>
+                            </div>
+                            <div class="mt-2 flex flex-wrap items-center gap-1">
+                                @foreach (var tag in entry.Tags ?? Array.Empty<string>())
+                                {
+                                    var tg = tag;
+                                    <span class="inline-flex items-center gap-1 rounded-full border border-pb-border bg-pb-bg px-2 py-0.5 text-xs text-pb-fg-muted">
+                                        #@tg
+                                        <button type="button"
+                                                class="text-pb-fg-muted hover:text-red-500"
+                                                aria-label="@L.T("library.entry.removeTag.aria", new Dictionary<string, object> { ["tag"] = tg })"
+                                                @onclick="@(() => RemoveTagAsync(entry, tg))">
+                                            ×
+                                        </button>
+                                    </span>
+                                }
+                                <input type="text"
+                                       class="rounded border border-pb-border bg-pb-bg px-2 py-0.5 text-xs w-40"
+                                       placeholder="@L.T("library.entry.addTag.placeholder")"
+                                       aria-label="@L.T("library.entry.addTag.aria")"
+                                       value="@_tagDraft.GetValueOrDefault(entry.Id.Value, string.Empty)"
+                                       @oninput="@(e => _tagDraft[entry.Id.Value] = e.Value?.ToString() ?? string.Empty)"
+                                       @onkeydown="@(e => OnTagKeydownAsync(e, entry))" />
+                            </div>
+                        </div>
+                        <button type="button"
+                                class="text-pb-fg-muted hover:text-red-500"
+                                title="@L.T("library.entry.removeTitle")"
+                                @onclick="@(() => RemoveEntryAsync(entry))">
+                            🗑
+                        </button>
+                    </div>
+                </li>
+            }
+        </ul>
+    }
+</section>
+
+@code {
+    private List<LibraryEntry> _entries = new();
+    private List<string> _allTags = new();
+    private HashSet<string> _selectedTags = new(StringComparer.OrdinalIgnoreCase);
+    private string _search = string.Empty;
+    private LibrarySort _sort = LibrarySort.LastOpenedDesc;
+    private bool _loading = true;
+    // Pro Eintrag-Id hält dieser Cache den aktuell getippten Tag-Entwurf,
+    // damit der Input nicht bei jedem Re-Render geleert wird.
+    private readonly Dictionary<string, string> _tagDraft = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await RefreshAsync();
+    }
+
+    private async Task RefreshAsync()
+    {
+        _loading = true;
+        var query = new LibraryQuery(
+            FullTextSearch: string.IsNullOrWhiteSpace(_search) ? null : _search,
+            Tags: _selectedTags.Count > 0 ? _selectedTags.ToList() : null,
+            Sort: _sort);
+        _entries = (await Library.QueryAsync(query, CancellationToken.None)).ToList();
+        _allTags = (await Library.GetAllTagsAsync(CancellationToken.None)).ToList();
+        _loading = false;
+        StateHasChanged();
+    }
+
+    private void ToggleTagFilter(string tag)
+    {
+        if (_selectedTags.Contains(tag)) _selectedTags.Remove(tag);
+        else _selectedTags.Add(tag);
+        _ = RefreshAsync();
+    }
+
+    private void ClearTagFilter()
+    {
+        if (_selectedTags.Count == 0) return;
+        _selectedTags.Clear();
+        _ = RefreshAsync();
+    }
+
+    private void OpenInReaderAsync(LibraryEntry entry)
+    {
+        // Browser hat keinen Filesystem-Zugriff — der Reader prompts den User,
+        // die PDF erneut zu wählen. Das Hash-Matching im Reader sorgt dafür,
+        // dass dieselbe Library-Annotations + Library-Eintrag wiedergefunden
+        // werden. Library-spezifisches Auto-Open via File-System-Access-API
+        // kommt in einer späteren Iteration (Chromium-only).
+        Nav.NavigateTo("/reader");
+    }
+
+    private async Task OnTagKeydownAsync(KeyboardEventArgs e, LibraryEntry entry)
+    {
+        if (e.Key != "Enter") return;
+        var draft = _tagDraft.GetValueOrDefault(entry.Id.Value, string.Empty).Trim();
+        if (string.IsNullOrEmpty(draft)) return;
+        var existing = entry.Tags ?? Array.Empty<string>();
+        if (existing.Any(t => string.Equals(t, draft, StringComparison.OrdinalIgnoreCase))) return;
+        var newTags = existing.Concat(new[] { draft }).ToList();
+        await Library.AddOrUpdateAsync(entry with { Tags = newTags }, CancellationToken.None);
+        _tagDraft[entry.Id.Value] = string.Empty;
+        await RefreshAsync();
+    }
+
+    private async Task RemoveTagAsync(LibraryEntry entry, string tag)
+    {
+        var newTags = (entry.Tags ?? Array.Empty<string>())
+            .Where(t => !string.Equals(t, tag, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        await Library.AddOrUpdateAsync(entry with { Tags = newTags }, CancellationToken.None);
+        await RefreshAsync();
+    }
+
+    private async Task RemoveEntryAsync(LibraryEntry entry)
+    {
+        // Confirm-Dialog später als eigene UI-Komponente; aktuell direkt löschen.
+        await Library.RemoveAsync(entry.Id, CancellationToken.None);
+        await RefreshAsync();
+    }
+
+    private static string FormatDate(DateTimeOffset dt) =>
+        dt.ToLocalTime().ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+
+    private static string FormatSize(long bytes)
+    {
+        if (bytes < 1024) return $"{bytes} B";
+        if (bytes < 1024L * 1024) return $"{bytes / 1024.0:F0} KB";
+        if (bytes < 1024L * 1024 * 1024) return $"{bytes / (1024.0 * 1024):F1} MB";
+        return $"{bytes / (1024.0 * 1024 * 1024):F1} GB";
+    }
+}
