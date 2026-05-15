@@ -148,6 +148,18 @@
   "reader.export.empty": "No annotations to export yet",
   "reader.export.title": "Export highlights + notes as Markdown (Obsidian-compatible)",
 
+  "reader.sidecar.export": "💾 Save sidecar",
+  "reader.sidecar.exporting": "Saving …",
+  "reader.sidecar.exportTitle": "Save annotations + signatures as <name>.pagebound.json next to the PDF (FA-070)",
+  "reader.sidecar.exportEmpty": "Nothing to save yet",
+  "reader.sidecar.import": "📂 Load sidecar",
+  "reader.sidecar.importTitle": "Load a JSON sidecar — new annotations are added to the existing ones",
+  "reader.sidecar.imported": "Sidecar imported: {added} new annotation(s) from “{filename}”.",
+  "reader.sidecar.importError": "Could not read sidecar: {message}",
+  "reader.sidecar.wrongPdf": "Warning: this sidecar belongs to a different PDF (hash mismatch). Load anyway?",
+  "reader.sidecar.confirmWrongPdfYes": "Load anyway",
+  "reader.sidecar.confirmWrongPdfNo": "Cancel",
+
   "reader.highlight.markLabel": "Highlight:",
   "reader.highlight.colorLabel": "Color:",
   "reader.highlight.colorButtonAria": "Highlight with color {color}",

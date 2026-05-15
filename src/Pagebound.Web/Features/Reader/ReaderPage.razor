@@ -11,6 +11,7 @@
 @inject IMarkdownExporter MarkdownExporter
 @inject IIntegrityService Integrity
 @inject IStorageService Storage
+@inject ISidecarService Sidecar
 @inject ILocalizationService L
 @inject IJSRuntime JS
 @implements IAsyncDisposable
@@ -301,8 +302,34 @@
                         <span class="ml-1 text-xs">(@_annotations.Count)</span>
                     }
                 </button>
+                <button type="button"
+                        class="rounded border border-pb-border bg-pb-bg px-2 py-0.5 text-pb-fg-muted hover:text-pb-fg disabled:opacity-40 disabled:cursor-not-allowed"
+                        disabled="@(_isExportingSidecar || _annotations.Count == 0)"
+                        title="@(_annotations.Count == 0 ? L.T("reader.sidecar.exportEmpty") : L.T("reader.sidecar.exportTitle"))"
+                        @onclick="ExportSidecarAsync">
+                    @(_isExportingSidecar ? L.T("reader.sidecar.exporting") : L.T("reader.sidecar.export"))
+                </button>
+                <label class="rounded border border-pb-border bg-pb-bg px-2 py-0.5 text-pb-fg-muted hover:text-pb-fg cursor-pointer @(_handle is null ? "opacity-40 cursor-not-allowed" : "")"
+                       title="@L.T("reader.sidecar.importTitle")">
+                    @L.T("reader.sidecar.import")
+                    <InputFile OnChange="HandleSidecarFileSelectedAsync"
+                               accept=".json,application/json"
+                               disabled="@(_handle is null)"
+                               class="hidden" />
+                </label>
             </div>
         </div>
+
+        @if (_sidecarStatus is not null)
+        {
+            <div class="@($"max-w-4xl mx-auto mt-2 rounded border px-3 py-2 text-sm {(_sidecarStatusIsError ? "border-red-300/40 bg-red-50/10 text-pb-fg" : "border-green-300/40 bg-green-50/10 text-pb-fg")}")">
+                @_sidecarStatus
+                <button type="button"
+                        class="float-right text-pb-fg-muted hover:text-pb-fg ml-2"
+                        @onclick="@(() => _sidecarStatus = null)"
+                        aria-label="@L.T("common.close")">✕</button>
+            </div>
+        }
 
         @if (_signerPanelOpen)
         {
@@ -889,6 +916,9 @@
     private PdfId? _currentPdfId;
     private string? _currentFilename;
     private bool _isExporting;
+    private bool _isExportingSidecar;
+    private string? _sidecarStatus;
+    private bool _sidecarStatusIsError;
     private IReadOnlyList<Annotation> _annotations = Array.Empty<Annotation>();
     private AnnotationMode _annotationMode = AnnotationMode.Select;
     private Annotation? _editingAnnotation;
@@ -1923,6 +1953,131 @@
         finally
         {
             _isExporting = false;
+        }
+    }
+
+    // --- Sidecar Export/Import (FA-070, FA-071, FA-073) ---------------------
+
+    private async Task ExportSidecarAsync()
+    {
+        if (_currentPdfId is null || _handle is null || _isExportingSidecar) return;
+        _isExportingSidecar = true;
+        _sidecarStatus = null;
+        try
+        {
+            var meta = new PdfMeta(
+                Filename: _currentFilename ?? "document.pdf",
+                FileHashSha256: _currentPdfId.Value.Value,
+                FileSize: _originalPdfBytes?.LongLength ?? 0,
+                PageCount: _handle.PageCount);
+            var template = await Sidecar.CreateNewAsync(_currentFilename ?? string.Empty, meta, CancellationToken.None)
+                .ConfigureAwait(false);
+            var withAnnotations = template with
+            {
+                UpdatedAt = DateTimeOffset.UtcNow,
+                Annotations = _annotations.ToList()
+            };
+            var json = await Sidecar.SerializeAsync(withAnnotations, CancellationToken.None).ConfigureAwait(false);
+            var sidecarFilename = BuildSidecarFilename(_currentFilename);
+            await JS.InvokeVoidAsync(
+                "pageboundShortcuts.downloadFile",
+                sidecarFilename,
+                json,
+                "application/json");
+        }
+        catch (Exception ex)
+        {
+            _sidecarStatus = L.T("reader.sidecar.importError",
+                new Dictionary<string, object> { ["message"] = ex.Message });
+            _sidecarStatusIsError = true;
+        }
+        finally
+        {
+            _isExportingSidecar = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private static string BuildSidecarFilename(string? pdfFilename)
+    {
+        var baseName = string.IsNullOrWhiteSpace(pdfFilename) ? "document" : pdfFilename;
+        if (baseName.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
+        {
+            baseName = baseName.Substring(0, baseName.Length - 4);
+        }
+        // Defensive: gleicher Safe-Zeichensatz wie beim Markdown-Export.
+        var safeBase = string.Concat(baseName.Select(c =>
+            char.IsLetterOrDigit(c) || c is '_' or '-' or '.' or ' ' ? c : '_'));
+        return $"{safeBase}.pagebound.json";
+    }
+
+    private async Task HandleSidecarFileSelectedAsync(InputFileChangeEventArgs e)
+    {
+        if (_currentPdfId is null) return;
+        var file = e.File;
+        if (file is null) return;
+        _sidecarStatus = null;
+
+        try
+        {
+            const long maxBytes = 50L * 1024 * 1024; // 50 MB hardcap für JSON
+            await using var stream = file.OpenReadStream(maxBytes);
+            await using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms).ConfigureAwait(false);
+            ms.Position = 0;
+
+            var parsed = await Sidecar.ParseAsync(ms, CancellationToken.None).ConfigureAwait(false);
+            if (parsed is null)
+            {
+                _sidecarStatus = L.T("reader.sidecar.importError",
+                    new Dictionary<string, object> { ["message"] = "JSON nicht parsebar oder kein Sidecar-Format" });
+                _sidecarStatusIsError = true;
+                return;
+            }
+
+            var migration = await Sidecar.MigrateAsync(parsed, CancellationToken.None).ConfigureAwait(false);
+            var sidecar = migration.Result;
+
+            // Hash-Mismatch macht den Import nicht ungültig (User könnte z.B.
+            // dieselbe PDF nur leicht modifiziert haben), aber wir warnen
+            // sichtbar in der Status-Box.
+            var wrongPdf = !string.Equals(
+                sidecar.PdfMeta.FileHashSha256,
+                _currentPdfId.Value.Value,
+                StringComparison.OrdinalIgnoreCase);
+
+            var pdfId = _currentPdfId.Value;
+            var existingIds = _annotations.Select(a => a.Id.Value).ToHashSet();
+            var newAnnotations = new List<Annotation>();
+            foreach (var imported in sidecar.Annotations)
+            {
+                // Sidecar-Annotation gehört eigentlich zu einer anderen pdfId.
+                // Wir nehmen Type/Page/Payload und erzeugen darauf eine frische
+                // Annotation im AnnotationService (frische Id, korrekte pdfId,
+                // sofortige Persistenz via IndexedDB).
+                if (existingIds.Contains(imported.Id.Value)) continue;
+                var fresh = await Annotations.CreateAsync(
+                    new NewAnnotation(pdfId, imported.Type, imported.PageNumber, imported.Payload),
+                    CancellationToken.None).ConfigureAwait(false);
+                newAnnotations.Add(fresh);
+            }
+            _annotations = _annotations.Concat(newAnnotations).ToList();
+
+            _sidecarStatus = wrongPdf
+                ? $"{L.T("reader.sidecar.wrongPdf")} — {L.T("reader.sidecar.imported", new Dictionary<string, object> { ["added"] = newAnnotations.Count, ["filename"] = file.Name })}"
+                : L.T("reader.sidecar.imported",
+                    new Dictionary<string, object> { ["added"] = newAnnotations.Count, ["filename"] = file.Name });
+            _sidecarStatusIsError = wrongPdf;
+        }
+        catch (Exception ex)
+        {
+            _sidecarStatus = L.T("reader.sidecar.importError",
+                new Dictionary<string, object> { ["message"] = ex.Message });
+            _sidecarStatusIsError = true;
+        }
+        finally
+        {
+            await InvokeAsync(StateHasChanged);
         }
     }
 

@@ -6,6 +6,7 @@ using Pagebound.Infrastructure.Crypto;
 using Pagebound.Infrastructure.Export;
 using Pagebound.Infrastructure.Localization;
 using Pagebound.Infrastructure.Pdf;
+using Pagebound.Infrastructure.Sidecars;
 using Pagebound.Infrastructure.Storage;
 using Pagebound.Infrastructure.Telemetry;
 using Pagebound.Infrastructure.Theme;
@@ -41,8 +42,7 @@ builder.Services.AddScoped<IMarkdownExporter, MarkdownExporter>();
 builder.Services.AddScoped<IIntegrityService, IntegrityService>();
 builder.Services.AddScoped<IThemeService, ThemeService>();
 builder.Services.AddScoped<ILocalizationService, LocalizationService>();
-
-// TODO Release 0.1: ISidecarService.
+builder.Services.AddScoped<ISidecarService, JsonSidecarService>();
 
 var host = builder.Build();
 

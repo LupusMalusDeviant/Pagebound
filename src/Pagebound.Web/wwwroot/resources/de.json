@@ -148,6 +148,18 @@
   "reader.export.empty": "Noch keine Annotationen zum Exportieren",
   "reader.export.title": "Highlights + Notizen als Markdown exportieren (Obsidian-kompatibel)",
 
+  "reader.sidecar.export": "💾 Sidecar speichern",
+  "reader.sidecar.exporting": "Speichere …",
+  "reader.sidecar.exportTitle": "Annotationen + Signaturen als <name>.pagebound.json neben die PDF speichern (FA-070)",
+  "reader.sidecar.exportEmpty": "Noch keine Daten zum Sichern",
+  "reader.sidecar.import": "📂 Sidecar laden",
+  "reader.sidecar.importTitle": "JSON-Sidecar laden — neue Annotationen werden zu den bereits vorhandenen hinzugefügt",
+  "reader.sidecar.imported": "Sidecar importiert: {added} neue Annotation(en) aus „{filename}\".",
+  "reader.sidecar.importError": "Sidecar konnte nicht gelesen werden: {message}",
+  "reader.sidecar.wrongPdf": "Achtung: Sidecar gehört zu einer anderen PDF (Hash weicht ab). Trotzdem laden?",
+  "reader.sidecar.confirmWrongPdfYes": "Trotzdem laden",
+  "reader.sidecar.confirmWrongPdfNo": "Abbrechen",
+
   "reader.highlight.markLabel": "Markieren:",
   "reader.highlight.colorLabel": "Farbe:",
   "reader.highlight.colorButtonAria": "Mit Farbe {color} markieren",
