@@ -74,6 +74,8 @@ src/Pagebound.Web/wwwroot/js/pdf-manipulator-bridge.js
 src/Pagebound.Web/wwwroot/js/pdf-manipulator-bridge.js.map
 src/Pagebound.Web/wwwroot/js/ocr-bridge.js
 src/Pagebound.Web/wwwroot/js/ocr-bridge.js.map
+src/Pagebound.Web/wwwroot/js/file-handle-bridge.js
+src/Pagebound.Web/wwwroot/js/file-handle-bridge.js.map
 src/Pagebound.Web/wwwroot/js/pdf.worker.min.mjs
 
 # --- Playwright ------------------------------------------------------------

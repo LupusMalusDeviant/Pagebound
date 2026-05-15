@@ -13,6 +13,7 @@
 @inject ISidecarService Sidecar
 @inject ILibraryService Library
 @inject IOcrService Ocr
+@inject IFileHandleService Files
 @inject ILocalizationService L
 @inject IJSRuntime JS
 @implements IAsyncDisposable
@@ -28,9 +29,26 @@
     <div class="max-w-4xl mx-auto rounded-lg border border-pb-border bg-pb-surface p-4">
         <label class="flex flex-col gap-2 text-sm">
             <span class="font-medium">@L.T("reader.choosePdf")</span>
-            <InputFile OnChange="HandleFileSelected"
-                       accept=".pdf"
-                       class="block text-sm file:mr-3 file:rounded file:border-0 file:bg-pb-accent file:px-3 file:py-1.5 file:text-white file:cursor-pointer cursor-pointer" />
+            @if (_fsaSupported)
+            {
+                @* File-System-Access-API: zeigt einen nativen Picker, dessen
+                   Handle wir nach dem ersten Open in IndexedDB persistieren.
+                   Späteres Wieder-Öffnen aus der Library kommt dann mit
+                   höchstens einem dezenten Permission-Dialog statt einem
+                   weiteren File-Picker durch. *@
+                <button type="button"
+                        class="self-start rounded bg-pb-accent px-3 py-1.5 text-sm text-white disabled:opacity-40"
+                        disabled="@_isLoading"
+                        @onclick="PickPdfViaFsaAsync">
+                    📂 @L.T("reader.choosePdf")
+                </button>
+            }
+            else
+            {
+                <InputFile OnChange="HandleFileSelected"
+                           accept=".pdf"
+                           class="block text-sm file:mr-3 file:rounded file:border-0 file:bg-pb-accent file:px-3 file:py-1.5 file:text-white file:cursor-pointer cursor-pointer" />
+            }
         </label>
 
         @if (_errorMessage is not null)
@@ -1223,7 +1241,7 @@
     /// Wiederöffnen (FA-060), wenn die Datei kleiner als <see cref="MaxPersistBytes"/>
     /// ist; sehr große PDFs würden sonst die IndexedDB-Quota sprengen.
     /// </summary>
-    private async Task LoadPdfBytesAsync(byte[] bytes, string filename)
+    private async Task LoadPdfBytesAsync(byte[] bytes, string filename, string? tempHandleId = null)
     {
         if (_handle is not null)
         {
@@ -1277,6 +1295,23 @@
             {
                 await Storage.SetBytesAsync(PdfBytesKeyFor(hash), bytes, CancellationToken.None).ConfigureAwait(false);
             }
+
+            // File-System-Access-API: Wenn der initiale Pick ein Handle
+            // mitgeliefert hat, jetzt unter dem PDF-Hash persistieren. Ab dann
+            // kann der Library-Klick die Datei via Permission-Dialog
+            // reaktivieren statt über den Bytes-Cache zu gehen — auch wenn
+            // die PDF gar nicht oder nicht mehr im Cache liegt.
+            if (!string.IsNullOrEmpty(tempHandleId))
+            {
+                try
+                {
+                    await Files.PersistHandleAsync(tempHandleId, hash, CancellationToken.None).ConfigureAwait(false);
+                }
+                catch
+                {
+                    // Best-effort — beim nächsten Open wird notfalls neu gepickt.
+                }
+            }
         }
         catch
         {
@@ -1312,6 +1347,17 @@
         ResetAnnotationState();
         try
         {
+            // 1) File-System-Access-API: gespeichertes Handle reaktivieren —
+            //    der User bekommt höchstens einen Permission-Dialog, keinen
+            //    weiteren File-Picker. Funktioniert nur in Chromium.
+            var reopened = await Files.TryReopenAsync(hash, CancellationToken.None).ConfigureAwait(false);
+            if (reopened is not null)
+            {
+                await LoadPdfBytesAsync(reopened.Bytes, reopened.Filename).ConfigureAwait(false);
+                return true;
+            }
+
+            // 2) Bytes-Cache aus IndexedDB (alle Browser, Cap 100 MB).
             var bytes = await Storage.GetBytesAsync(PdfBytesKeyFor(hash), CancellationToken.None).ConfigureAwait(false);
             if (bytes is null || bytes.Length == 0) return false;
 
@@ -1337,6 +1383,55 @@
 
     private const long MaxPersistBytes = 100L * 1024 * 1024; // 100 MB Cap pro PDF
     private static string PdfBytesKeyFor(string hash) => $"pdf:bytes:{hash}";
+
+    // File-System-Access-API (Chromium). Im Pane gecached, damit die Markup-
+    // Variante (Button vs InputFile) nicht jedes Re-Render einen JS-Roundtrip
+    // braucht.
+    private bool _fsaSupported;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _fsaSupported = await Files.IsSupportedAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+        catch
+        {
+            _fsaSupported = false;
+        }
+    }
+
+    /// <summary>
+    /// Klick-Handler für den FSA-Open-Button. Lädt die gewählte PDF in den
+    /// Reader und persistiert das File-Handle unter ihrem SHA-256-Hash —
+    /// damit kann ein späterer Library-Klick die Datei ohne weiteren Picker
+    /// wieder öffnen.
+    /// </summary>
+    private async Task PickPdfViaFsaAsync()
+    {
+        _errorMessage = null;
+        _isLoading = true;
+        _rasterDataUrl = null;
+        ClearSearchState();
+        ResetAnnotationState();
+        try
+        {
+            var picked = await Files.PickPdfAsync(CancellationToken.None).ConfigureAwait(false);
+            if (picked is null) return; // User-canceled
+            await LoadPdfBytesAsync(picked.Bytes, picked.Filename, picked.TempHandleId).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"PDF konnte nicht geöffnet werden: {ex.Message}";
+            _handle = null;
+            ResetAnnotationState();
+        }
+        finally
+        {
+            _isLoading = false;
+            await InvokeAsync(StateHasChanged).ConfigureAwait(false);
+        }
+    }
 
     private void ResetAnnotationState()
     {

@@ -47,6 +47,7 @@ builder.Services.AddScoped<ILocalizationService, LocalizationService>();
 builder.Services.AddScoped<ISidecarService, JsonSidecarService>();
 builder.Services.AddScoped<ILibraryService, LibraryService>();
 builder.Services.AddScoped<IOcrService, TesseractOcrService>();
+builder.Services.AddScoped<IFileHandleService, FileSystemAccessHandleService>();
 
 var host = builder.Build();
 

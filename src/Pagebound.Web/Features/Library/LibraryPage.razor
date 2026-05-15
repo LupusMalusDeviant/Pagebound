@@ -2,6 +2,7 @@
 @using System.Globalization
 @using Microsoft.AspNetCore.Components.Web
 @inject ILibraryService Library
+@inject IFileHandleService Files
 @inject ILocalizationService L
 @inject NavigationManager Nav
 
@@ -224,6 +225,14 @@
     {
         // Confirm-Dialog später als eigene UI-Komponente; aktuell direkt löschen.
         await Library.RemoveAsync(entry.Id, CancellationToken.None);
+        // Auch das persistierte FSA-File-Handle aufräumen (Chromium-only,
+        // sonst no-op). Sonst hängen Handles in IndexedDB obwohl der Eintrag
+        // schon weg ist.
+        var hash = entry.PdfMeta?.FileHashSha256;
+        if (!string.IsNullOrEmpty(hash))
+        {
+            await Files.ClearHandleAsync(hash, CancellationToken.None);
+        }
         await RefreshAsync();
     }
 

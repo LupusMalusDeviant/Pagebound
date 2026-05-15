@@ -59,6 +59,12 @@ const builds = [
     globalName: "pageboundOcr",
     entryPoints: [resolve(__dirname, "wwwroot/js/ocr-bridge.ts")],
     outfile: resolve(__dirname, "wwwroot/js/ocr-bridge.js")
+  },
+  {
+    ...sharedOptions,
+    globalName: "pageboundFiles",
+    entryPoints: [resolve(__dirname, "wwwroot/js/file-handle-bridge.ts")],
+    outfile: resolve(__dirname, "wwwroot/js/file-handle-bridge.js")
   }
 ];
 
