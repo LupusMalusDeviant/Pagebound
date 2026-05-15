@@ -290,6 +290,18 @@
                     }
                 </button>
                 <button type="button"
+                        class="@($"rounded border px-2 py-0.5 {(_thumbsOpen ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted")}")"
+                        title="@L.T("reader.thumbs.toggleTitle")"
+                        @onclick="ToggleThumbsAsync">
+                    @L.T("reader.thumbs.toggle")
+                    @if (_thumbsOpen && _handle is not null && _thumbnailsProgress < _handle.PageCount)
+                    {
+                        <span class="ml-1 text-xs text-pb-fg-muted">
+                            @L.T("reader.thumbs.loading", new Dictionary<string, object> { ["current"] = _thumbnailsProgress, ["total"] = _handle.PageCount })
+                        </span>
+                    }
+                </button>
+                <button type="button"
                         class="rounded border border-pb-border bg-pb-bg px-2 py-0.5 text-pb-fg-muted hover:text-pb-fg disabled:opacity-40 disabled:cursor-not-allowed"
                         disabled="@(_isExporting || _annotations.Count == 0)"
                         title="@(_annotations.Count == 0 ? L.T("reader.export.empty") : L.T("reader.export.title"))"
@@ -412,6 +424,53 @@
                         @foreach (var entry in _outline.Entries)
                         {
                             <OutlineNode Entry="entry" OnNavigate="GoToPageAsync" />
+                        }
+                    </ul>
+                }
+            </aside>
+        }
+
+        @if (_thumbsOpen)
+        {
+            <aside class="w-44 shrink-0 rounded-lg border border-pb-border bg-pb-surface p-2 max-h-[80vh] overflow-y-auto"
+                   aria-label="@L.T("reader.thumbs.heading")">
+                <div class="flex items-center justify-between mb-2 px-1">
+                    <h3 class="text-sm font-medium">@L.T("reader.thumbs.heading")</h3>
+                    <button type="button"
+                            class="text-pb-fg-muted hover:text-pb-fg text-xs"
+                            @onclick="@(() => _thumbsOpen = false)"
+                            aria-label="@L.T("reader.thumbs.closeAria")">
+                        ✕
+                    </button>
+                </div>
+                @if (_handle is not null)
+                {
+                    <ul class="space-y-2">
+                        @for (var i = 1; i <= _handle.PageCount; i++)
+                        {
+                            var pageNum = i;
+                            var thumb = _thumbnails.GetValueOrDefault(pageNum);
+                            var isCurrent = pageNum == _currentPage;
+                            <li>
+                                <button type="button"
+                                        class="@($"w-full flex flex-col items-center gap-1 rounded border p-1 hover:border-pb-fg-muted {(isCurrent ? "border-pb-accent ring-2 ring-pb-accent/30" : "border-pb-border")}")"
+                                        title="@L.T("reader.thumbs.pageAria", new Dictionary<string, object> { ["page"] = pageNum })"
+                                        aria-label="@L.T("reader.thumbs.pageAria", new Dictionary<string, object> { ["page"] = pageNum })"
+                                        @onclick="@(() => GoToPageAsync(pageNum))">
+                                    @if (thumb is not null)
+                                    {
+                                        <img src="@thumb"
+                                             alt="@L.T("reader.thumbs.pageLabel", new Dictionary<string, object> { ["page"] = pageNum })"
+                                             draggable="false"
+                                             class="block w-full h-auto bg-pb-bg shadow-sm" />
+                                    }
+                                    else
+                                    {
+                                        <div class="w-full aspect-[3/4] bg-pb-bg animate-pulse"></div>
+                                    }
+                                    <span class="text-xs text-pb-fg-muted tabular-nums">@pageNum</span>
+                                </button>
+                            </li>
                         }
                     </ul>
                 }
@@ -932,6 +991,15 @@
     private PdfOutline? _outline;
     private bool _outlineOpen;
 
+    // Thumbnail-Sidebar (FA-007). Pro Seite eine Daten-URL; gerendert mit
+    // kleiner Skalierung im Hintergrund nach dem ersten Öffnen. Cancel-Token
+    // bricht das Rendering ab, wenn der User die PDF wechselt oder die
+    // Sidebar wieder schließt.
+    private bool _thumbsOpen;
+    private Dictionary<int, string> _thumbnails = new();
+    private int _thumbnailsProgress;
+    private CancellationTokenSource? _thumbnailsCts;
+
     // Notiz-Editor-Modus (FA-012 Markdown-Live-Preview)
     private bool _editorPreviewMode;
 
@@ -1156,6 +1224,68 @@
         _originalPdfBytes = null;
         _signerPanelOpen = false;
         _isSavingSignedPdf = false;
+        // Thumbnails (FA-007): laufendes Render abbrechen + Cache leeren,
+        // damit das nächste Dokument bei Bedarf frische Thumbnails bekommt.
+        _thumbnailsCts?.Cancel();
+        _thumbnailsCts = null;
+        _thumbnails = new Dictionary<int, string>();
+        _thumbnailsProgress = 0;
+        _thumbsOpen = false;
+    }
+
+    private async Task ToggleThumbsAsync()
+    {
+        if (_thumbsOpen)
+        {
+            _thumbsOpen = false;
+            _thumbnailsCts?.Cancel();
+            _thumbnailsCts = null;
+            return;
+        }
+
+        _thumbsOpen = true;
+        // Gegenseitig schließend mit Outline — beide Sidebars gleichzeitig
+        // wäre auf dem 1280er-Layout zu eng. Wenn der User Outline aktiv hat,
+        // klappt sie hier wegen.
+        _outlineOpen = false;
+
+        if (_handle is null) return;
+        if (_thumbnails.Count >= _handle.PageCount) return;
+
+        _thumbnailsCts = new CancellationTokenSource();
+        await RenderThumbnailsAsync(_handle, _thumbnailsCts.Token).ConfigureAwait(false);
+    }
+
+    private async Task RenderThumbnailsAsync(PdfDocumentHandle handle, CancellationToken ct)
+    {
+        try
+        {
+            for (var i = 1; i <= handle.PageCount; i++)
+            {
+                ct.ThrowIfCancellationRequested();
+                if (_thumbnails.ContainsKey(i))
+                {
+                    _thumbnailsProgress = i;
+                    continue;
+                }
+                var rendered = await Renderer
+                    .RenderPageAsync(handle, i, new RenderOptions(Scale: 0.35), ct)
+                    .ConfigureAwait(false);
+                if (rendered.RasterBytes is not null && rendered.RasterFormat is not null)
+                {
+                    _thumbnails[i] = $"data:{rendered.RasterFormat};base64,{Convert.ToBase64String(rendered.RasterBytes)}";
+                }
+                _thumbnailsProgress = i;
+                await InvokeAsync(StateHasChanged);
+                // Browser-Frame Zeit zum Atmen geben — sonst friert die UI ein,
+                // wenn jemand bei einer 200-Seiten-PDF die Sidebar öffnet.
+                await Task.Yield();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Erwartet bei Datei-Wechsel oder Sidebar-Close.
+        }
     }
 
     private async Task RenderCurrentPageAsync()

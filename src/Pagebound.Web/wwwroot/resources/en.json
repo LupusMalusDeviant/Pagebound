@@ -182,6 +182,14 @@
   "reader.outline.closeAria": "Close table of contents",
   "reader.outline.noOutline": "This PDF has no table of contents.",
 
+  "reader.thumbs.toggle": "🖼 Pages",
+  "reader.thumbs.toggleTitle": "Show / hide page thumbnails (FA-007)",
+  "reader.thumbs.heading": "Page overview",
+  "reader.thumbs.closeAria": "Close page overview",
+  "reader.thumbs.loading": "Rendering {current} / {total}",
+  "reader.thumbs.pageAria": "Go to page {page}",
+  "reader.thumbs.pageLabel": "Page {page}",
+
   "reader.export.button": "📤 Markdown",
   "reader.export.empty": "No annotations to export yet",
   "reader.export.title": "Export highlights + notes as Markdown (Obsidian-compatible)",

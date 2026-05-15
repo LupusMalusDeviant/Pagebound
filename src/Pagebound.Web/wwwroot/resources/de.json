@@ -182,6 +182,14 @@
   "reader.outline.closeAria": "Inhaltsverzeichnis schließen",
   "reader.outline.noOutline": "Diese PDF hat kein Inhaltsverzeichnis.",
 
+  "reader.thumbs.toggle": "🖼 Seiten",
+  "reader.thumbs.toggleTitle": "Seiten-Vorschauen ein- bzw. ausblenden (FA-007)",
+  "reader.thumbs.heading": "Seitenübersicht",
+  "reader.thumbs.closeAria": "Seitenübersicht schließen",
+  "reader.thumbs.loading": "Rendere {current} / {total}",
+  "reader.thumbs.pageAria": "Zu Seite {page} wechseln",
+  "reader.thumbs.pageLabel": "Seite {page}",
+
   "reader.export.button": "📤 Markdown",
   "reader.export.empty": "Noch keine Annotationen zum Exportieren",
   "reader.export.title": "Highlights + Notizen als Markdown exportieren (Obsidian-kompatibel)",
