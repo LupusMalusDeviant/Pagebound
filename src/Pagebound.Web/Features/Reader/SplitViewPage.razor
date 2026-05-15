@@ -1,0 +1,29 @@
+@page "/split"
+@inject ILocalizationService L
+
+@*
+    Split-View (FA-090, FA-091): zwei <ReaderPane>-Instanzen nebeneinander.
+    Jede Pane hat ihren eigenen Component-State (Handle, currentPage, Zoom,
+    Annotations-Cache etc.) — die DI-Services sind shared, das ist OK weil
+    Annotation-Service per PdfId trennt und Library/Renderer ohnehin
+    document-spezifisch arbeiten.
+
+    Resize + sync-scroll (FA-092) folgen in einer späteren Iteration.
+*@
+
+<PageTitle>@L.T("split.pageTitle")</PageTitle>
+
+<div class="flex flex-col h-full min-h-0">
+    <header class="border-b border-pb-border px-4 py-2 text-sm">
+        <div class="font-medium">@L.T("split.heading")</div>
+        <div class="text-xs text-pb-fg-muted">@L.T("split.hint")</div>
+    </header>
+    <div class="flex-1 min-h-0 grid grid-cols-2 divide-x divide-pb-border">
+        <div class="overflow-auto min-w-0" aria-label="@L.T("split.pane.left")">
+            <ReaderPane />
+        </div>
+        <div class="overflow-auto min-w-0" aria-label="@L.T("split.pane.right")">
+            <ReaderPane />
+        </div>
+    </div>
+</div>

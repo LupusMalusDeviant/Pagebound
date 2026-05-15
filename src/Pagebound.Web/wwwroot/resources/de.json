@@ -26,6 +26,7 @@
   "nav.start": "Start",
   "nav.reader": "Reader (Demo)",
   "nav.tools": "PDF-Werkzeuge",
+  "nav.split": "Split-View",
   "nav.library": "Library",
   "nav.library.empty": "Noch leer — öffne eine PDF.",
   "nav.library.recent": "Zuletzt geöffnet",
@@ -56,6 +57,14 @@
   "notFound.title": "404 — Nicht gefunden",
   "notFound.text": "Der gewünschte Inhalt existiert nicht.",
   "notFound.toHome": "Zur Startseite",
+
+  "split.pageTitle": "Split-View — Pagebound",
+  "split.heading": "Split-View",
+  "split.hint": "Zwei PDFs nebeneinander — jede Seite mit unabhängiger Navigation, Annotation und Suche (FA-090..091).",
+  "split.sync.label": "Synchron scrollen",
+  "split.sync.title": "Page-Wechsel in einer Pane spiegelt sich in die andere (FA-092)",
+  "split.pane.left": "Linke Pane",
+  "split.pane.right": "Rechte Pane",
 
   "library.pageTitle": "Library — Pagebound",
   "library.heading": "Library",
