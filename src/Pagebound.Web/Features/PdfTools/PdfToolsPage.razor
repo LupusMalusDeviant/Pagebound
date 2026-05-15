@@ -118,6 +118,40 @@
             </button>
         </div>
 
+        @* Compress-Bar (FA-026) — eigene Reihe weil destruktiv (verliert Vektor-Text)
+           und unabhängig von den Pages-Edits oben. *@
+        <div class="max-w-4xl mx-auto mt-2 rounded-lg border border-pb-border bg-pb-surface p-3 flex flex-wrap items-center gap-2 text-sm">
+            <span class="text-pb-fg-muted">@L.T("tools.compress.label")</span>
+            @foreach (var preset in CompressionPresets)
+            {
+                var p = preset;
+                var isActive = _compressQuality == p.Quality;
+                <button type="button"
+                        class="@($"rounded border px-2 py-0.5 text-xs {(isActive ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted hover:text-pb-fg")}")"
+                        @onclick="@(() => _compressQuality = p.Quality)">
+                    @L.T(p.LabelKey)
+                </button>
+            }
+            <button type="button"
+                    class="ml-auto rounded border border-pb-border bg-pb-bg px-3 py-1 text-pb-fg-muted hover:text-pb-fg disabled:opacity-40"
+                    disabled="@(_isCompressing || _handle is null)"
+                    title="@L.T("tools.compress.title")"
+                    @onclick="CompressAsync">
+                @(_isCompressing ? L.T("tools.compress.running") : L.T("tools.compress.button"))
+            </button>
+        </div>
+
+        @if (_compressionResult is not null)
+        {
+            <div class="max-w-4xl mx-auto mt-2 rounded border border-green-300/40 bg-green-50/10 px-3 py-2 text-sm text-pb-fg">
+                @_compressionResult
+                <button type="button"
+                        class="float-right text-pb-fg-muted hover:text-pb-fg"
+                        @onclick="@(() => _compressionResult = null)"
+                        aria-label="@L.T("common.close")">✕</button>
+            </div>
+        }
+
         <div class="mt-6 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
             @{
                 var visiblePages = _pages.Where(p => !p.Deleted).ToList();
@@ -206,6 +240,16 @@
     private byte[]? _originalPdfBytes;
     private bool _isLoading;
     private bool _isSaving;
+    private bool _isCompressing;
+    private int _compressQuality = 70;
+    private string? _compressionResult;
+
+    private static readonly (int Quality, string LabelKey)[] CompressionPresets =
+    {
+        (40, "tools.compress.quality.low"),
+        (70, "tools.compress.quality.medium"),
+        (90, "tools.compress.quality.high")
+    };
     private string? _errorMessage;
     private int _thumbnailProgress;
     private int _appendedPdfsCount;
@@ -498,6 +542,66 @@
         {
             _isSaving = false;
         }
+    }
+
+    private async Task CompressAsync()
+    {
+        if (_originalPdfBytes is null || _isCompressing) return;
+        _isCompressing = true;
+        _compressionResult = null;
+        _errorMessage = null;
+        try
+        {
+            var options = new CompressionOptions(ImageQuality: _compressQuality);
+            await using var stream = new MemoryStream(_originalPdfBytes);
+            var compressed = await Manipulator
+                .CompressAsync(stream, options, null, CancellationToken.None)
+                .ConfigureAwait(false);
+
+            var origSize = _originalPdfBytes.Length;
+            var newSize = compressed.Length;
+            var ratio = origSize > 0 ? (1.0 - (double)newSize / origSize) * 100.0 : 0.0;
+            _compressionResult = L.T("tools.compress.result", new Dictionary<string, object>
+            {
+                ["orig"] = FormatBytes(origSize),
+                ["compressed"] = FormatBytes(newSize),
+                ["ratio"] = ratio.ToString("F1", CultureInfo.InvariantCulture)
+            });
+
+            var filename = BuildCompressedFilename(_currentFilename);
+            var base64 = Convert.ToBase64String(compressed);
+            await JS.InvokeVoidAsync("pageboundShortcuts.downloadBytes", filename, base64, "application/pdf")
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = ex.Message;
+        }
+        finally
+        {
+            _isCompressing = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private static string FormatBytes(long bytes)
+    {
+        if (bytes < 1024) return $"{bytes} B";
+        if (bytes < 1024L * 1024) return $"{bytes / 1024.0:F0} KB";
+        if (bytes < 1024L * 1024 * 1024) return $"{bytes / (1024.0 * 1024):F1} MB";
+        return $"{bytes / (1024.0 * 1024 * 1024):F2} GB";
+    }
+
+    private static string BuildCompressedFilename(string? originalName)
+    {
+        var baseName = string.IsNullOrWhiteSpace(originalName) ? "document" : originalName;
+        if (baseName.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
+        {
+            baseName = baseName.Substring(0, baseName.Length - 4);
+        }
+        var safe = string.Concat(baseName.Select(c =>
+            char.IsLetterOrDigit(c) || c is '_' or '-' or '.' or ' ' ? c : '_'));
+        return $"{safe}.compressed.pdf";
     }
 
     private async Task UnloadCurrentAsync()

@@ -280,5 +280,14 @@
   "tools.page.label": "Page {index}",
   "tools.page.imageAlt": "Page {index}",
   "tools.deleted.summary": "{count} page(s) marked for deletion",
-  "tools.deleted.undo": "undo"
+  "tools.deleted.undo": "undo",
+
+  "tools.compress.label": "Compress:",
+  "tools.compress.title": "Re-encode every page as JPEG at the chosen quality — shrinks the PDF, drops the vector text layer (FA-026).",
+  "tools.compress.button": "📦 Save compressed",
+  "tools.compress.running": "Compressing …",
+  "tools.compress.quality.low": "Small (Q 40)",
+  "tools.compress.quality.medium": "Medium (Q 70)",
+  "tools.compress.quality.high": "Large (Q 90)",
+  "tools.compress.result": "Compressed: {orig} → {compressed} ({ratio}% smaller)"
 }

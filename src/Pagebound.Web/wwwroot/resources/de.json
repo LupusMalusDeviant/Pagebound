@@ -280,5 +280,14 @@
   "tools.page.label": "Seite {index}",
   "tools.page.imageAlt": "Seite {index}",
   "tools.deleted.summary": "{count} Seite(n) zum Löschen markiert",
-  "tools.deleted.undo": "rückgängig machen"
+  "tools.deleted.undo": "rückgängig machen",
+
+  "tools.compress.label": "Komprimieren:",
+  "tools.compress.title": "Jede Seite als JPEG mit gewählter Qualität neu kodieren — verkleinert die PDF, verliert dabei den Vektor-Text (FA-026).",
+  "tools.compress.button": "📦 Komprimiert speichern",
+  "tools.compress.running": "Komprimiere …",
+  "tools.compress.quality.low": "Klein (Q 40)",
+  "tools.compress.quality.medium": "Mittel (Q 70)",
+  "tools.compress.quality.high": "Groß (Q 90)",
+  "tools.compress.result": "Komprimiert: {orig} → {compressed} ({ratio}% kleiner)"
 }

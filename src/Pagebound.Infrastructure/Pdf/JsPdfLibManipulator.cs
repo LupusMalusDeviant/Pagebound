@@ -44,10 +44,42 @@ public sealed class JsPdfLibManipulator : IPdfManipulator
     public Task<byte[]> RotateAsync(Stream pdf, IReadOnlyDictionary<int, int> rotationDegrees, CancellationToken cancellationToken)
         => _inner.RotateAsync(pdf, rotationDegrees, cancellationToken);
 
-    public Task<byte[]> CompressAsync(Stream pdf, CompressionOptions options, IProgress<int>? progress, CancellationToken cancellationToken) =>
-        throw new NotImplementedException(
-            "CompressAsync folgt in Release 0.8 (FA-026). Erste Iteration: " +
-            "Re-Encoding eingebetteter Bilder mit wählbarer JPEG-Qualität.");
+    public async Task<byte[]> CompressAsync(
+        Stream pdf,
+        CompressionOptions options,
+        IProgress<int>? progress,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(pdf);
+        ArgumentNullException.ThrowIfNull(options);
+
+        // PDF einlesen — die JS-Bridge nimmt Uint8Array entgegen.
+        byte[] pdfBytes;
+        await using (var ms = new MemoryStream())
+        {
+            await pdf.CopyToAsync(ms, cancellationToken).ConfigureAwait(false);
+            pdfBytes = ms.ToArray();
+        }
+
+        // ImageQuality im Domain-Modell ist 1..100, JS erwartet 0.1..0.95.
+        var quality = (options.ImageQuality ?? 75) / 100.0;
+        quality = Math.Clamp(quality, 0.1, 0.95);
+
+        try
+        {
+            var result = await _js.InvokeAsync<byte[]>(
+                "pageboundPdfManipulator.compressPdf",
+                cancellationToken,
+                pdfBytes,
+                new { imageQuality = quality }).ConfigureAwait(false);
+            return result ?? pdfBytes;
+        }
+        catch (JSException jsex)
+        {
+            throw new InvalidOperationException(
+                $"[stage:compress] pdf-lib/PDF.js Re-Rasterize fehlgeschlagen: {jsex.Message}", jsex);
+        }
+    }
 
     public Task<byte[]> EncryptAsync(Stream pdf, EncryptionOptions options, CancellationToken cancellationToken) =>
         throw new NotImplementedException(

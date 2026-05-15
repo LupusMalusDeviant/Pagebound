@@ -11,6 +11,12 @@
 // =============================================================================
 
 import { PDFDocument, PDFName, PDFString } from "pdf-lib";
+import * as pdfjsLib from "pdfjs-dist";
+
+// Eigene Worker-Konfig — diese Bridge ist ein separater IIFE-Bundle, der
+// seinen eigenen pdfjs-Modulscope hat. Der Worker selbst (gleiche .mjs-Datei)
+// kann shared sein, daher reicht der Pfad wie in pdfjs-bridge.ts.
+pdfjsLib.GlobalWorkerOptions.workerSrc = "/js/pdf.worker.min.mjs";
 
 export interface EmbeddedSignatureInput {
   pageNumber: number;
@@ -86,4 +92,71 @@ export async function embedSignatures(
   });
 
   return await doc.save({ updateMetadata: false });
+}
+
+// ============================================================================
+// PDF-Komprimierung (FA-026)
+// ----------------------------------------------------------------------------
+// Strategie: jede Seite mit PDF.js auf ein Canvas rendern, das Canvas als JPEG
+// mit konfigurierbarer Quality kodieren und mit pdf-lib in eine frische PDF
+// einbauen. Verliert Vektor-Text und macht die Datei eventuell nicht
+// kleiner, wenn die Original-PDF bereits hoch komprimiert ist — aber für die
+// typischen "Foto-PDFs mit zu großen Bildern" funktioniert es robust.
+// Echte image-level-Recompression (PDF-Strukturen erhalten, nur Bilder neu
+// kodieren) folgt in einer späteren Iteration.
+// ============================================================================
+
+export interface CompressOptions {
+  /** JPEG-Quality 0.1 .. 0.95. */
+  imageQuality: number;
+  /** Optionale Auflösungs-Skalierung; 2.0 = ungefähr Display-Pixel. */
+  renderScale?: number;
+}
+
+export async function compressPdf(
+  pdfBytes: Uint8Array,
+  options: CompressOptions
+): Promise<Uint8Array> {
+  const quality = Math.min(0.95, Math.max(0.1, options.imageQuality ?? 0.75));
+  const renderScale = Math.max(1.0, options.renderScale ?? 2.0);
+
+  const srcDoc = await pdfjsLib.getDocument({ data: pdfBytes }).promise;
+  const outDoc = await PDFDocument.create();
+
+  try {
+    for (let i = 1; i <= srcDoc.numPages; i++) {
+      const page = await srcDoc.getPage(i);
+      const viewport = page.getViewport({ scale: renderScale });
+      const origViewport = page.getViewport({ scale: 1 });
+
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(viewport.width);
+      canvas.height = Math.round(viewport.height);
+      const ctx = canvas.getContext("2d");
+      if (!ctx) continue;
+
+      await page.render({ canvasContext: ctx, viewport, canvas: canvas as any }).promise;
+
+      const jpegBlob = await new Promise<Blob | null>((resolve) =>
+        canvas.toBlob((b) => resolve(b), "image/jpeg", quality)
+      );
+      if (!jpegBlob) continue;
+      const jpegBytes = new Uint8Array(await jpegBlob.arrayBuffer());
+
+      const jpegImg = await outDoc.embedJpg(jpegBytes);
+      const pdfPage = outDoc.addPage([origViewport.width, origViewport.height]);
+      pdfPage.drawImage(jpegImg, {
+        x: 0,
+        y: 0,
+        width: origViewport.width,
+        height: origViewport.height
+      });
+    }
+  } finally {
+    srcDoc.destroy();
+  }
+
+  outDoc.setCreator("Pagebound");
+  outDoc.setProducer("Pagebound Compress");
+  return await outDoc.save({ updateMetadata: false });
 }
