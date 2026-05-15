@@ -9,6 +9,7 @@
 // =============================================================================
 
 import * as pdfjsLib from "pdfjs-dist";
+import { TextLayer } from "pdfjs-dist";
 import type {
   PDFDocumentProxy,
   PDFPageProxy
@@ -294,15 +295,121 @@ export async function extractText(
   handleId: string,
   pageNumber: number
 ): Promise<TextItemDto[]> {
+  // Wird nur noch für FA-005-Suche genutzt (C#-seitig). Text-Layer-Rendering
+  // läuft separat über `renderTextLayerToContainer`, das PDF.js' eigene
+  // TextLayer-Klasse aufruft und damit pixel-genau positioniert.
   const doc = requireDoc(handleId);
   const { items, viewportHeight } = await readPageText(doc, pageNumber);
 
   return items.map((it) => {
-    // PDF coordinates are bottom-up; convert to top-down for the UI side.
     const tx = it.transform[4];
-    const ty = viewportHeight - it.transform[5] - it.height;
+    const ty = viewportHeight - it.transform[5] - it.height * 0.80;
     return { text: it.str, x: tx, y: ty, width: it.width, height: it.height };
   });
+}
+
+// ============================================================================
+// Native Text-Layer-Rendering (FA-005 Selection, FA-010 Highlight-Picking)
+// ----------------------------------------------------------------------------
+// PDF.js' eigene TextLayer-Klasse rendert die Word-Spans pixel-genau über das
+// gerenderte Seitenbild — Selection-Boxen kleben damit exakt am Schriftbild,
+// auch bei stylisierten Headlines. Eigener Razor-Markup mit scaleX-Annäherung
+// hat das nicht zuverlässig hinbekommen, weil das System-Font im Browser nie
+// dieselben Glyphen-Metriken hat wie der PDF-Font.
+//
+// Strategy:
+//   - Layer wird mit viewport scale=1 gerendert (Spans in PDF-Punkten).
+//   - Container hat Pixel-Größe in PDF-Punkten, ein CSS transform: scale(...)
+//     skaliert ihn nachträglich auf die actual displayed width.
+//   - Ein ResizeObserver hält die Skalierung auch bei Window-Resize bei.
+// ============================================================================
+
+interface TextLayerLease {
+  resizeObserver: ResizeObserver | null;
+  cancel: () => void;
+}
+
+const activeTextLayers = new Map<string, TextLayerLease>();
+
+function disposeTextLayer(containerSelector: string): void {
+  const lease = activeTextLayers.get(containerSelector);
+  if (!lease) return;
+  try { lease.cancel(); } catch { /* ignore */ }
+  try { lease.resizeObserver?.disconnect(); } catch { /* ignore */ }
+  activeTextLayers.delete(containerSelector);
+}
+
+export async function renderTextLayerToContainer(
+  handleId: string,
+  pageNumber: number,
+  containerSelector: string,
+  imageSelector: string
+): Promise<TextItemDto[]> {
+  disposeTextLayer(containerSelector);
+
+  const container = document.querySelector(containerSelector);
+  const image = document.querySelector(imageSelector);
+  if (!(container instanceof HTMLElement) || !(image instanceof HTMLElement)) {
+    return [];
+  }
+
+  const doc = requireDoc(handleId);
+  const page = await doc.getPage(pageNumber);
+  const viewport = page.getViewport({ scale: 1 });
+
+  // Container braucht die pb-textLayer-CSS-Klasse — die enthält die
+  // CSS-Custom-Properties (--min-font-size, --text-scale-factor) und die
+  // Selector-Regeln (color:transparent, font-size: calc(...)), ohne die
+  // PDF.js' Spans als schwarzer, riesiger System-Font sichtbar wären.
+  container.innerHTML = "";
+  container.classList.add("pb-textLayer");
+  // setLayerDimensions in PDF.js setzt width = `calc(var(--total-scale-factor)
+  // * pageWidth px)` — wir müssen --total-scale-factor auf das tatsächliche
+  // Verhältnis Display-Width/PDF-Width setzen.
+  function applyScale(): void {
+    const rect = image.getBoundingClientRect();
+    if (rect.width <= 0 || viewport.width <= 0) return;
+    const factor = rect.width / viewport.width;
+    container.style.setProperty("--total-scale-factor", factor.toFixed(6));
+  }
+  applyScale();
+
+  const textContent = await page.getTextContent();
+  const textLayer = new TextLayer({
+    textContentSource: textContent,
+    container,
+    viewport
+  });
+  await textLayer.render();
+
+  const resizeObserver = new ResizeObserver(() => applyScale());
+  resizeObserver.observe(image);
+
+  activeTextLayers.set(containerSelector, {
+    resizeObserver,
+    cancel: () => textLayer.cancel()
+  });
+
+  // Items für die Such-Funktion zurückgeben — derselbe ascent-Trick wie in
+  // `extractText` (search-side bleibt unverändert kompatibel).
+  const items = textContent.items as unknown as PdfTextItem[];
+  return items.map((it) => ({
+    text: it.str,
+    x: it.transform[4],
+    y: viewport.height - it.transform[5] - it.height * 0.80,
+    width: it.width,
+    height: it.height
+  }));
+}
+
+export function clearTextLayer(containerSelector: string): void {
+  disposeTextLayer(containerSelector);
+  const container = document.querySelector(containerSelector);
+  if (container instanceof HTMLElement) {
+    container.innerHTML = "";
+    container.classList.remove("pb-textLayer");
+    container.style.removeProperty("--total-scale-factor");
+  }
 }
 
 export async function search(

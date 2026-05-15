@@ -638,6 +638,53 @@ export function reload(): void {
 }
 
 /**
+ * Skaliert jeden Text-Layer-Span pixel-genau auf seine Ziel-Bounding-Box,
+ * indem `transform: scaleX(...) scaleY(...)` so gesetzt wird, dass die
+ * tatsächlich gerenderte Glyphen-Breite/Höhe mit der erwarteten übereinstimmt.
+ *
+ * Hintergrund: Im PDF-Reader liegt ein transparenter Text-Layer über dem
+ * gerenderten Seitenbild, damit der User Text markieren und der Browser ihn
+ * suchen kann. Die Spans bekommen Position + Width in Prozent der Seite
+ * sowie eine font-size, aber das Browser-Font-Rendering produziert nie exakt
+ * dieselben Glyphen-Maße wie das Original-PDF. Ohne Skalierung wandern die
+ * Selection-Highlights spürbar gegen das eigentliche Schriftbild — bei OCR-
+ * Output ist das besonders auffällig, weil dort jedes Wort eine eigene Box
+ * hat. Nach dem ersten DOM-Render messen wir `scrollWidth` und korrigieren.
+ *
+ * Erwartet pro Span:
+ *   data-pb-text="true"
+ *   data-pb-target-width / data-pb-target-height = Pixel-Breite/Höhe der
+ *     Ziel-Bounding-Box im Container.
+ */
+export function fixTextLayerScale(containerSelector: string): void {
+  const container = document.querySelector(containerSelector);
+  if (!(container instanceof HTMLElement)) return;
+  const rect = container.getBoundingClientRect();
+  if (rect.width <= 0) return;
+  const spans = container.querySelectorAll('span[data-pb-text="true"]');
+  spans.forEach((node) => {
+    if (!(node instanceof HTMLElement)) return;
+    // Nur scaleX — scaleY würde die Glyphen-Höhe stauchen/strecken und das
+    // Schriftbild verzerren. font-size aus dem Razor-style sorgt schon für
+    // die richtige vertikale Größe; die Pixel-Position wird vom `top`-Style
+    // gesetzt.
+    const wPercent = parseFloat(node.dataset.pbTargetWidth ?? "");
+    if (!isFinite(wPercent) || wPercent <= 0) return;
+    const targetPx = (wPercent / 100) * rect.width;
+
+    // Transform vor der Messung zurücksetzen, sonst rechnen wir bei jedem
+    // Re-Render mit dem schon skalierten scrollWidth weiter.
+    node.style.transform = "";
+    const natW = node.scrollWidth;
+    if (natW <= 0) return;
+    const sx = targetPx / natW;
+    if (!isFinite(sx) || sx <= 0) return;
+    node.style.transform = `scaleX(${sx.toFixed(4)})`;
+    node.style.transformOrigin = "top left";
+  });
+}
+
+/**
  * Robuste localStorage-Wrapper. Direktes `IJSRuntime.InvokeAsync("localStorage.getItem", ...)`
  * funktioniert in Blazor WASM nicht zuverlässig — die Bridge ruft die Methode dort
  * ohne korrektes `this`-Binding auf. Hier explizit auf `window.localStorage`.

@@ -19,6 +19,7 @@
   },
   "license": "Apache-2.0",
   "dependencies": {
-    "pdf-lib": "^1.17.1"
+    "pdf-lib": "^1.17.1",
+    "tesseract.js": "^7.0.0"
   }
 }

@@ -6,6 +6,7 @@ using Pagebound.Infrastructure.Crypto;
 using Pagebound.Infrastructure.Export;
 using Pagebound.Infrastructure.Library;
 using Pagebound.Infrastructure.Localization;
+using Pagebound.Infrastructure.Ocr;
 using Pagebound.Infrastructure.Pdf;
 using Pagebound.Infrastructure.Sidecars;
 using Pagebound.Infrastructure.Storage;
@@ -45,6 +46,7 @@ builder.Services.AddScoped<IThemeService, ThemeService>();
 builder.Services.AddScoped<ILocalizationService, LocalizationService>();
 builder.Services.AddScoped<ISidecarService, JsonSidecarService>();
 builder.Services.AddScoped<ILibraryService, LibraryService>();
+builder.Services.AddScoped<IOcrService, TesseractOcrService>();
 
 var host = builder.Build();
 

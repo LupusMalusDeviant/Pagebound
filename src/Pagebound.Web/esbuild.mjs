@@ -53,6 +53,12 @@ const builds = [
     globalName: "pageboundPdfManipulator",
     entryPoints: [resolve(__dirname, "wwwroot/js/pdf-manipulator-bridge.ts")],
     outfile: resolve(__dirname, "wwwroot/js/pdf-manipulator-bridge.js")
+  },
+  {
+    ...sharedOptions,
+    globalName: "pageboundOcr",
+    entryPoints: [resolve(__dirname, "wwwroot/js/ocr-bridge.ts")],
+    outfile: resolve(__dirname, "wwwroot/js/ocr-bridge.js")
   }
 ];
 

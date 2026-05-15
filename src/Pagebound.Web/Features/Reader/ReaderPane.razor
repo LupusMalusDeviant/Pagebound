@@ -12,6 +12,7 @@
 @inject IStorageService Storage
 @inject ISidecarService Sidecar
 @inject ILibraryService Library
+@inject IOcrService Ocr
 @inject ILocalizationService L
 @inject IJSRuntime JS
 @implements IAsyncDisposable
@@ -83,8 +84,27 @@
                         <input type="checkbox" @bind="_wholeWord" class="rounded" />
                         @L.T("reader.search.wholeWord")
                     </label>
+                    <button type="button"
+                            class="ml-auto rounded border border-pb-border px-2 py-1 text-xs text-pb-fg-muted hover:text-pb-fg disabled:opacity-40"
+                            disabled="@(_isOcrRunning || _handle is null)"
+                            title="@L.T("reader.ocr.title")"
+                            @onclick="RunOcrOnCurrentPageAsync">
+                        @(_isOcrRunning ? L.T("reader.ocr.running") : L.T("reader.ocr.button"))
+                    </button>
                 </div>
             </form>
+
+            @if (_ocrStatus is not null)
+            {
+                <div class="@($"mt-2 rounded border px-3 py-1 text-xs {(_ocrStatusIsError ? "border-red-300/40 bg-red-50/10 text-pb-fg" : "border-green-300/40 bg-green-50/10 text-pb-fg-muted")}")"
+                     aria-live="polite">
+                    @_ocrStatus
+                    <button type="button"
+                            class="float-right text-pb-fg-muted hover:text-pb-fg ml-2"
+                            @onclick="@(() => _ocrStatus = null)"
+                            aria-label="@L.T("common.close")">✕</button>
+                </div>
+            }
 
             @if (_searchHits is not null)
             {
@@ -94,6 +114,13 @@
                         <div class="rounded border border-amber-300/40 bg-amber-50/10 px-3 py-2 text-pb-fg">
                             <div class="font-medium">@L.T("reader.search.noTextLayer.title")</div>
                             <p class="mt-1 text-pb-fg-muted">@L.T("reader.search.noTextLayer.body")</p>
+                            <button type="button"
+                                    class="mt-2 rounded bg-pb-accent px-3 py-1 text-sm text-white disabled:opacity-40"
+                                    disabled="@_isOcrRunning"
+                                    title="@L.T("reader.ocr.title")"
+                                    @onclick="RunOcrOnCurrentPageAsync">
+                                @(_isOcrRunning ? L.T("reader.ocr.running") : L.T("reader.ocr.button"))
+                            </button>
                         </div>
                     }
                     else if (_searchHits.Count == 0)
@@ -498,25 +525,45 @@
                          class="block w-full h-full shadow-sm select-none pointer-events-none"
                          draggable="false" />
 
-                    @* Text-Layer (transparent + selectable) für FA-005 Suche-Highlighting und FA-010 Highlight-Selection.
-                       Im Sticky-Note-Modus deaktiviert (pointer-events-none + select-none), damit Klicks aufs PDF
-                       direkt auf das Canvas-Div durchschlagen und einen Pin setzen können. *@
-                    @if (_pageTextItems.Count > 0)
+                    @* Text-Layer für FA-005 (Suche-Highlighting) und FA-010 (Highlight-Selection).
+                       Im Sticky-Note-/Zeichnen-Modus deaktiviert, damit Klicks aufs PDF
+                       direkt auf das Canvas-Div durchschlagen.
+
+                       Zwei Code-Pfade:
+                       a) Native PDF-Text: PDF.js' eigene TextLayer-Klasse rendert die
+                          Spans pixel-genau (siehe pdfjs-bridge.renderTextLayerToContainer).
+                          Der Container ist hier nur ein leeres Anker-Div mit dem
+                          data-pb-native-text-layer-Selector; JavaScript füllt ihn nach
+                          jedem Render.
+                       b) OCR-Output (FA-050): kommt mit Pixel-Bounding-Boxes statt
+                          font-stream — die rendern wir als Razor-Spans mit scaleX-Helper. *@
+                    @{
+                        var textLayerInteractiveCss = (_annotationMode == AnnotationMode.StickyNote || IsDrawingMode(_annotationMode))
+                            ? "select-none pointer-events-none"
+                            : "select-text";
+                    }
+                    @if (_useOcrTextLayer && _pageTextItems.Count > 0)
                     {
-                        var textLayerClass = (_annotationMode == AnnotationMode.StickyNote || IsDrawingMode(_annotationMode))
-                            ? "absolute inset-0 leading-none whitespace-pre select-none pointer-events-none"
-                            : "absolute inset-0 leading-none whitespace-pre select-text";
-                        <div class="@textLayerClass" aria-hidden="true">
+                        <div class="@($"absolute inset-0 leading-none whitespace-pre {textLayerInteractiveCss}")"
+                             aria-hidden="true">
                             @foreach (var item in _pageTextItems)
                             {
                                 var leftPct = (item.X / pageW * 100).ToString("F3", CultureInfo.InvariantCulture);
                                 var topPct = (item.Y / pageH * 100).ToString("F3", CultureInfo.InvariantCulture);
                                 var widthPct = (item.Width / pageW * 100).ToString("F3", CultureInfo.InvariantCulture);
                                 var fontCqh = (item.Height / pageH * 100).ToString("F3", CultureInfo.InvariantCulture);
-                                <span class="absolute text-transparent origin-top-left"
-                                      style="@($"left:{leftPct}%; top:{topPct}%; width:{widthPct}%; font-size:{fontCqh}cqh")">@item.Text</span>
+                                <span data-pb-text="true"
+                                      data-pb-target-width="@widthPct"
+                                      class="absolute text-transparent origin-top-left whitespace-pre leading-none"
+                                      style="@($"left:{leftPct}%; top:{topPct}%; font-size:{fontCqh}cqh; line-height:1")">@item.Text</span>
                             }
                         </div>
+                    }
+                    else
+                    {
+                        <div data-pb-native-text-layer
+                             class="@($"absolute inset-0 leading-none {textLayerInteractiveCss}")"
+                             aria-hidden="true"></div>
                     }
 
                     @* Highlight-Layer (über Text, semi-transparent, klickbar zur Bearbeitung) *@
@@ -970,6 +1017,7 @@
     // Annotation-State (FA-011 Sticky Notes, FA-070 ff. Persistenz)
     private const string PdfImageSelector = "[data-pb-pdf-image]";
     private const string PageCanvasSelector = "[data-pb-page-canvas]";
+    private const string NativeTextLayerSelector = "[data-pb-native-text-layer]";
     private PdfId? _currentPdfId;
     private string? _currentFilename;
     private bool _isExporting;
@@ -990,6 +1038,17 @@
     // Outline (FA-006)
     private PdfOutline? _outline;
     private bool _outlineOpen;
+
+    // OCR-State (FA-050). Default-Sprachen für Erkennung — Tesseract.js
+    // kombiniert beide und matcht in einem Pass.
+    private const string OcrLanguages = "eng+deu";
+    private bool _isOcrRunning;
+    private string? _ocrStatus;
+    private bool _ocrStatusIsError;
+    // Wenn true: Razor rendert OCR-Spans (Tesseract-Bounding-Boxes) für Selection.
+    // Wenn false: PDF.js' eigene TextLayer-Klasse rendert das nativ ins
+    // data-pb-native-text-layer-Div — pixel-genau, ohne scaleX-Approximation.
+    private bool _useOcrTextLayer;
 
     // Thumbnail-Sidebar (FA-007). Pro Seite eine Daten-URL; gerendert mit
     // kleiner Skalierung im Hintergrund nach dem ersten Öffnen. Cancel-Token
@@ -1231,6 +1290,92 @@
         _thumbnails = new Dictionary<int, string>();
         _thumbnailsProgress = 0;
         _thumbsOpen = false;
+        // OCR-Status der Vorgänger-PDF nicht "vererben".
+        _ocrStatus = null;
+        _ocrStatusIsError = false;
+        _isOcrRunning = false;
+        _useOcrTextLayer = false;
+    }
+
+    // --- OCR (FA-050) -----------------------------------------------------
+
+    private async Task RunOcrOnCurrentPageAsync()
+    {
+        if (_handle is null || _isOcrRunning) return;
+        _isOcrRunning = true;
+        _ocrStatus = null;
+        try
+        {
+            // High-res Render speziell für OCR — die Display-Qualität (BaseScale ×
+            // Zoom-Faktor) ist sonst stark vom User-Zoom abhängig; ein
+            // konsistentes Scale 2.5 hält die Trefferquote stabil.
+            var hiRes = await Renderer.RenderPageAsync(
+                _handle,
+                _currentPage,
+                new RenderOptions(Scale: 2.5),
+                CancellationToken.None).ConfigureAwait(false);
+            if (hiRes.RasterBytes is null) return;
+
+            var dataUrl = $"data:{hiRes.RasterFormat ?? "image/png"};base64,{Convert.ToBase64String(hiRes.RasterBytes)}";
+            var result = await Ocr.RecognizePageAsync(dataUrl, OcrLanguages, CancellationToken.None).ConfigureAwait(false);
+
+            var pageW = hiRes.PageWidthPt;
+            var pageH = hiRes.PageHeightPt;
+            // Bewusst die tatsächliche Render-Größe nehmen, nicht das
+            // result.ImageWidth/Height aus der JS-Bridge — Tesseract liefert
+            // dort nur die max-bbox über alle erkannten Wörter zurück, das
+            // ist bei PDFs mit Rand systematisch zu klein und verschiebt
+            // anschließend alle Mappings nach rechts/unten.
+            double imgW = hiRes.WidthPx;
+            double imgH = hiRes.HeightPx;
+
+            if (imgW > 0 && imgH > 0 && result.Words.Count > 0)
+            {
+                // OCR-Bounding-Boxes in PDF-Punkte umrechnen — die Render-Skala
+                // ist intern bekannt, aber das simple Verhältnis Bild ↔ Page
+                // reicht, weil RenderPageAsync proportional skaliert.
+                var scaleX = pageW / imgW;
+                var scaleY = pageH / imgH;
+                _pageTextItems = result.Words.Select(w => new TextItem(
+                    w.Text,
+                    w.X * scaleX,
+                    w.Y * scaleY,
+                    w.Width * scaleX,
+                    w.Height * scaleY)).ToList();
+                // Sobald wir Wörter haben, gilt die Seite als durchsuchbar —
+                // die "kein Textlayer"-Box im Such-UI klappt damit zu.
+                _pdfHasNoTextLayer = false;
+                // Native PDF.js-TextLayer abräumen und den OCR-Pfad aktivieren:
+                // OCR liefert Pixel-Bounding-Boxes, keinen TextContent-Stream,
+                // also kann PDF.js' Layer-Klasse sie nicht rendern.
+                _useOcrTextLayer = true;
+                try
+                {
+                    await JS.InvokeVoidAsync("pageboundPdf.clearTextLayer", NativeTextLayerSelector);
+                }
+                catch
+                {
+                    // best-effort
+                }
+            }
+
+            _ocrStatus = L.T("reader.ocr.success", new Dictionary<string, object>
+            {
+                ["count"] = result.Words.Count,
+                ["confidence"] = result.Confidence.ToString("F0", CultureInfo.InvariantCulture)
+            });
+            _ocrStatusIsError = false;
+        }
+        catch (Exception ex)
+        {
+            _ocrStatus = L.T("reader.ocr.failed", new Dictionary<string, object> { ["message"] = ex.Message });
+            _ocrStatusIsError = true;
+        }
+        finally
+        {
+            _isOcrRunning = false;
+            await InvokeAsync(StateHasChanged);
+        }
     }
 
     private async Task ToggleThumbsAsync()
@@ -1327,6 +1472,49 @@
         finally
         {
             _isRendering = false;
+        }
+
+        // StateHasChanged + await sorgt dafür, dass das neue Markup im DOM
+        // liegt, bevor wir Layer-Manipulationen vornehmen.
+        await InvokeAsync(StateHasChanged);
+
+        if (_useOcrTextLayer)
+        {
+            // OCR-Pfad: Razor hat die <span>s schon gerendert; jetzt skaliert
+            // der Helper sie pixel-genau auf ihre Ziel-Bounding-Box.
+            try
+            {
+                await JS.InvokeVoidAsync("pageboundShortcuts.fixTextLayerScale", PageCanvasSelector);
+            }
+            catch
+            {
+                // Bridge nicht erreichbar — Spans bleiben ungeskaliert, Selection
+                // funktioniert weiter, ist nur ein paar Pixel daneben.
+            }
+        }
+        else if (_handle is not null)
+        {
+            // Native-Pfad: PDF.js' eigene TextLayer-Klasse rendert die Spans in
+            // den Anker-Container. Das Result enthält die für die Suche
+            // benötigten TextItems (in PDF-Punkten, mit ascent-korrigiertem Y).
+            try
+            {
+                var items = await JS.InvokeAsync<TextItem[]>(
+                    "pageboundPdf.renderTextLayerToContainer",
+                    _handle.Id,
+                    _currentPage,
+                    NativeTextLayerSelector,
+                    PdfImageSelector);
+                if (items is not null)
+                {
+                    _pageTextItems = items;
+                }
+            }
+            catch
+            {
+                // Bridge oder TextLayer nicht erreichbar — Selection ist dann
+                // disabled, Suche funktioniert weiter über getTextContent.
+            }
         }
     }
 
