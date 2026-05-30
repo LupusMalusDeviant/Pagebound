@@ -233,7 +233,9 @@
             </div>
         }
 
-        @* Encrypt-Bar (FA-027) — managed AES-256 (ISO 32000-2 V5/R6), eigene Reihe. *@
+        @* Encrypt-Bar (FA-027) — bis zum WASM-Perf-Umbau (WebCrypto/qpdf) ausgeblendet. *@
+        @if (EncryptionUiEnabled)
+        {
         <div class="max-w-4xl mx-auto mt-2 rounded-lg pb-glass p-3 flex flex-wrap items-center gap-2 text-sm">
             <span class="text-pb-fg-muted">@L.T("tools.encrypt.label")</span>
             <input type="password"
@@ -262,6 +264,7 @@
             </div>
         }
         <p class="max-w-4xl mx-auto mt-1 text-xs text-pb-fg-muted">@L.T("tools.encrypt.note")</p>
+        }
 
         <div class="mt-6 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
             @{
@@ -345,6 +348,12 @@
 
 @code {
     private const long MaxFileSize = 200L * 1024 * 1024; // 200 MB für Editor-Modus
+
+    // FA-027: Encrypt-UI ausgeblendet bis zum WASM-Perf-Umbau. Die managed
+    // AES-256-R6-Krypto ist korrekt (Unit-Tests grün), friert aber den
+    // Single-Thread-WASM ~30s ein (kein Hardware-AES) → geplant WebCrypto/qpdf.
+    // Code (EncryptPdfAsync, ManagedPdfEncryptor) bleibt für den Umbau erhalten.
+    private const bool EncryptionUiEnabled = false;
 
     private PdfDocumentHandle? _handle;
     private string? _currentFilename;
