@@ -14,6 +14,7 @@
 @inject ILibraryService Library
 @inject IOcrService Ocr
 @inject IFileHandleService Files
+@inject IPdfFormService FormService
 @inject ILocalizationService L
 @inject IJSRuntime JS
 @implements IAsyncDisposable
@@ -346,6 +347,16 @@
                         </span>
                     }
                 </button>
+                @if (HasFormFields)
+                {
+                    <button type="button"
+                            class="@($"rounded border px-2 py-0.5 {(_formPanelOpen ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted")}")"
+                            title="@L.T("reader.form.toggleTitle")"
+                            @onclick="@(() => _formPanelOpen = !_formPanelOpen)">
+                        @L.T("reader.form.toggle")
+                        <span class="ml-1 text-xs text-pb-fg-muted">(@_formFields.Count)</span>
+                    </button>
+                }
                 <button type="button"
                         class="rounded border border-pb-border bg-pb-bg px-2 py-0.5 text-pb-fg-muted hover:text-pb-fg disabled:opacity-40 disabled:cursor-not-allowed"
                         disabled="@(_isExporting || _annotations.Count == 0)"
@@ -441,6 +452,151 @@
                         @L.T("reader.signer.remember")
                     </button>
                 </div>
+            </div>
+        }
+
+        @if (_formPanelOpen && HasFormFields)
+        {
+            <div class="max-w-4xl mx-auto mt-2 rounded-lg pb-glass-strong p-3">
+                <div class="flex items-center justify-between mb-3">
+                    <div>
+                        <span class="text-sm font-medium">@L.T("reader.form.heading")</span>
+                        <span class="ml-2 text-xs text-pb-fg-muted">@L.T("reader.form.fieldCount", new Dictionary<string, object> { ["count"] = _formFields.Count })</span>
+                    </div>
+                    <button type="button"
+                            class="text-pb-fg-muted hover:text-pb-fg text-xs"
+                            @onclick="@(() => _formPanelOpen = false)"
+                            aria-label="@L.T("common.close")">✕</button>
+                </div>
+
+                <div class="space-y-4 max-h-[60vh] overflow-y-auto pr-1">
+                    @foreach (var group in _formFields.GroupBy(f => f.PageNumber).OrderBy(g => g.Key == 0 ? int.MaxValue : g.Key))
+                    {
+                        <div>
+                            <div class="text-xs font-medium text-pb-fg-muted mb-1 border-b border-pb-border pb-1">
+                                @(group.Key == 0
+                                    ? L.T("reader.form.pageUnknown")
+                                    : L.T("reader.form.pageLabel", new Dictionary<string, object> { ["page"] = group.Key }))
+                            </div>
+                            <div class="space-y-2 pt-1">
+                                @foreach (var field in group)
+                                {
+                                    var f = field;
+                                    <div class="grid grid-cols-1 sm:grid-cols-[12rem_1fr] gap-2 items-start">
+                                        <button type="button"
+                                                class="text-sm text-pb-fg pt-1 text-left break-words hover:text-pb-accent disabled:hover:text-pb-fg"
+                                                disabled="@(f.PageNumber < 1)"
+                                                title="@L.T("reader.form.jumpTitle")"
+                                                @onclick="@(() => JumpToFormFieldPage(f))">
+                                            @f.Name
+                                            @if (f.Required)
+                                            {
+                                                <span class="text-red-400">*</span>
+                                            }
+                                        </button>
+                                        <div>
+                                            @switch (f.Type)
+                                            {
+                                                case PdfFormFieldType.Text:
+                                                    <input type="text"
+                                                           class="w-full rounded border border-pb-border bg-pb-bg px-2 py-1 text-sm disabled:opacity-50"
+                                                           value="@GetSingle(f.Name)"
+                                                           disabled="@f.ReadOnly"
+                                                           @onchange="@(e => SetSingle(f.Name, e.Value?.ToString()))" />
+                                                    break;
+                                                case PdfFormFieldType.Checkbox:
+                                                    <label class="flex items-center gap-2 text-sm">
+                                                        <input type="checkbox"
+                                                               checked="@IsChecked(f.Name)"
+                                                               disabled="@f.ReadOnly"
+                                                               @onchange="@(e => SetChecked(f.Name, e.Value is true))" />
+                                                        <span class="text-pb-fg-muted">@L.T("reader.form.checkboxOn")</span>
+                                                    </label>
+                                                    break;
+                                                case PdfFormFieldType.Radio:
+                                                    <div class="flex flex-wrap gap-3 text-sm">
+                                                        @foreach (var opt in f.Options)
+                                                        {
+                                                            var o = opt;
+                                                            <label class="flex items-center gap-1 cursor-pointer">
+                                                                <input type="radio"
+                                                                       name="@($"radio-{f.Name}")"
+                                                                       checked="@(GetSingle(f.Name) == o)"
+                                                                       disabled="@f.ReadOnly"
+                                                                       @onchange="@(() => SetSingle(f.Name, o))" />
+                                                                @o
+                                                            </label>
+                                                        }
+                                                    </div>
+                                                    break;
+                                                case PdfFormFieldType.Dropdown:
+                                                    <select class="w-full rounded border border-pb-border bg-pb-bg px-2 py-1 text-sm disabled:opacity-50"
+                                                            disabled="@f.ReadOnly"
+                                                            @onchange="@(e => SetSingle(f.Name, e.Value?.ToString()))">
+                                                        <option value="" selected="@(GetSingle(f.Name).Length == 0)">@L.T("reader.form.dropdownEmpty")</option>
+                                                        @foreach (var opt in f.Options)
+                                                        {
+                                                            var o = opt;
+                                                            <option value="@o" selected="@(GetSingle(f.Name) == o)">@o</option>
+                                                        }
+                                                    </select>
+                                                    break;
+                                                case PdfFormFieldType.ListBox:
+                                                    <select multiple
+                                                            class="w-full rounded border border-pb-border bg-pb-bg px-2 py-1 text-sm disabled:opacity-50 min-h-[4rem]"
+                                                            disabled="@f.ReadOnly"
+                                                            @onchange="@(e => SetMulti(f.Name, e.Value))">
+                                                        @foreach (var opt in f.Options)
+                                                        {
+                                                            var o = opt;
+                                                            <option value="@o" selected="@(GetMulti(f.Name).Contains(o))">@o</option>
+                                                        }
+                                                    </select>
+                                                    break;
+                                            }
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+                        </div>
+                    }
+                </div>
+
+                <div class="mt-4 flex flex-wrap items-center justify-end gap-3 border-t border-pb-border pt-3">
+                    <div class="flex items-center gap-3 text-xs text-pb-fg-muted mr-auto">
+                        <span>@L.T("reader.form.saveMode")</span>
+                        <label class="flex items-center gap-1 cursor-pointer">
+                            <input type="radio" name="form-save-mode"
+                                   checked="@(!_formSaveFlatten)"
+                                   @onchange="@(() => _formSaveFlatten = false)" />
+                            @L.T("reader.form.saveEditable")
+                        </label>
+                        <label class="flex items-center gap-1 cursor-pointer">
+                            <input type="radio" name="form-save-mode"
+                                   checked="@_formSaveFlatten"
+                                   @onchange="@(() => _formSaveFlatten = true)" />
+                            @L.T("reader.form.saveFlatten")
+                        </label>
+                    </div>
+                    <button type="button"
+                            class="rounded bg-pb-accent px-3 py-1.5 text-sm text-white disabled:opacity-40"
+                            disabled="@_isFillingForm"
+                            @onclick="SaveFilledFormAsync">
+                        @(_isFillingForm ? L.T("reader.form.saving") : L.T("reader.form.save"))
+                    </button>
+                </div>
+
+                @if (_formStatus is not null)
+                {
+                    <div class="@($"mt-2 rounded border px-3 py-1 text-xs {(_formStatusIsError ? "border-red-300/40 bg-red-50/10 text-pb-fg" : "border-green-300/40 bg-green-50/10 text-pb-fg-muted")}")"
+                         aria-live="polite">
+                        @_formStatus
+                        <button type="button"
+                                class="float-right text-pb-fg-muted hover:text-pb-fg ml-2"
+                                @onclick="@(() => _formStatus = null)"
+                                aria-label="@L.T("common.close")">✕</button>
+                    </div>
+                }
             </div>
         }
 
@@ -1167,6 +1323,19 @@
     private bool _isSavingSignedPdf;
     private bool _signerLoaded;
 
+    // Formular-State (FA-040/041). Erkannte AcroForm-Felder + die aktuell im
+    // Panel editierten Werte (pro Feldname). _formSaveFlatten steuert, ob beim
+    // Speichern geflattet wird (Werte fixiert) oder das Formular editierbar bleibt.
+    private IReadOnlyList<PdfFormField> _formFields = Array.Empty<PdfFormField>();
+    private readonly Dictionary<string, List<string>> _formValues = new();
+    private bool _formPanelOpen;
+    private bool _formSaveFlatten;
+    private bool _isFillingForm;
+    private string? _formStatus;
+    private bool _formStatusIsError;
+
+    private bool HasFormFields => _formFields.Count > 0;
+
     private IEnumerable<Annotation> SignaturesOnCurrentPage =>
         _annotations.Where(a => a.Type == AnnotationType.Signature && a.PageNumber == _currentPage);
 
@@ -1328,6 +1497,18 @@
         }
         _outlineOpen = _outline is not null;
 
+        // AcroForm-Felder erkennen (FA-040). Fehlt ein Formular oder schlägt das
+        // Lesen fehl, bleibt der Formular-Toggle einfach ausgeblendet.
+        try
+        {
+            await using var formStream = new MemoryStream(bytes, writable: false);
+            SetFormFields(await FormService.GetFieldsAsync(formStream, CancellationToken.None).ConfigureAwait(false));
+        }
+        catch
+        {
+            SetFormFields(Array.Empty<PdfFormField>());
+        }
+
         await RenderCurrentPageAsync().ConfigureAwait(false);
     }
 
@@ -1454,6 +1635,12 @@
         _originalPdfBytes = null;
         _signerPanelOpen = false;
         _isSavingSignedPdf = false;
+        _formFields = Array.Empty<PdfFormField>();
+        _formValues.Clear();
+        _formPanelOpen = false;
+        _isFillingForm = false;
+        _formStatus = null;
+        _formStatusIsError = false;
         // Thumbnails (FA-007): laufendes Render abbrechen + Cache leeren,
         // damit das nächste Dokument bei Bedarf frische Thumbnails bekommt.
         _thumbnailsCts?.Cancel();
@@ -1466,6 +1653,111 @@
         _ocrStatusIsError = false;
         _isOcrRunning = false;
         _useOcrTextLayer = false;
+    }
+
+    // --- Formular / AcroForms (FA-040/041) --------------------------------
+
+    /// <summary>Übernimmt frisch erkannte Felder und initialisiert die Editierwerte.</summary>
+    private void SetFormFields(IReadOnlyList<PdfFormField> fields)
+    {
+        _formFields = fields;
+        _formValues.Clear();
+        foreach (var f in fields)
+        {
+            _formValues[f.Name] = f.Value.ToList();
+        }
+        _formPanelOpen = false;
+        _formStatus = null;
+        _formStatusIsError = false;
+    }
+
+    private string GetSingle(string name) =>
+        _formValues.TryGetValue(name, out var v) && v.Count > 0 ? v[0] : string.Empty;
+
+    private void SetSingle(string name, string? value) =>
+        _formValues[name] = string.IsNullOrEmpty(value)
+            ? new List<string>()
+            : new List<string> { value };
+
+    private bool IsChecked(string name) =>
+        _formValues.TryGetValue(name, out var v) && v.Contains("true");
+
+    private void SetChecked(string name, bool on) =>
+        _formValues[name] = on ? new List<string> { "true" } : new List<string>();
+
+    private IReadOnlyList<string> GetMulti(string name) =>
+        _formValues.TryGetValue(name, out var v) ? v : Array.Empty<string>();
+
+    private void SetMulti(string name, object? value)
+    {
+        var arr = value switch
+        {
+            string[] strings => strings,
+            IEnumerable<string> en => en.ToArray(),
+            _ => Array.Empty<string>()
+        };
+        _formValues[name] = arr.ToList();
+    }
+
+    private async Task JumpToFormFieldPage(PdfFormField field)
+    {
+        if (field.PageNumber >= 1 && _handle is not null && field.PageNumber <= _handle.PageCount)
+        {
+            await GoToPageAsync(field.PageNumber);
+        }
+    }
+
+    /// <summary>
+    /// Schreibt die editierten Werte zurück ins PDF (FA-041) und lädt das
+    /// Ergebnis als <c>&lt;name&gt;.filled.pdf</c> herunter. ReadOnly-Felder
+    /// werden nicht angefasst.
+    /// </summary>
+    private async Task SaveFilledFormAsync()
+    {
+        if (_originalPdfBytes is null || !HasFormFields || _isFillingForm) return;
+
+        _isFillingForm = true;
+        _formStatus = null;
+        _formStatusIsError = false;
+        try
+        {
+            var editable = _formFields.Where(f => !f.ReadOnly).Select(f => f.Name).ToHashSet();
+            var values = _formValues
+                .Where(kv => editable.Contains(kv.Key))
+                .Select(kv => new FormFieldValue(kv.Key, kv.Value.ToArray()))
+                .ToList();
+
+            var options = new FillFormOptions(
+                _formSaveFlatten ? FormSaveMode.Flatten : FormSaveMode.KeepEditable);
+
+            await using var ms = new MemoryStream(_originalPdfBytes, writable: false);
+            var filled = await FormService.FillAsync(ms, values, options, CancellationToken.None);
+
+            var baseName = !string.IsNullOrWhiteSpace(_currentFilename)
+                ? System.IO.Path.GetFileNameWithoutExtension(_currentFilename)
+                : (_handle?.Title ?? "pagebound");
+            var safeBase = string.Concat(baseName.Select(c =>
+                char.IsLetterOrDigit(c) || c is '_' or '-' or '.' or ' ' ? c : '_'));
+            var downloadName = $"{safeBase}.filled.pdf";
+
+            await JS.InvokeVoidAsync(
+                "pageboundShortcuts.downloadBytes",
+                downloadName,
+                Convert.ToBase64String(filled),
+                "application/pdf");
+
+            _formStatus = L.T("reader.form.saved", new Dictionary<string, object> { ["name"] = downloadName });
+        }
+        catch (Exception ex)
+        {
+            _formStatus = L.T("reader.form.saveError", new Dictionary<string, object> { ["error"] = ex.Message });
+            _formStatusIsError = true;
+        }
+        finally
+        {
+            _isFillingForm = false;
+            await InvokeAsync(StateHasChanged);
+        }
     }
 
     // --- OCR (FA-050) -----------------------------------------------------

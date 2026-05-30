@@ -10,7 +10,17 @@
 // Entsprechende C#-Klasse: Pagebound.Infrastructure.Pdf.JsPdfLibManipulator.
 // =============================================================================
 
-import { PDFDocument, PDFName, PDFString } from "pdf-lib";
+import {
+  PDFDocument,
+  PDFName,
+  PDFString,
+  PDFRef,
+  PDFTextField,
+  PDFCheckBox,
+  PDFRadioGroup,
+  PDFDropdown,
+  PDFOptionList
+} from "pdf-lib";
 import * as pdfjsLib from "pdfjs-dist";
 
 // Eigene Worker-Konfig — diese Bridge ist ein separater IIFE-Bundle, der
@@ -159,4 +169,204 @@ export async function compressPdf(
   outDoc.setCreator("Pagebound");
   outDoc.setProducer("Pagebound Compress");
   return await outDoc.save({ updateMetadata: false });
+}
+
+// ============================================================================
+// AcroForms: Formularfelder lesen + ausfüllen (FA-040 / FA-041)
+// ----------------------------------------------------------------------------
+// pdf-lib bringt eine vollständige Form-API mit (getForm/getFields/setText/...).
+// getFormFields liefert eine flache Feldliste; fillForm setzt die Werte und
+// speichert — optional geflattet (Werte fixiert, Felder nicht mehr editierbar).
+// Entspricht Pagebound.Infrastructure.Pdf.JsPdfFormService auf der C#-Seite.
+//
+// Der Feldtyp wird als String ("Text"/"Checkbox"/...) zurückgegeben, weil die
+// JSInterop-Deserialisierung C#-Enums sonst als Zahl erwarten würde —
+// JsPdfFormService mappt den String auf das Domain-Enum.
+// ============================================================================
+
+export interface FormFieldDto {
+  name: string;
+  type: "Text" | "Checkbox" | "Radio" | "Dropdown" | "ListBox";
+  /** Aktuelle Werte: Text/Radio/Dropdown 0..1, Checkbox ["true"] oder [], ListBox 0..n. */
+  value: string[];
+  /** Wählbare Optionen bei Radio/Dropdown/ListBox; leer bei Text/Checkbox. */
+  options: string[];
+  readOnly: boolean;
+  required: boolean;
+  /** 1-basierte Seitenzahl, 0 = nicht ermittelbar. */
+  pageNumber: number;
+}
+
+export interface FormFieldValueDto {
+  name: string;
+  value: string[];
+}
+
+export interface FillFormDto {
+  flatten: boolean;
+}
+
+function classifyFormField(field: unknown): FormFieldDto["type"] | null {
+  if (field instanceof PDFTextField) return "Text";
+  if (field instanceof PDFCheckBox) return "Checkbox";
+  if (field instanceof PDFRadioGroup) return "Radio";
+  if (field instanceof PDFDropdown) return "Dropdown";
+  if (field instanceof PDFOptionList) return "ListBox";
+  return null; // Buttons / Signaturfelder etc. ignorieren wir bewusst
+}
+
+function safeBool(fn: () => boolean): boolean {
+  try {
+    return fn();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Baut eine Map von Widget-Dict-Instanz → 1-basierte Seitenzahl, indem die
+ * Annotation-Arrays aller Seiten durchlaufen werden. pdf-lib cached gelookupte
+ * Objekte, daher ist die Dict-Instanz eines Widgets identisch mit dem Eintrag
+ * im Annots-Array seiner Seite.
+ */
+function buildWidgetPageMap(doc: PDFDocument): Map<unknown, number> {
+  const map = new Map<unknown, number>();
+  const pages = doc.getPages();
+  pages.forEach((page, idx) => {
+    const annots = page.node.Annots();
+    if (!annots) return;
+    for (const ref of annots.asArray()) {
+      try {
+        const obj = ref instanceof PDFRef ? doc.context.lookup(ref) : ref;
+        if (obj) map.set(obj, idx + 1);
+      } catch {
+        // defekte/zirkuläre Referenz — überspringen
+      }
+    }
+  });
+  return map;
+}
+
+function formFieldPageNumber(field: any, widgetPageMap: Map<unknown, number>): number {
+  try {
+    for (const widget of field.acroField.getWidgets()) {
+      const page = widgetPageMap.get(widget.dict);
+      if (page) return page;
+    }
+  } catch {
+    // Feld ohne (auflösbare) Widgets
+  }
+  return 0;
+}
+
+export async function getFormFields(pdfBytes: Uint8Array): Promise<FormFieldDto[]> {
+  const doc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
+  const form = doc.getForm();
+  const fields = form.getFields();
+  if (!fields || fields.length === 0) return [];
+
+  const widgetPageMap = buildWidgetPageMap(doc);
+  const result: FormFieldDto[] = [];
+
+  for (const field of fields) {
+    const type = classifyFormField(field);
+    if (!type) continue;
+
+    let value: string[] = [];
+    let options: string[] = [];
+
+    switch (type) {
+      case "Text": {
+        const t = (field as PDFTextField).getText();
+        value = t ? [t] : [];
+        break;
+      }
+      case "Checkbox":
+        value = (field as PDFCheckBox).isChecked() ? ["true"] : [];
+        break;
+      case "Radio": {
+        const rg = field as PDFRadioGroup;
+        options = rg.getOptions();
+        const sel = rg.getSelected();
+        value = sel ? [sel] : [];
+        break;
+      }
+      case "Dropdown": {
+        const dd = field as PDFDropdown;
+        options = dd.getOptions();
+        value = dd.getSelected() ?? [];
+        break;
+      }
+      case "ListBox": {
+        const ol = field as PDFOptionList;
+        options = ol.getOptions();
+        value = ol.getSelected() ?? [];
+        break;
+      }
+    }
+
+    result.push({
+      name: field.getName(),
+      type,
+      value,
+      options,
+      readOnly: safeBool(() => field.isReadOnly()),
+      required: safeBool(() => field.isRequired()),
+      pageNumber: formFieldPageNumber(field, widgetPageMap)
+    });
+  }
+
+  return result;
+}
+
+export async function fillForm(
+  pdfBytes: Uint8Array,
+  values: FormFieldValueDto[],
+  options: FillFormDto
+): Promise<Uint8Array> {
+  const doc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
+  const form = doc.getForm();
+
+  for (const entry of values ?? []) {
+    let field: any;
+    try {
+      field = form.getField(entry.name);
+    } catch {
+      continue; // Feld nicht (mehr) vorhanden
+    }
+    const vals = entry.value ?? [];
+    try {
+      if (field instanceof PDFTextField) {
+        field.setText(vals.length > 0 ? vals[0] : undefined);
+      } else if (field instanceof PDFCheckBox) {
+        if (vals.includes("true")) field.check();
+        else field.uncheck();
+      } else if (field instanceof PDFRadioGroup) {
+        if (vals.length > 0) field.select(vals[0]);
+        else field.clear();
+      } else if (field instanceof PDFDropdown) {
+        field.clear();
+        if (vals.length > 0) field.select(vals);
+      } else if (field instanceof PDFOptionList) {
+        field.clear();
+        if (vals.length > 0) field.select(vals);
+      }
+    } catch (e) {
+      // Einzelfeld-Fehler (Wert nicht in Optionsliste, nicht-WinAnsi-Zeichen
+      // ohne eingebetteten Font, ...) nicht den ganzen Save abbrechen lassen.
+      console.warn(`[pagebound] fillForm: Feld '${entry.name}' nicht setzbar:`, e);
+    }
+  }
+
+  if (options?.flatten) {
+    form.flatten();
+  } else {
+    try {
+      form.updateFieldAppearances();
+    } catch (e) {
+      console.warn("[pagebound] fillForm: updateFieldAppearances fehlgeschlagen:", e);
+    }
+  }
+
+  return await doc.save({ updateMetadata: false });
 }

@@ -48,6 +48,7 @@ builder.Services.AddScoped<ISidecarService, JsonSidecarService>();
 builder.Services.AddScoped<ILibraryService, LibraryService>();
 builder.Services.AddScoped<IOcrService, TesseractOcrService>();
 builder.Services.AddScoped<IFileHandleService, FileSystemAccessHandleService>();
+builder.Services.AddScoped<IPdfFormService, JsPdfFormService>();
 
 var host = builder.Build();
 
