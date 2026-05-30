@@ -11,12 +11,14 @@ public sealed record CompressionOptions(
     bool RecompressImages = true);
 
 /// <summary>
-/// Optionen für die PDF-Verschlüsselung (FA-027).
+/// Optionen für die PDF-Verschlüsselung (FA-027). Der Web-Pfad
+/// (<c>ManagedPdfEncryptor</c>) nutzt immer AES-256 (ISO 32000-2 V5/R6);
+/// <see cref="Strength"/> ist für einen späteren Desktop-Pfad reserviert.
 /// </summary>
 public sealed record EncryptionOptions(
     string OwnerPassword,
     string? UserPassword = null,
-    EncryptionStrength Strength = EncryptionStrength.Aes128);
+    EncryptionStrength Strength = EncryptionStrength.Aes256);
 
 public enum EncryptionStrength
 {

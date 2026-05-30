@@ -22,11 +22,13 @@ public sealed class JsPdfLibManipulator : IPdfManipulator
 {
     private readonly IJSRuntime _js;
     private readonly PdfSharpManipulator _inner;
+    private readonly IPdfEncryptor _encryptor;
 
-    public JsPdfLibManipulator(IJSRuntime js, PdfSharpManipulator inner)
+    public JsPdfLibManipulator(IJSRuntime js, PdfSharpManipulator inner, IPdfEncryptor encryptor)
     {
         _js = js;
         _inner = inner;
+        _encryptor = encryptor;
     }
 
     public Task<byte[]> MergeAsync(IReadOnlyList<Stream> pdfs, CancellationToken cancellationToken)
@@ -81,9 +83,11 @@ public sealed class JsPdfLibManipulator : IPdfManipulator
         }
     }
 
+    // Verschlüsselung läuft managed über AES-256 (ISO 32000-2 V5/R6) im
+    // ManagedPdfEncryptor — NICHT über PdfSharpCore, dessen Security-Handler in
+    // WASM am MD5 crasht. V5/R6 nutzt nur SHA-256/384/512 + AES (FA-027, ADR-004).
     public Task<byte[]> EncryptAsync(Stream pdf, EncryptionOptions options, CancellationToken cancellationToken) =>
-        throw new NotImplementedException(
-            "EncryptAsync folgt in Release 0.8 (FA-027), siehe ADR-004 zu AES-256.");
+        _encryptor.EncryptAsync(pdf, options, cancellationToken);
 
     public async Task<byte[]> EmbedSignaturesAsync(
         Stream pdf,

@@ -1,8 +1,6 @@
-using Pagebound.Core.Domain;
 using PdfSharpCore.Fonts;
 using PdfSharpCore.Pdf;
 using PdfSharpCore.Pdf.IO;
-using PdfSharpCore.Pdf.Security;
 
 namespace Pagebound.Infrastructure.Pdf;
 
@@ -14,10 +12,12 @@ namespace Pagebound.Infrastructure.Pdf;
 /// der implementiert das volle <c>IPdfManipulator</c>-Interface und delegiert
 /// hierher nur die Operationen, die in Blazor WASM stabil laufen.
 ///
-/// Bewusst NICHT hier: Embed/Compress/Encrypt. Embed läuft über pdf-lib (JS),
-/// weil PdfSharpCores Save-Pfad intern <c>MD5.Create()</c> ruft und der
-/// WASM-CryptoConfig MD5 nicht kennt. Compress/Encrypt kommen in Release 0.8
-/// (FA-026/FA-027), siehe ADR-004.
+/// Bewusst NICHT hier: Embed/Compress/Encrypt. Embed + Compress laufen über
+/// pdf-lib (JS), Encrypt über <c>ManagedPdfEncryptor</c> (managed AES-256,
+/// V5/R6) — alle drei, weil PdfSharpCores eigener Verschlüsselungs-/Save-Pfad
+/// intern <c>MD5.Create()</c> ruft und der WASM-CryptoConfig MD5 nicht kennt
+/// (ADR-004). <see cref="NormalizeAsync"/> liefert dem Encryptor die klassische
+/// Struktur.
 /// </summary>
 public sealed class PdfSharpManipulator
 {
@@ -178,28 +178,17 @@ public sealed class PdfSharpManipulator
         return Save(doc);
     }
 
-    public async Task<byte[]> EncryptAsync(
-        Stream pdf,
-        EncryptionOptions options,
-        CancellationToken cancellationToken)
+    /// <summary>
+    /// Öffnet die PDF und speichert sie unverändert wieder. Normalisiert damit
+    /// auf PdfSharpCores klassische, unkomprimierte Struktur (klassische
+    /// xref-Tabelle, direkte <c>/Length</c>) — die Grundlage, auf der der
+    /// nachgelagerte managed AES-256-Encryptor (<c>PdfAesEncryptor</c>) arbeitet.
+    /// </summary>
+    public async Task<byte[]> NormalizeAsync(Stream pdf, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(pdf);
-        ArgumentNullException.ThrowIfNull(options);
-        if (string.IsNullOrEmpty(options.OwnerPassword))
-            throw new ArgumentException("Owner-Passwort darf nicht leer sein.", nameof(options));
-        if (options.Strength == EncryptionStrength.Aes256)
-            throw new NotSupportedException(
-                "AES-256 wird von PdfSharpCore 1.x nicht unterstützt. " +
-                "Upgrade auf PdfSharp 6.x geplant für Release 1.1 (ADR-004).");
-
         await using var buffered = await CopyToSeekableAsync(pdf, cancellationToken).ConfigureAwait(false);
         using var doc = PdfReader.Open(buffered, PdfDocumentOpenMode.Modify);
-
-        doc.SecuritySettings.DocumentSecurityLevel = PdfDocumentSecurityLevel.Encrypted128Bit;
-        doc.SecuritySettings.OwnerPassword = options.OwnerPassword;
-        if (options.UserPassword is not null)
-            doc.SecuritySettings.UserPassword = options.UserPassword;
-
         return Save(doc);
     }
 
