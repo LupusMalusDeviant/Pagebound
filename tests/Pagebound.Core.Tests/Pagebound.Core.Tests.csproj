@@ -22,6 +22,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Pagebound.Core\Pagebound.Core.csproj" />
+    <ProjectReference Include="..\..\src\Pagebound.Infrastructure\Pagebound.Infrastructure.csproj" />
   </ItemGroup>
 
 </Project>

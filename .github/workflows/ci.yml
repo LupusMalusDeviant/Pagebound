@@ -85,18 +85,35 @@ jobs:
       - name: Restore .NET packages
         run: dotnet restore
 
-      - name: Install Playwright browsers
-        run: |
-          dotnet build tests/Pagebound.E2ETests --configuration Release
-          pwsh tests/Pagebound.E2ETests/bin/Release/net10.0/playwright.ps1 install --with-deps chromium
-
       - name: Build CSS + JS bridges
         working-directory: src/Pagebound.Web
         run: |
           npm ci
           npm run build
 
+      - name: Publish Blazor WASM
+        run: dotnet publish src/Pagebound.Web --configuration Release --output ./publish
+
+      - name: Build E2E test project
+        run: dotnet build tests/Pagebound.E2ETests --configuration Release
+
+      - name: Install Playwright browsers
+        run: pwsh tests/Pagebound.E2ETests/bin/Release/net10.0/playwright.ps1 install --with-deps chromium
+
+      - name: Serve app in background
+        run: |
+          npm install -g serve@latest
+          serve -s ./publish/wwwroot -l 5000 &
+          echo "App server started on port 5000"
+          # Wait for the server to be ready
+          for i in $(seq 1 30); do
+            if nc -z localhost 5000; then break; fi
+            sleep 1
+          done
+
       - name: Run E2E tests
+        env:
+          PAGEBOUND_URL: http://localhost:5000
         run: dotnet test tests/Pagebound.E2ETests --configuration Release --no-build
 
       - name: Upload Playwright report
