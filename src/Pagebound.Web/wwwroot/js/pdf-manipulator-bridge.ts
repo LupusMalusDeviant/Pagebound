@@ -19,7 +19,8 @@ import {
   PDFCheckBox,
   PDFRadioGroup,
   PDFDropdown,
-  PDFOptionList
+  PDFOptionList,
+  degrees
 } from "pdf-lib";
 import * as pdfjsLib from "pdfjs-dist";
 
@@ -437,4 +438,99 @@ export async function imagesToPdf(
   doc.setCreator("Pagebound");
   doc.setProducer("Pagebound Image-to-PDF");
   return await doc.save();
+}
+
+// ============================================================================
+// Seiten-Operationen (FA-020..024) + Normalize — pdf-lib statt PdfSharpCore
+// ----------------------------------------------------------------------------
+// PdfSharpCore.Save crasht in Blazor WASM (MD5 im Security-Handler via
+// CryptoConfig-Reflection → TargetInvocationException) — selbst bei plainem
+// Save. Daher laufen Merge/Split/Reorder/Delete/Rotate + Normalize hier über
+// pdf-lib (copyPages/setRotation/save), das kein MD5 braucht.
+// useObjectStreams:false → klassische xref-Tabelle (Voraussetzung u.a. für den
+// PdfAesEncryptor, der die normalisierte Ausgabe objektweise parst).
+// ============================================================================
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let bin = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(bin);
+}
+
+export async function normalizePdf(pdfBytes: Uint8Array): Promise<Uint8Array> {
+  const doc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
+  return await doc.save({ useObjectStreams: false });
+}
+
+export async function mergePdfs(pdfsBase64: string[]): Promise<Uint8Array> {
+  const out = await PDFDocument.create();
+  for (const b64 of pdfsBase64 ?? []) {
+    const src = await PDFDocument.load(base64ToBytes(b64), { ignoreEncryption: true });
+    const pages = await out.copyPages(src, src.getPageIndices());
+    pages.forEach((p) => out.addPage(p));
+  }
+  return await out.save({ useObjectStreams: false });
+}
+
+export async function splitPdf(pdfBytes: Uint8Array, splitAfterPages: number[]): Promise<string[]> {
+  const src = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
+  const total = src.getPageCount();
+  const points = [...new Set((splitAfterPages ?? []).filter((p) => p >= 1 && p < total))].sort((a, b) => a - b);
+
+  const ranges: Array<[number, number]> = [];
+  let cursor = 0;
+  for (const sp of points) {
+    ranges.push([cursor, sp]);
+    cursor = sp;
+  }
+  ranges.push([cursor, total]);
+
+  const results: string[] = [];
+  for (const [start, end] of ranges) {
+    const part = await PDFDocument.create();
+    const idx: number[] = [];
+    for (let i = start; i < end; i++) idx.push(i);
+    const pages = await part.copyPages(src, idx);
+    pages.forEach((p) => part.addPage(p));
+    results.push(bytesToBase64(await part.save({ useObjectStreams: false })));
+  }
+  return results;
+}
+
+export async function reorderPdf(pdfBytes: Uint8Array, newOrder: number[]): Promise<Uint8Array> {
+  const src = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
+  const out = await PDFDocument.create();
+  const idx = (newOrder ?? []).map((n) => n - 1).filter((i) => i >= 0 && i < src.getPageCount());
+  const pages = await out.copyPages(src, idx);
+  pages.forEach((p) => out.addPage(p));
+  return await out.save({ useObjectStreams: false });
+}
+
+export async function deletePages(pdfBytes: Uint8Array, pageIndices: number[]): Promise<Uint8Array> {
+  const src = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
+  const del = new Set(pageIndices ?? []);
+  const keep: number[] = [];
+  for (let i = 1; i <= src.getPageCount(); i++) if (!del.has(i)) keep.push(i - 1);
+  const out = await PDFDocument.create();
+  const pages = await out.copyPages(src, keep);
+  pages.forEach((p) => out.addPage(p));
+  return await out.save({ useObjectStreams: false });
+}
+
+export async function rotatePages(
+  pdfBytes: Uint8Array,
+  rotations: Record<string, number>
+): Promise<Uint8Array> {
+  const doc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
+  const pages = doc.getPages();
+  for (const [key, deg] of Object.entries(rotations ?? {})) {
+    const idx = parseInt(key, 10) - 1;
+    if (idx < 0 || idx >= pages.length) continue;
+    const current = pages[idx].getRotation().angle;
+    pages[idx].setRotation(degrees((((current + deg) % 360) + 360) % 360));
+  }
+  return await doc.save({ useObjectStreams: false });
 }

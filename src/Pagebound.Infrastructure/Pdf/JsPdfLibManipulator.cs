@@ -5,46 +5,80 @@ using Pagebound.Core.Domain;
 namespace Pagebound.Infrastructure.Pdf;
 
 /// <summary>
-/// <see cref="IPdfManipulator"/>-Implementation für Blazor WASM. Bettet
-/// Signaturen via <c>pdf-lib</c> (JS-Bridge) ein und delegiert Seiten-Operationen
-/// (Merge/Split/Reorder/Delete/Rotate) an den inneren <see cref="PdfSharpManipulator"/>.
+/// <see cref="IPdfManipulator"/>-Implementation für Blazor WASM — vollständig
+/// über <c>pdf-lib</c> (JS-Bridge). Seiten-Operationen (Merge/Split/Reorder/
+/// Delete/Rotate) nutzen pdf-libs <c>copyPages</c>/<c>setRotation</c>/<c>save</c>,
+/// Compress die PDF.js-Rasterung, Signatur-Embed pdf-libs Draw-API,
+/// Verschlüsselung den managed <see cref="IPdfEncryptor"/>.
 ///
-/// Hintergrund: PdfSharpCores Save-Pfad ruft im Konstruktor von
-/// <c>PdfStandardSecurityHandler</c> (lazy via Trailer-Dictionary mit
-/// <c>VCF.CreateIndirect</c>) <c>MD5.Create()</c> auf — das schlägt unter
-/// Blazor WebAssembly mit <c>Cryptography_UnknownHashAlgorithm, MD5</c> fehl,
-/// weil der WASM-<c>HashProviderDispenser</c> MD5 nicht kennt. pdf-lib hat
-/// diese Abhängigkeit nicht.
-///
-/// Compress/Encrypt sind im Web-Pfad nicht angeschlossen (Release 0.8, ADR-004).
+/// Bewusst KEIN PdfSharpCore: dessen Save-Pfad ruft (auch bei plainem Save) im
+/// Konstruktor des <c>PdfStandardSecurityHandler</c> <c>MD5.Create()</c> auf —
+/// das schlägt unter Blazor WASM mit <c>TargetInvocationException</c> fehl
+/// (CryptoConfig-Reflection kennt MD5 nicht). pdf-lib hat diese Abhängigkeit
+/// nicht (verifiziert im Browser-Smoke-Test, 2026-05).
 /// </summary>
 public sealed class JsPdfLibManipulator : IPdfManipulator
 {
     private readonly IJSRuntime _js;
-    private readonly PdfSharpManipulator _inner;
     private readonly IPdfEncryptor _encryptor;
 
-    public JsPdfLibManipulator(IJSRuntime js, PdfSharpManipulator inner, IPdfEncryptor encryptor)
+    public JsPdfLibManipulator(IJSRuntime js, IPdfEncryptor encryptor)
     {
         _js = js;
-        _inner = inner;
         _encryptor = encryptor;
     }
 
-    public Task<byte[]> MergeAsync(IReadOnlyList<Stream> pdfs, CancellationToken cancellationToken)
-        => _inner.MergeAsync(pdfs, cancellationToken);
+    public async Task<byte[]> MergeAsync(IReadOnlyList<Stream> pdfs, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(pdfs);
+        if (pdfs.Count == 0) throw new ArgumentException("Mindestens eine PDF erforderlich.", nameof(pdfs));
 
-    public Task<IReadOnlyList<byte[]>> SplitAsync(Stream pdf, IReadOnlyList<int> splitAfterPages, CancellationToken cancellationToken)
-        => _inner.SplitAsync(pdf, splitAfterPages, cancellationToken);
+        var base64 = new string[pdfs.Count];
+        for (var i = 0; i < pdfs.Count; i++)
+            base64[i] = Convert.ToBase64String(await ReadAllAsync(pdfs[i], cancellationToken).ConfigureAwait(false));
 
-    public Task<byte[]> ReorderAsync(Stream pdf, IReadOnlyList<int> newOrder, CancellationToken cancellationToken)
-        => _inner.ReorderAsync(pdf, newOrder, cancellationToken);
+        return await InvokeBytesAsync("mergePdfs", cancellationToken, new object[] { base64 }).ConfigureAwait(false);
+    }
 
-    public Task<byte[]> DeletePagesAsync(Stream pdf, IReadOnlyList<int> pageIndices, CancellationToken cancellationToken)
-        => _inner.DeletePagesAsync(pdf, pageIndices, cancellationToken);
+    public async Task<IReadOnlyList<byte[]>> SplitAsync(Stream pdf, IReadOnlyList<int> splitAfterPages, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(splitAfterPages);
+        var bytes = await ReadAllAsync(pdf, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var parts = await _js.InvokeAsync<string[]>(
+                "pageboundPdfManipulator.splitPdf", cancellationToken, bytes, splitAfterPages.ToArray()).ConfigureAwait(false);
+            return parts.Select(Convert.FromBase64String).ToList();
+        }
+        catch (JSException jsex)
+        {
+            throw new InvalidOperationException($"[stage:split] pdf-lib splitPdf fehlgeschlagen: {jsex.Message}", jsex);
+        }
+    }
 
-    public Task<byte[]> RotateAsync(Stream pdf, IReadOnlyDictionary<int, int> rotationDegrees, CancellationToken cancellationToken)
-        => _inner.RotateAsync(pdf, rotationDegrees, cancellationToken);
+    public async Task<byte[]> ReorderAsync(Stream pdf, IReadOnlyList<int> newOrder, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(newOrder);
+        var bytes = await ReadAllAsync(pdf, cancellationToken).ConfigureAwait(false);
+        return await InvokeBytesAsync("reorderPdf", cancellationToken, new object[] { bytes, newOrder.ToArray() }).ConfigureAwait(false);
+    }
+
+    public async Task<byte[]> DeletePagesAsync(Stream pdf, IReadOnlyList<int> pageIndices, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(pageIndices);
+        var bytes = await ReadAllAsync(pdf, cancellationToken).ConfigureAwait(false);
+        return await InvokeBytesAsync("deletePages", cancellationToken, new object[] { bytes, pageIndices.ToArray() }).ConfigureAwait(false);
+    }
+
+    public async Task<byte[]> RotateAsync(Stream pdf, IReadOnlyDictionary<int, int> rotationDegrees, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(rotationDegrees);
+        var bytes = await ReadAllAsync(pdf, cancellationToken).ConfigureAwait(false);
+        // Dictionary<int,int> → JSON-Objekt {"<seite>": <grad>}; pdf-lib liest Object.entries.
+        var map = rotationDegrees.ToDictionary(
+            kv => kv.Key.ToString(System.Globalization.CultureInfo.InvariantCulture), kv => kv.Value);
+        return await InvokeBytesAsync("rotatePages", cancellationToken, new object[] { bytes, map }).ConfigureAwait(false);
+    }
 
     public async Task<byte[]> CompressAsync(
         Stream pdf,
@@ -142,6 +176,28 @@ public sealed class JsPdfLibManipulator : IPdfManipulator
         {
             throw new InvalidOperationException(
                 $"[stage:js-embed] pdf-lib embedSignatures fehlgeschlagen: {jsex.Message}", jsex);
+        }
+    }
+
+    private static async Task<byte[]> ReadAllAsync(Stream pdf, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(pdf);
+        await using var ms = new MemoryStream();
+        await pdf.CopyToAsync(ms, cancellationToken).ConfigureAwait(false);
+        return ms.ToArray();
+    }
+
+    private async Task<byte[]> InvokeBytesAsync(string fn, CancellationToken cancellationToken, object[] args)
+    {
+        try
+        {
+            var result = await _js.InvokeAsync<byte[]>(
+                $"pageboundPdfManipulator.{fn}", cancellationToken, args).ConfigureAwait(false);
+            return result ?? Array.Empty<byte>();
+        }
+        catch (JSException jsex)
+        {
+            throw new InvalidOperationException($"[stage:{fn}] pdf-lib {fn} fehlgeschlagen: {jsex.Message}", jsex);
         }
     }
 
