@@ -50,6 +50,7 @@ builder.Services.AddScoped<ILibraryService, LibraryService>();
 builder.Services.AddScoped<IOcrService, TesseractOcrService>();
 builder.Services.AddScoped<IFileHandleService, FileSystemAccessHandleService>();
 builder.Services.AddScoped<IPdfFormService, JsPdfFormService>();
+builder.Services.AddScoped<IImageToPdfConverter, JsImageToPdfConverter>();
 
 var host = builder.Build();
 

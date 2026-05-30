@@ -336,5 +336,17 @@
   "tools.encrypt.button": "🔒 Encrypt",
   "tools.encrypt.running": "Encrypting …",
   "tools.encrypt.result": "Encrypted: {name} — the password is required to open it.",
-  "tools.encrypt.note": "AES-256 (V5/R6). Page content (streams) is encrypted; string metadata (title, notes, bookmarks) stays in clear text for now."
+  "tools.encrypt.note": "AES-256 (V5/R6). Page content (streams) is encrypted; string metadata (title, notes, bookmarks) stays in clear text for now.",
+  "tools.img2pdf.heading": "Images → PDF",
+  "tools.img2pdf.choose": "🖼 Choose images",
+  "tools.img2pdf.hint": "Pick PNG/JPG — one page per image. Drag & drop to reorder.",
+  "tools.img2pdf.pageSize": "Page size:",
+  "tools.img2pdf.size.image": "Image size",
+  "tools.img2pdf.size.a4": "A4",
+  "tools.img2pdf.size.letter": "Letter",
+  "tools.img2pdf.build": "📄 Create PDF ({count})",
+  "tools.img2pdf.building": "Creating …",
+  "tools.img2pdf.clear": "Clear",
+  "tools.img2pdf.remove": "Remove image",
+  "tools.img2pdf.result": "PDF created: {name} ({count} pages)"
 }
