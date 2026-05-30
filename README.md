@@ -69,6 +69,7 @@ Details: [docs/02-lastenheft.md](docs/02-lastenheft.md) Abschnitt 6.
 | [docs/01-requirements.md](docs/01-requirements.md) | Anforderungsdokument (Vision, FA-/NFA-IDs, Erfolgsktiterien) |
 | [docs/02-lastenheft.md](docs/02-lastenheft.md) | Lastenheft (Auftraggeber-Sicht, MoSCoW-Priorisierung, Releases) |
 | [docs/03-pflichtenheft.md](docs/03-pflichtenheft.md) | Pflichtenheft (Architektur, 17 Service-Interfaces, Test-Konzept, ADRs) |
+| [docs/04-deployment-guide.md](docs/04-deployment-guide.md) | Deployment-Guide (Docker, dotnet run, static hosting, CI/CD, TLS, Troubleshooting) |
 | [docs/adrs/](docs/adrs/) | Architecture Decision Records — einzelne Entscheidungen im Detail |
 | [CHANGELOG.md](CHANGELOG.md) | Was sich von Commit zu Commit ändert |
 
