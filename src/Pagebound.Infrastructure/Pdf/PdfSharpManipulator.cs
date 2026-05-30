@@ -1,6 +1,8 @@
+using Pagebound.Core.Domain;
 using PdfSharpCore.Fonts;
 using PdfSharpCore.Pdf;
 using PdfSharpCore.Pdf.IO;
+using PdfSharpCore.Pdf.Security;
 
 namespace Pagebound.Infrastructure.Pdf;
 
@@ -173,6 +175,31 @@ public sealed class PdfSharpManipulator
             // PdfSharp.Rotate ist additiv-replace: wir setzen den absoluten Wert.
             page.Rotate = (normalized + page.Rotate) % 360;
         }
+        return Save(doc);
+    }
+
+    public async Task<byte[]> EncryptAsync(
+        Stream pdf,
+        EncryptionOptions options,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(pdf);
+        ArgumentNullException.ThrowIfNull(options);
+        if (string.IsNullOrEmpty(options.OwnerPassword))
+            throw new ArgumentException("Owner-Passwort darf nicht leer sein.", nameof(options));
+        if (options.Strength == EncryptionStrength.Aes256)
+            throw new NotSupportedException(
+                "AES-256 wird von PdfSharpCore 1.x nicht unterstützt. " +
+                "Upgrade auf PdfSharp 6.x geplant für Release 1.1 (ADR-004).");
+
+        await using var buffered = await CopyToSeekableAsync(pdf, cancellationToken).ConfigureAwait(false);
+        using var doc = PdfReader.Open(buffered, PdfDocumentOpenMode.Modify);
+
+        doc.SecuritySettings.DocumentSecurityLevel = PdfDocumentSecurityLevel.Encrypted128Bit;
+        doc.SecuritySettings.OwnerPassword = options.OwnerPassword;
+        if (options.UserPassword is not null)
+            doc.SecuritySettings.UserPassword = options.UserPassword;
+
         return Save(doc);
     }
 
