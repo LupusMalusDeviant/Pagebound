@@ -5,12 +5,18 @@
 @inject ILibraryService LibrarySvc
 @inject NavigationManager Nav
 
-<div class="flex h-screen w-screen overflow-hidden bg-pb-bg text-pb-fg">
+<div class="flex h-screen w-screen overflow-hidden text-pb-fg">
 
-    @* Library-Sidebar — auto-collapse beim Lesen, hier vorerst Stub *@
-    <aside class="hidden md:flex w-64 flex-col border-r border-pb-border bg-pb-surface"
+    @* Library-Sidebar — auto-collapse beim Lesen, hier vorerst Stub.
+       pb-glass setzt Background, Border (rundherum) und Shadow; wir
+       überschreiben unten + oben + links auf 0, damit die Sidebar an die
+       Viewport-Kante bündig stößt und nur die rechte Trennlinie sichtbar
+       bleibt. *@
+    <aside class="hidden md:flex w-64 flex-col pb-glass"
+           style="border-top: 0; border-bottom: 0; border-left: 0; border-radius: 0;"
            aria-label="@L.T("nav.library")">
-        <div class="px-4 py-3 border-b border-pb-border">
+        <div class="px-4 py-3"
+             style="border-bottom: 1px solid var(--pb-glass-border)">
             <a href="/" class="block">
                 <h1 class="text-lg font-semibold tracking-tight">@L.T("app.title")</h1>
                 <p class="text-xs text-pb-fg-muted">@L.T("app.preAlpha")</p>
@@ -76,7 +82,8 @@
     @* Hauptbereich (Tabs + Content) *@
     <main class="flex-1 flex flex-col min-w-0" role="main">
         @* Tab-Leiste — vorerst Stub, rechts Theme + Sprache + Version (FA-100/101) *@
-        <header class="flex items-center justify-between border-b border-pb-border px-4 h-12 gap-3">
+        <header class="flex items-center justify-between px-4 h-12 gap-3 pb-glass"
+                style="border-top: 0; border-left: 0; border-right: 0; border-radius: 0;">
             <div class="text-sm text-pb-fg-muted">@L.T("tabs.comingSoon")</div>
             <div class="flex items-center gap-2 text-xs">
                 <button type="button"

@@ -38,6 +38,16 @@
   --pb-surface:   #f8fafc;
   --pb-border:    #e2e8f0;
   --pb-accent:    #2563eb;
+
+  /* Glassmorphism: semi-transparente Surfaces mit backdrop-blur. Hellere
+     Themes brauchen eine deutlich höhere Opacity, weil der Hintergrund hell
+     ist und der Glass-Effekt sonst zu durchsichtig wirkt. */
+  --pb-glass-bg:        rgb(255 255 255 / 0.55);
+  --pb-glass-bg-strong: rgb(255 255 255 / 0.80);
+  --pb-glass-border:    rgb(15 23 42 / 0.08);
+  --pb-glass-shadow:    0 1px 2px rgb(15 23 42 / 0.04), 0 8px 24px rgb(15 23 42 / 0.06);
+  --pb-glass-blur:      14px;
+
   color-scheme: light;
 }
 
@@ -49,6 +59,13 @@
   --pb-surface:   #1e293b;
   --pb-border:    #334155;
   --pb-accent:    #60a5fa;
+
+  --pb-glass-bg:        rgb(30 41 59 / 0.55);
+  --pb-glass-bg-strong: rgb(30 41 59 / 0.78);
+  --pb-glass-border:    rgb(226 232 240 / 0.10);
+  --pb-glass-shadow:    0 1px 2px rgb(0 0 0 / 0.35), 0 10px 30px rgb(0 0 0 / 0.40);
+  --pb-glass-blur:      16px;
+
   color-scheme: dark;
 }
 
@@ -60,6 +77,13 @@
   --pb-surface:   #ede5cd;
   --pb-border:    #d8c9a8;
   --pb-accent:    #8b5a2b;
+
+  --pb-glass-bg:        rgb(237 229 205 / 0.62);
+  --pb-glass-bg-strong: rgb(237 229 205 / 0.85);
+  --pb-glass-border:    rgb(70 58 42 / 0.12);
+  --pb-glass-shadow:    0 1px 2px rgb(70 58 42 / 0.08), 0 8px 24px rgb(70 58 42 / 0.10);
+  --pb-glass-blur:      14px;
+
   color-scheme: light;
 }
 
@@ -72,8 +96,64 @@
     --pb-surface:   #1e293b;
     --pb-border:    #334155;
     --pb-accent:    #60a5fa;
+
+    --pb-glass-bg:        rgb(30 41 59 / 0.55);
+    --pb-glass-bg-strong: rgb(30 41 59 / 0.78);
+    --pb-glass-border:    rgb(226 232 240 / 0.10);
+    --pb-glass-shadow:    0 1px 2px rgb(0 0 0 / 0.35), 0 10px 30px rgb(0 0 0 / 0.40);
+    --pb-glass-blur:      16px;
+
     color-scheme: dark;
   }
+}
+
+/* =============================================================================
+   Glassmorphism-Helper-Klassen (FA-100 Theme + Design-Polish)
+   ----------------------------------------------------------------------------
+   Drei Stufen:
+     .pb-glass         — leichte Transparenz, Standard für Sidebars + Toolbars
+     .pb-glass-strong  — kräftigere Opacity für Popovers + Editor-Karten
+                        (Text muss klar lesbar bleiben, Hintergrund nur leicht
+                        durchscheinen)
+     .pb-glass-flat    — ohne backdrop-filter (Fallback / wenn der darunter-
+                        liegende Bereich eh schon einfarbig ist)
+
+   Alle drei rendern fallback-freundlich: wenn `backdrop-filter` nicht
+   unterstützt wird (Safari < 14, ältere Firefox), bleibt der semi-transparente
+   Background als visueller Anker.
+============================================================================= */
+.pb-glass {
+  background-color: var(--pb-glass-bg);
+  border: 1px solid var(--pb-glass-border);
+  -webkit-backdrop-filter: blur(var(--pb-glass-blur)) saturate(150%);
+  backdrop-filter: blur(var(--pb-glass-blur)) saturate(150%);
+  box-shadow: var(--pb-glass-shadow);
+}
+
+.pb-glass-strong {
+  background-color: var(--pb-glass-bg-strong);
+  border: 1px solid var(--pb-glass-border);
+  -webkit-backdrop-filter: blur(calc(var(--pb-glass-blur) + 4px)) saturate(160%);
+  backdrop-filter: blur(calc(var(--pb-glass-blur) + 4px)) saturate(160%);
+  box-shadow: var(--pb-glass-shadow);
+}
+
+.pb-glass-flat {
+  background-color: var(--pb-glass-bg-strong);
+  border: 1px solid var(--pb-glass-border);
+}
+
+/* Subtile Gradient-Mesh als App-Hintergrund — das ist was Glassmorphism
+   überhaupt sichtbar macht; auf flachem Solid-Background sieht's flach aus.
+   Die Mesh-Punkte sind über alle Themes konsistent positioniert, nur die
+   Farben kommen aus den --pb-accent-Tönen. */
+body.pb-app-bg {
+  background-color: var(--pb-bg);
+  background-image:
+    radial-gradient(at 12% 14%, color-mix(in oklab, var(--pb-accent) 18%, transparent) 0px, transparent 50%),
+    radial-gradient(at 88% 22%, color-mix(in oklab, var(--pb-accent) 12%, transparent) 0px, transparent 55%),
+    radial-gradient(at 68% 88%, color-mix(in oklab, var(--pb-accent) 14%, transparent) 0px, transparent 55%);
+  background-attachment: fixed;
 }
 
 /* =============================================================================

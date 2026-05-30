@@ -16,7 +16,7 @@
         <p class="mt-1 text-sm text-pb-fg-muted">@L.T("tools.subheading")</p>
     </header>
 
-    <div class="max-w-4xl mx-auto rounded-lg border border-pb-border bg-pb-surface p-4">
+    <div class="max-w-4xl mx-auto rounded-lg pb-glass p-4">
         <label class="flex flex-col gap-2 text-sm">
             <span class="font-medium">@L.T("tools.choosePdf")</span>
             <InputFile OnChange="HandleFileSelectedAsync"
@@ -51,7 +51,7 @@
 
     @if (_handle is not null && _pages.Count > 0)
     {
-        <div class="max-w-4xl mx-auto mt-4 rounded-lg border border-pb-border bg-pb-surface p-3 flex flex-wrap items-center gap-2 text-sm">
+        <div class="max-w-4xl mx-auto mt-4 rounded-lg pb-glass p-3 flex flex-wrap items-center gap-2 text-sm">
             <span class="text-pb-fg-muted">@L.T("tools.selection.label")</span>
             <button type="button"
                     class="rounded border border-pb-border px-2 py-0.5 text-pb-fg-muted hover:text-pb-fg"
@@ -120,7 +120,7 @@
 
         @* Compress-Bar (FA-026) — eigene Reihe weil destruktiv (verliert Vektor-Text)
            und unabhängig von den Pages-Edits oben. *@
-        <div class="max-w-4xl mx-auto mt-2 rounded-lg border border-pb-border bg-pb-surface p-3 flex flex-wrap items-center gap-2 text-sm">
+        <div class="max-w-4xl mx-auto mt-2 rounded-lg pb-glass p-3 flex flex-wrap items-center gap-2 text-sm">
             <span class="text-pb-fg-muted">@L.T("tools.compress.label")</span>
             @foreach (var preset in CompressionPresets)
             {

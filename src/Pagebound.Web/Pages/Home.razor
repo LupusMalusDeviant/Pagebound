@@ -36,17 +36,17 @@
             @L.T("home.usp.heading")
         </h2>
         <div class="mt-3 grid gap-4 sm:grid-cols-3">
-            <article class="rounded-lg border border-pb-border bg-pb-surface p-4">
+            <article class="rounded-lg pb-glass p-4">
                 <div class="text-2xl">📝</div>
                 <h3 class="mt-2 text-sm font-semibold">@L.T("home.usp.signature.title")</h3>
                 <p class="mt-1 text-xs text-pb-fg-muted leading-relaxed">@L.T("home.usp.signature.body")</p>
             </article>
-            <article class="rounded-lg border border-pb-border bg-pb-surface p-4">
+            <article class="rounded-lg pb-glass p-4">
                 <div class="text-2xl">📚</div>
                 <h3 class="mt-2 text-sm font-semibold">@L.T("home.usp.library.title")</h3>
                 <p class="mt-1 text-xs text-pb-fg-muted leading-relaxed">@L.T("home.usp.library.body")</p>
             </article>
-            <article class="rounded-lg border border-pb-border bg-pb-surface p-4">
+            <article class="rounded-lg pb-glass p-4">
                 <div class="text-2xl">🔗</div>
                 <h3 class="mt-2 text-sm font-semibold">@L.T("home.usp.markdown.title")</h3>
                 <p class="mt-1 text-xs text-pb-fg-muted leading-relaxed">@L.T("home.usp.markdown.body")</p>
@@ -55,7 +55,7 @@
     </section>
 
     @* Built-in Features *@
-    <section class="mt-12 rounded-lg border border-pb-border bg-pb-surface p-6">
+    <section class="mt-12 rounded-lg pb-glass p-6">
         <h2 class="text-lg font-semibold">@L.T("home.builtin.heading")</h2>
         <ul class="mt-3 space-y-2 text-sm">
             <li>📄 @L.T("home.builtin.viewer")</li>
@@ -70,7 +70,7 @@
     @* Roadmap *@
     <section class="mt-8">
         <h2 class="text-lg font-semibold">@L.T("home.status.heading")</h2>
-        <div class="mt-3 overflow-x-auto rounded-lg border border-pb-border bg-pb-surface">
+        <div class="mt-3 overflow-x-auto rounded-lg pb-glass">
             <table class="w-full text-sm">
                 <tbody class="divide-y divide-pb-border">
                     @foreach (var (release, label, status, statusColor) in RoadmapRows())
@@ -97,7 +97,7 @@
     </section>
 
     @* Anti-Tracking-Hinweis *@
-    <section class="mt-8 rounded-lg border border-pb-border bg-pb-bg p-4 text-xs text-pb-fg-muted">
+    <section class="mt-8 rounded-lg pb-glass p-4 text-xs text-pb-fg-muted">
         <strong class="text-pb-fg">@L.T("home.privacy.title").</strong>
         @L.T("home.privacy.body")
     </section>

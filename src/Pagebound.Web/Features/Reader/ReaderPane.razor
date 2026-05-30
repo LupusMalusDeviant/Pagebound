@@ -26,7 +26,7 @@
         </p>
     </header>
 
-    <div class="max-w-4xl mx-auto rounded-lg border border-pb-border bg-pb-surface p-4">
+    <div class="max-w-4xl mx-auto rounded-lg pb-glass p-4">
         <label class="flex flex-col gap-2 text-sm">
             <span class="font-medium">@L.T("reader.choosePdf")</span>
             @if (_fsaSupported)
@@ -67,7 +67,7 @@
 
     @if (_handle is not null)
     {
-        <div class="max-w-4xl mx-auto mt-4 rounded-lg border border-pb-border bg-pb-surface p-4">
+        <div class="max-w-4xl mx-auto mt-4 rounded-lg pb-glass p-4">
             <form @onsubmit="DoSearchAsync" @onsubmit:preventDefault>
                 <div class="flex flex-wrap gap-2 items-center">
                     <input @bind="_searchQuery"
@@ -388,7 +388,7 @@
 
         @if (_signerPanelOpen)
         {
-            <div class="max-w-4xl mx-auto mt-2 rounded-lg border border-pb-border bg-pb-surface p-3">
+            <div class="max-w-4xl mx-auto mt-2 rounded-lg pb-glass-strong p-3">
                 <div class="flex items-center justify-between mb-2">
                     <span class="text-sm font-medium">@L.T("reader.signer.panel.heading")</span>
                     <span class="text-xs text-pb-fg-muted">@L.T("reader.signer.panel.subheading")</span>
@@ -448,7 +448,7 @@
 
         @if (_outlineOpen)
         {
-            <aside class="w-64 shrink-0 rounded-lg border border-pb-border bg-pb-surface p-3 max-h-[80vh] overflow-y-auto"
+            <aside class="w-64 shrink-0 rounded-lg pb-glass-strong p-3 max-h-[80vh] overflow-y-auto"
                    aria-label="@L.T("reader.outline.heading")">
                 <div class="flex items-center justify-between mb-2">
                     <h3 class="text-sm font-medium">@L.T("reader.outline.heading")</h3>
@@ -477,7 +477,7 @@
 
         @if (_thumbsOpen)
         {
-            <aside class="w-44 shrink-0 rounded-lg border border-pb-border bg-pb-surface p-2 max-h-[80vh] overflow-y-auto"
+            <aside class="w-44 shrink-0 rounded-lg pb-glass p-2 max-h-[80vh] overflow-y-auto"
                    aria-label="@L.T("reader.thumbs.heading")">
                 <div class="flex items-center justify-between mb-2 px-1">
                     <h3 class="text-sm font-medium">@L.T("reader.thumbs.heading")</h3>
@@ -720,7 +720,7 @@
                         var anchorLeftPct = (anchorX * 100).ToString("F2", CultureInfo.InvariantCulture);
                         var anchorTopPct = (anchorY * 100).ToString("F2", CultureInfo.InvariantCulture);
                         var translateY = anchorY < 0.08 ? "8px" : "calc(-100% - 6px)";
-                        <div class="absolute z-20 flex items-center gap-1 rounded-md border border-pb-border bg-pb-surface px-2 py-1 shadow-lg"
+                        <div class="absolute z-20 flex items-center gap-1 rounded-md pb-glass-strong px-2 py-1"
                              style="@($"left:{anchorLeftPct}%; top:{anchorTopPct}%; transform: translate(-50%, {translateY})")"
                              @onclick:stopPropagation>
                             <span class="text-xs text-pb-fg-muted mr-1">
@@ -749,7 +749,7 @@
                         var toolbarTranslateY = _pendingSelection.AnchorY < 0.08
                             ? "8px"
                             : "calc(-100% - 6px)";
-                        <div class="absolute z-20 flex items-center gap-1 rounded-md border border-pb-border bg-pb-surface px-2 py-1 shadow-lg"
+                        <div class="absolute z-20 flex items-center gap-1 rounded-md pb-glass-strong px-2 py-1"
                              style="@($"left:{anchorLeft}%; top:{anchorTop}%; transform: translate(-50%, {toolbarTranslateY})")"
                              @onmousedown:preventDefault
                              @onclick:stopPropagation>
@@ -783,7 +783,7 @@
                             var hlTranslateY = firstRect.Y < 0.08
                                 ? $"calc({firstRect.Height * 100:F2}% + 6px)"
                                 : "calc(-100% - 6px)";
-                            <div class="absolute z-20 flex items-center gap-1 rounded-md border border-pb-border bg-pb-surface px-2 py-1 shadow-lg"
+                            <div class="absolute z-20 flex items-center gap-1 rounded-md pb-glass-strong px-2 py-1"
                                  style="@($"left:{editLeft}%; top:{editTop}%; transform: translate(0, {hlTranslateY})")"
                                  @onclick:stopPropagation>
                                 <span class="text-xs text-pb-fg-muted mr-1">@L.T("reader.highlight.colorLabel")</span>
@@ -908,7 +908,7 @@
                         // Pin sitzt unten → Popover nach oben flippen.
                         var translateX = noteX > 0.55 ? "calc(-100% - 8px)" : "8px";
                         var translateY = noteY > 0.65 ? "calc(-100% + 8px)" : "-8px";
-                        <div class="absolute z-10 w-80 rounded-lg border border-pb-border bg-pb-surface shadow-xl p-3"
+                        <div class="absolute z-10 w-80 rounded-lg pb-glass-strong p-3"
                              style="@($"left:{editLeft}%; top:{editTop}%; transform: translate({translateX}, {translateY})")"
                              @onclick:stopPropagation>
                             <div class="flex items-center justify-between mb-2 gap-2">
