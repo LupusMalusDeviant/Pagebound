@@ -160,3 +160,71 @@ export async function compressPdf(
   outDoc.setProducer("Pagebound Compress");
   return await outDoc.save({ updateMetadata: false });
 }
+
+// ============================================================================
+// Bild → PDF (FA-025)
+// ----------------------------------------------------------------------------
+// Erzeugt aus PNG/JPG-Bildern eine PDF — je Bild eine Seite, in übergebener
+// Reihenfolge. Bilder kommen als Base64 (verschachtelte byte[] marshalled
+// Blazor nicht als Uint8Array), werden hier dekodiert und mit pdf-lib
+// (embedPng/embedJpg) eingebettet. Entspricht JsImageToPdfConverter.
+// ============================================================================
+
+export interface ImageInput {
+  base64: string;
+  mime: string;
+}
+
+export interface ImagesToPdfOptions {
+  /** "image" = Seite in Bildgröße, sonst feste Seite mit eingepasstem Bild. */
+  pageSize: "image" | "a4" | "letter";
+  marginPt: number;
+}
+
+function base64ToBytes(b64: string): Uint8Array {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+export async function imagesToPdf(
+  images: ImageInput[],
+  options: ImagesToPdfOptions
+): Promise<Uint8Array> {
+  const doc = await PDFDocument.create();
+  const A4: [number, number] = [595.28, 841.89];
+  const LETTER: [number, number] = [612, 792];
+  const margin = Math.max(0, options?.marginPt ?? 0);
+
+  for (const input of images ?? []) {
+    const bytes = base64ToBytes(input.base64);
+    const img = (input.mime || "").toLowerCase().includes("png")
+      ? await doc.embedPng(bytes)
+      : await doc.embedJpg(bytes);
+
+    if (options?.pageSize === "image" || !options?.pageSize) {
+      const page = doc.addPage([img.width, img.height]);
+      page.drawImage(img, { x: 0, y: 0, width: img.width, height: img.height });
+      continue;
+    }
+
+    // Feste Seite — Orientierung nach Bild-Seitenverhältnis, Bild "contain".
+    const [shortSide, longSide] = options.pageSize === "letter" ? LETTER : A4;
+    const portrait = img.height >= img.width;
+    const pageW = portrait ? shortSide : longSide;
+    const pageH = portrait ? longSide : shortSide;
+    const page = doc.addPage([pageW, pageH]);
+
+    const availW = Math.max(1, pageW - 2 * margin);
+    const availH = Math.max(1, pageH - 2 * margin);
+    const scale = Math.min(availW / img.width, availH / img.height);
+    const w = img.width * scale;
+    const h = img.height * scale;
+    page.drawImage(img, { x: (pageW - w) / 2, y: (pageH - h) / 2, width: w, height: h });
+  }
+
+  doc.setCreator("Pagebound");
+  doc.setProducer("Pagebound Image-to-PDF");
+  return await doc.save();
+}

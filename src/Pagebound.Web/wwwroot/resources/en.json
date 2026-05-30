@@ -311,5 +311,18 @@
   "tools.compress.quality.low": "Small (Q 40)",
   "tools.compress.quality.medium": "Medium (Q 70)",
   "tools.compress.quality.high": "Large (Q 90)",
-  "tools.compress.result": "Compressed: {orig} → {compressed} ({ratio}% smaller)"
+  "tools.compress.result": "Compressed: {orig} → {compressed} ({ratio}% smaller)",
+
+  "tools.img2pdf.heading": "Images → PDF",
+  "tools.img2pdf.choose": "🖼 Choose images",
+  "tools.img2pdf.hint": "Pick PNG/JPG — one page per image. Drag & drop to reorder.",
+  "tools.img2pdf.pageSize": "Page size:",
+  "tools.img2pdf.size.image": "Image size",
+  "tools.img2pdf.size.a4": "A4",
+  "tools.img2pdf.size.letter": "Letter",
+  "tools.img2pdf.build": "📄 Create PDF ({count})",
+  "tools.img2pdf.building": "Creating …",
+  "tools.img2pdf.clear": "Clear",
+  "tools.img2pdf.remove": "Remove image",
+  "tools.img2pdf.result": "PDF created: {name} ({count} pages)"
 }
