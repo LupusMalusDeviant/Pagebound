@@ -12,10 +12,12 @@ namespace Pagebound.Infrastructure.Pdf;
 /// der implementiert das volle <c>IPdfManipulator</c>-Interface und delegiert
 /// hierher nur die Operationen, die in Blazor WASM stabil laufen.
 ///
-/// Bewusst NICHT hier: Embed/Compress/Encrypt. Embed läuft über pdf-lib (JS),
-/// weil PdfSharpCores Save-Pfad intern <c>MD5.Create()</c> ruft und der
-/// WASM-CryptoConfig MD5 nicht kennt. Compress/Encrypt kommen in Release 0.8
-/// (FA-026/FA-027), siehe ADR-004.
+/// Bewusst NICHT hier: Embed/Compress/Encrypt. Embed + Compress laufen über
+/// pdf-lib (JS), Encrypt über <c>ManagedPdfEncryptor</c> (managed AES-256,
+/// V5/R6) — alle drei, weil PdfSharpCores eigener Verschlüsselungs-/Save-Pfad
+/// intern <c>MD5.Create()</c> ruft und der WASM-CryptoConfig MD5 nicht kennt
+/// (ADR-004). <see cref="NormalizeAsync"/> liefert dem Encryptor die klassische
+/// Struktur.
 /// </summary>
 public sealed class PdfSharpManipulator
 {
@@ -173,6 +175,20 @@ public sealed class PdfSharpManipulator
             // PdfSharp.Rotate ist additiv-replace: wir setzen den absoluten Wert.
             page.Rotate = (normalized + page.Rotate) % 360;
         }
+        return Save(doc);
+    }
+
+    /// <summary>
+    /// Öffnet die PDF und speichert sie unverändert wieder. Normalisiert damit
+    /// auf PdfSharpCores klassische, unkomprimierte Struktur (klassische
+    /// xref-Tabelle, direkte <c>/Length</c>) — die Grundlage, auf der der
+    /// nachgelagerte managed AES-256-Encryptor (<c>PdfAesEncryptor</c>) arbeitet.
+    /// </summary>
+    public async Task<byte[]> NormalizeAsync(Stream pdf, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(pdf);
+        await using var buffered = await CopyToSeekableAsync(pdf, cancellationToken).ConfigureAwait(false);
+        using var doc = PdfReader.Open(buffered, PdfDocumentOpenMode.Modify);
         return Save(doc);
     }
 

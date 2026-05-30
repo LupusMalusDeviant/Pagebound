@@ -51,6 +51,15 @@ Begründung:
 - **PdfPig**: nur Read-Only, würde Schreib-Operationen nicht abdecken.
 - **Eigenimplementation**: PDF-Spec ist enorm; nicht realistisch im Solo-Projekt.
 
+## Update 2026-05-30 — AES-256 (FA-027) managed gelöst
+
+Die offene AES-256-Frage ist entschieden. PdfSharpCores eigener Verschlüsselungs-Pfad ist **nicht WASM-tauglich**: er ruft `MD5.Create()` im Security-Handler auf, was der WASM-CryptoConfig nicht kennt (derselbe Grund wie bei Signatur-Embed und Compress). Statt PdfSharpCore-Encryption (RC4/AES-128, MD5-abhängig) oder eines Upgrades auf PdfSharp 6.x wird AES-256 **rein managed** implementiert (`AesR6` + `PdfAesEncryptor`, ISO 32000-2 `/V 5` `/R 6`). R6 nutzt ausschließlich SHA-256/384/512 + AES — WASM-kompatibel und zugleich das im Lastenheft geforderte AES-256.
+
+- PdfSharpCore bleibt für Merge/Split/Reorder/Rotate/Delete und zum **Normalisieren** der Eingabe (klassische, unkomprimierte Struktur) zuständig.
+- `IPdfEncryptor` kapselt die Verschlüsselung; `JsPdfLibManipulator.EncryptAsync` delegiert dorthin. Die Abstraktion macht einen späteren Desktop-Pfad (PdfSharp 6.x) risikoarm.
+- MVP-Grenze: nur Stream-Verschlüsselung (`/StmF /StdCF`), Strings `/Identity`. Volle String-Verschlüsselung ist eine Folge-Iteration.
+- Der ursprüngliche RC4-Prototyp (`PdfSharpManipulator.EncryptAsync`) wurde entfernt.
+
 ## Referenz
 
 - Lastenheft TEC-03, FA-020 bis FA-027

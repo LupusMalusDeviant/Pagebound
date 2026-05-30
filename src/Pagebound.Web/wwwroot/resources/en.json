@@ -328,5 +328,13 @@
   "tools.compress.quality.low": "Small (Q 40)",
   "tools.compress.quality.medium": "Medium (Q 70)",
   "tools.compress.quality.high": "Large (Q 90)",
-  "tools.compress.result": "Compressed: {orig} → {compressed} ({ratio}% smaller)"
+  "tools.compress.result": "Compressed: {orig} → {compressed} ({ratio}% smaller)",
+
+  "tools.encrypt.label": "Encrypt:",
+  "tools.encrypt.placeholder": "Password to open",
+  "tools.encrypt.title": "Save the PDF password-protected with AES-256 (FA-027)",
+  "tools.encrypt.button": "🔒 Encrypt",
+  "tools.encrypt.running": "Encrypting …",
+  "tools.encrypt.result": "Encrypted: {name} — the password is required to open it.",
+  "tools.encrypt.note": "AES-256 (V5/R6). Page content (streams) is encrypted; string metadata (title, notes, bookmarks) stays in clear text for now."
 }

@@ -152,6 +152,36 @@
             </div>
         }
 
+        @* Encrypt-Bar (FA-027) — managed AES-256 (ISO 32000-2 V5/R6), eigene Reihe. *@
+        <div class="max-w-4xl mx-auto mt-2 rounded-lg pb-glass p-3 flex flex-wrap items-center gap-2 text-sm">
+            <span class="text-pb-fg-muted">@L.T("tools.encrypt.label")</span>
+            <input type="password"
+                   @bind="_encryptPassword"
+                   @bind:event="oninput"
+                   class="flex-1 min-w-[12rem] rounded border border-pb-border bg-pb-bg px-3 py-1.5 text-sm"
+                   placeholder="@L.T("tools.encrypt.placeholder")"
+                   autocomplete="new-password"
+                   aria-label="@L.T("tools.encrypt.label")" />
+            <button type="button"
+                    class="ml-auto rounded border border-pb-border bg-pb-bg px-3 py-1 text-pb-fg-muted hover:text-pb-fg disabled:opacity-40"
+                    disabled="@(_isEncrypting || _handle is null || string.IsNullOrEmpty(_encryptPassword))"
+                    title="@L.T("tools.encrypt.title")"
+                    @onclick="EncryptPdfAsync">
+                @(_isEncrypting ? L.T("tools.encrypt.running") : L.T("tools.encrypt.button"))
+            </button>
+        </div>
+        @if (_encryptStatus is not null)
+        {
+            <div class="max-w-4xl mx-auto mt-2 rounded border border-green-300/40 bg-green-50/10 px-3 py-2 text-sm text-pb-fg">
+                @_encryptStatus
+                <button type="button"
+                        class="float-right text-pb-fg-muted hover:text-pb-fg"
+                        @onclick="@(() => _encryptStatus = null)"
+                        aria-label="@L.T("common.close")">✕</button>
+            </div>
+        }
+        <p class="max-w-4xl mx-auto mt-1 text-xs text-pb-fg-muted">@L.T("tools.encrypt.note")</p>
+
         <div class="mt-6 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
             @{
                 var visiblePages = _pages.Where(p => !p.Deleted).ToList();
@@ -243,6 +273,9 @@
     private bool _isCompressing;
     private int _compressQuality = 70;
     private string? _compressionResult;
+    private string _encryptPassword = string.Empty;
+    private bool _isEncrypting;
+    private string? _encryptStatus;
 
     private static readonly (int Quality, string LabelKey)[] CompressionPresets =
     {
@@ -602,6 +635,48 @@
         var safe = string.Concat(baseName.Select(c =>
             char.IsLetterOrDigit(c) || c is '_' or '-' or '.' or ' ' ? c : '_'));
         return $"{safe}.compressed.pdf";
+    }
+
+    private async Task EncryptPdfAsync()
+    {
+        if (_originalPdfBytes is null || _isEncrypting || string.IsNullOrEmpty(_encryptPassword)) return;
+        _isEncrypting = true;
+        _encryptStatus = null;
+        _errorMessage = null;
+        try
+        {
+            // Ein Passwort schützt das Öffnen: als Owner UND User setzen.
+            var options = new EncryptionOptions(OwnerPassword: _encryptPassword, UserPassword: _encryptPassword);
+            await using var stream = new MemoryStream(_originalPdfBytes);
+            var encrypted = await Manipulator.EncryptAsync(stream, options, CancellationToken.None).ConfigureAwait(false);
+
+            var filename = BuildEncryptedFilename(_currentFilename);
+            var base64 = Convert.ToBase64String(encrypted);
+            await JS.InvokeVoidAsync("pageboundShortcuts.downloadBytes", filename, base64, "application/pdf")
+                .ConfigureAwait(false);
+
+            _encryptStatus = L.T("tools.encrypt.result", new Dictionary<string, object> { ["name"] = filename });
+            _encryptPassword = string.Empty;
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = ex.Message;
+        }
+        finally
+        {
+            _isEncrypting = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private static string BuildEncryptedFilename(string? originalName)
+    {
+        var baseName = string.IsNullOrWhiteSpace(originalName) ? "document" : originalName;
+        if (baseName.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
+            baseName = baseName[..^4];
+        var safe = string.Concat(baseName.Select(c =>
+            char.IsLetterOrDigit(c) || c is '_' or '-' or '.' or ' ' ? c : '_'));
+        return $"{safe}.encrypted.pdf";
     }
 
     private async Task UnloadCurrentAsync()
