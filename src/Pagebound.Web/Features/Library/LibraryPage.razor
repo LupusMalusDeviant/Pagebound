@@ -170,33 +170,53 @@
         }
         else if (_view == LibraryView.Grid)
         {
-            <div class="max-w-4xl mx-auto mt-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+            <div class="lib-grid max-w-4xl mx-auto mt-4">
                 @foreach (var item in _entries)
                 {
                     var entry = item;
                     var pageCount = entry.PdfMeta?.PageCount ?? 0;
-                    <div class="rounded-lg pb-glass p-3 flex flex-col gap-2">
-                        <button type="button" class="text-left font-medium text-pb-fg hover:text-pb-accent line-clamp-2"
-                                title="@L.T("library.entry.openTitle")"
-                                @onclick="@(() => OpenInReaderAsync(entry))">@entry.Title</button>
-                        <div class="text-xs text-pb-fg-muted">
-                            @(pageCount > 0 ? L.T("library.entry.pageCount", new Dictionary<string, object> { ["count"] = pageCount }) : "")@(entry.PdfMeta is { } m && m.FileSize > 0 ? $" · {FormatSize(m.FileSize)}" : "")
-                        </div>
-                        @if ((entry.Tags ?? Array.Empty<string>()).Any())
-                        {
-                            <div class="flex flex-wrap gap-1">
-                                @foreach (var tag in entry.Tags!)
+                    var hash = ShortHash(entry);
+                    <div class="doc">
+                        <button type="button" class="doc-cover" title="@L.T("library.entry.openTitle")"
+                                aria-label="@entry.Title" @onclick="@(() => OpenInReaderAsync(entry))">
+                            <span class="glyphbg"><Icon Name="doc" /></span>
+                            <span class="pages"><i></i><i></i><i></i></span>
+                            @if (!string.IsNullOrEmpty(hash))
+                            {
+                                <span class="sidecar" title="SHA-256"><Icon Name="shield" /></span>
+                            }
+                        </button>
+                        <div class="doc-body">
+                            <button type="button" class="title" @onclick="@(() => OpenInReaderAsync(entry))">@entry.Title</button>
+                            <div class="doc-meta">
+                                @if (pageCount > 0)
                                 {
-                                    var tg = tag;
-                                    <span class="inline-flex items-center gap-1 rounded-full border border-pb-border bg-pb-bg px-2 py-0.5 text-xs text-pb-fg-muted">#@tg<button type="button" class="hover:text-red-500" aria-label="@L.T("library.entry.removeTag.aria", new Dictionary<string, object> { ["tag"] = tg })" @onclick="@(() => RemoveTagAsync(entry, tg))">×</button></span>
+                                    <span><Icon Name="doc" /> @pageCount</span>
+                                }
+                                @if (entry.PdfMeta is { } m && m.FileSize > 0)
+                                {
+                                    <span>@FormatSize(m.FileSize)</span>
+                                }
+                                <span><Icon Name="clock" /> @FormatDate(entry.AddedAt)</span>
+                                @if (!string.IsNullOrEmpty(hash))
+                                {
+                                    <span class="hash">@hash</span>
                                 }
                             </div>
-                        }
-                        <div class="mt-auto flex items-center justify-between text-xs text-pb-fg-muted pt-1">
-                            <span class="tabular-nums">@FormatDate(entry.AddedAt)</span>
-                            <button type="button" class="hover:text-red-500"
-                                    title="@L.T("library.entry.removeTitle")"
-                                    @onclick="@(() => RemoveEntryAsync(entry))"><Icon Name="trash" /></button>
+                            @if ((entry.Tags ?? Array.Empty<string>()).Any())
+                            {
+                                <div class="doc-tags">
+                                    @foreach (var tag in entry.Tags!)
+                                    {
+                                        <span class="t">#@tag</span>
+                                    }
+                                </div>
+                            }
+                            <div class="flex items-center justify-end pt-1 mt-auto">
+                                <button type="button" class="text-pb-fg-muted hover:text-red-500"
+                                        title="@L.T("library.entry.removeTitle")"
+                                        @onclick="@(() => RemoveEntryAsync(entry))"><Icon Name="trash" /></button>
+                            </div>
                         </div>
                     </div>
                 }
@@ -400,6 +420,12 @@
             await Files.ClearHandleAsync(hash, CancellationToken.None);
         }
         await RefreshAsync();
+    }
+
+    private static string ShortHash(LibraryEntry e)
+    {
+        var h = e.PdfMeta?.FileHashSha256;
+        return string.IsNullOrEmpty(h) ? "" : h[..Math.Min(4, h.Length)];
     }
 
     private static string FormatDate(DateTimeOffset dt) =>

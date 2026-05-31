@@ -478,6 +478,23 @@ body.pb-app-bg { background: var(--bg-base); }
 .lib-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: var(--sp-4); }
 .doc { border-radius: var(--radius-m); border: 1px solid var(--line); background: var(--bg-surface); overflow: hidden; display: flex; flex-direction: column; text-align: left; transition: transform var(--speed), border-color var(--speed), box-shadow var(--speed); }
 .doc:hover { transform: translateY(-3px); border-color: var(--accent-line); box-shadow: var(--shadow-pop); }
+.doc-cover { width: 100%; aspect-ratio: 1.6; background: var(--bg-raised); position: relative; overflow: hidden; border: 0; border-bottom: 1px solid var(--line); display: block; cursor: pointer; }
+.doc-cover .glyphbg { position: absolute; inset: 0; display: grid; place-items: center; color: var(--line); }
+.doc-cover .glyphbg .ic { width: 38%; height: 38%; }
+.doc-cover .pages { position: absolute; top: 12px; left: 16px; right: 16px; display: flex; flex-direction: column; gap: 5px; }
+.doc-cover .pages i { height: 4px; background: var(--line-soft); border-radius: 2px; }
+.doc-cover .pages i:nth-child(3) { width: 70%; }
+.doc-cover .sidecar { position: absolute; top: 8px; right: 8px; color: var(--ok); display: inline-flex; }
+.doc-cover .sidecar .ic { width: 0.95rem; height: 0.95rem; }
+.doc-body { padding: var(--sp-3) var(--sp-4) var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-2); flex: 1; }
+.doc-body .title { font-family: var(--font-ui); font-weight: 600; color: var(--ink); font-size: 0.94rem; line-height: 1.3; background: none; border: 0; padding: 0; cursor: pointer; text-align: left; }
+.doc-body .title:hover { color: var(--accent); }
+.doc-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 2px 8px; font-family: var(--font-mono); font-size: 0.7rem; color: var(--ink-4); }
+.doc-meta > span { white-space: nowrap; display: inline-flex; align-items: center; gap: 0.3em; }
+.doc-meta .ic { width: 0.85rem; height: 0.85rem; }
+.doc-meta .hash { color: var(--accent); }
+.doc-tags { display: flex; gap: 5px; flex-wrap: wrap; margin-top: auto; }
+.doc-tags .t { font-family: var(--font-mono); font-size: 0.68rem; color: var(--ink-3); background: var(--bg-raised); border: 1px solid var(--line-soft); padding: 0.15em 0.5em; border-radius: 5px; }
 .tag { font-family: var(--font-mono); font-size: 0.76rem; padding: 0.36em 0.75em; border-radius: 999px; border: 1px solid var(--line); color: var(--ink-2); background: var(--bg-surface); transition: all var(--speed); }
 .tag:hover { border-color: var(--accent-line); color: var(--ink); }
 .tag[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
