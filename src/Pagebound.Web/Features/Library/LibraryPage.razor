@@ -46,6 +46,18 @@
                 <option value="@LibrarySort.TitleDesc">@L.T("library.sort.titleDesc")</option>
             </select>
 
+            <span class="text-pb-fg-muted">@L.T("library.view.label")</span>
+            @foreach (var (mode, labelKey) in LibraryViews)
+            {
+                var m = mode;
+                var active = _view == m;
+                <button type="button"
+                        class="@($"rounded border px-2 py-0.5 text-xs {(active ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted hover:text-pb-fg")}")"
+                        @onclick="@(() => _view = m)">
+                    @L.T(labelKey)
+                </button>
+            }
+
             <span class="ml-auto text-xs text-pb-fg-muted">
                 @L.T("library.count", new Dictionary<string, object> { ["count"] = _entries.Count })
             </span>
@@ -73,6 +85,91 @@
             </div>
         }
 
+        @if (_view == LibraryView.Table)
+        {
+            <div class="max-w-4xl mx-auto mt-4 overflow-x-auto rounded-lg pb-glass">
+                <table class="w-full text-sm">
+                    <thead class="text-xs text-pb-fg-muted">
+                        <tr class="border-b border-pb-border text-left">
+                            <th class="px-3 py-2 font-medium">@L.T("library.col.title")</th>
+                            <th class="px-3 py-2 font-medium">@L.T("library.col.pages")</th>
+                            <th class="px-3 py-2 font-medium">@L.T("library.col.size")</th>
+                            <th class="px-3 py-2 font-medium">@L.T("library.col.tags")</th>
+                            <th class="px-3 py-2 font-medium">@L.T("library.col.added")</th>
+                            <th class="px-3 py-2 font-medium">@L.T("library.col.opened")</th>
+                            <th class="px-3 py-2"></th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-pb-border">
+                        @foreach (var item in _entries)
+                        {
+                            var entry = item;
+                            var pageCount = entry.PdfMeta?.PageCount ?? 0;
+                            <tr class="hover:bg-pb-bg/40">
+                                <td class="px-3 py-2">
+                                    <button type="button" class="text-left font-medium hover:text-pb-accent"
+                                            @onclick="@(() => OpenInReaderAsync(entry))">@entry.Title</button>
+                                </td>
+                                <td class="px-3 py-2 text-pb-fg-muted tabular-nums">@(pageCount > 0 ? pageCount.ToString() : "—")</td>
+                                <td class="px-3 py-2 text-pb-fg-muted">@(entry.PdfMeta is { } m && m.FileSize > 0 ? FormatSize(m.FileSize) : "—")</td>
+                                <td class="px-3 py-2">
+                                    <div class="flex flex-wrap gap-1">
+                                        @foreach (var tag in entry.Tags ?? Array.Empty<string>())
+                                        {
+                                            var tg = tag;
+                                            <span class="inline-flex items-center gap-1 rounded-full border border-pb-border bg-pb-bg px-2 py-0.5 text-xs text-pb-fg-muted">#@tg<button type="button" class="hover:text-red-500" aria-label="@L.T("library.entry.removeTag.aria", new Dictionary<string, object> { ["tag"] = tg })" @onclick="@(() => RemoveTagAsync(entry, tg))">×</button></span>
+                                        }
+                                    </div>
+                                </td>
+                                <td class="px-3 py-2 text-pb-fg-muted tabular-nums">@FormatDate(entry.AddedAt)</td>
+                                <td class="px-3 py-2 text-pb-fg-muted tabular-nums">@(entry.LastOpenedAt is { } lo ? FormatDate(lo) : "—")</td>
+                                <td class="px-3 py-2 text-right">
+                                    <button type="button" class="text-pb-fg-muted hover:text-red-500"
+                                            title="@L.T("library.entry.removeTitle")"
+                                            @onclick="@(() => RemoveEntryAsync(entry))">🗑</button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+        else if (_view == LibraryView.Grid)
+        {
+            <div class="max-w-4xl mx-auto mt-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+                @foreach (var item in _entries)
+                {
+                    var entry = item;
+                    var pageCount = entry.PdfMeta?.PageCount ?? 0;
+                    <div class="rounded-lg pb-glass p-3 flex flex-col gap-2">
+                        <button type="button" class="text-left font-medium text-pb-fg hover:text-pb-accent line-clamp-2"
+                                title="@L.T("library.entry.openTitle")"
+                                @onclick="@(() => OpenInReaderAsync(entry))">@entry.Title</button>
+                        <div class="text-xs text-pb-fg-muted">
+                            @(pageCount > 0 ? L.T("library.entry.pageCount", new Dictionary<string, object> { ["count"] = pageCount }) : "")@(entry.PdfMeta is { } m && m.FileSize > 0 ? $" · {FormatSize(m.FileSize)}" : "")
+                        </div>
+                        @if ((entry.Tags ?? Array.Empty<string>()).Any())
+                        {
+                            <div class="flex flex-wrap gap-1">
+                                @foreach (var tag in entry.Tags!)
+                                {
+                                    var tg = tag;
+                                    <span class="inline-flex items-center gap-1 rounded-full border border-pb-border bg-pb-bg px-2 py-0.5 text-xs text-pb-fg-muted">#@tg<button type="button" class="hover:text-red-500" aria-label="@L.T("library.entry.removeTag.aria", new Dictionary<string, object> { ["tag"] = tg })" @onclick="@(() => RemoveTagAsync(entry, tg))">×</button></span>
+                                }
+                            </div>
+                        }
+                        <div class="mt-auto flex items-center justify-between text-xs text-pb-fg-muted pt-1">
+                            <span class="tabular-nums">@FormatDate(entry.AddedAt)</span>
+                            <button type="button" class="hover:text-red-500"
+                                    title="@L.T("library.entry.removeTitle")"
+                                    @onclick="@(() => RemoveEntryAsync(entry))">🗑</button>
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+        else
+        {
         <ul class="max-w-4xl mx-auto mt-4 divide-y divide-pb-border rounded-lg pb-glass">
             @foreach (var item in _entries)
             {
@@ -136,6 +233,7 @@
                 </li>
             }
         </ul>
+        }
     }
 </section>
 
@@ -146,6 +244,17 @@
     private string _search = string.Empty;
     private LibrarySort _sort = LibrarySort.LastOpenedDesc;
     private bool _loading = true;
+    private LibraryView _view = LibraryView.List;
+
+    // Die drei Library-Ansichten (FA-061/062). Reihenfolge = Reihenfolge der Umschalt-Buttons.
+    private enum LibraryView { List, Table, Grid }
+
+    private static readonly (LibraryView Mode, string LabelKey)[] LibraryViews =
+    {
+        (LibraryView.List, "library.view.list"),
+        (LibraryView.Table, "library.view.table"),
+        (LibraryView.Grid, "library.view.grid"),
+    };
     // Pro Eintrag-Id hält dieser Cache den aktuell getippten Tag-Entwurf,
     // damit der Input nicht bei jedem Re-Render geleert wird.
     private readonly Dictionary<string, string> _tagDraft = new();
