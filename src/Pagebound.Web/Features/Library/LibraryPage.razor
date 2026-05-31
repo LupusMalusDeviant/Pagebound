@@ -5,6 +5,7 @@
 @inject IFileHandleService Files
 @inject ILocalizationService L
 @inject NavigationManager Nav
+@inject IWorkspaceService Workspace
 
 <PageTitle>@L.T("library.pageTitle")</PageTitle>
 
@@ -13,6 +14,35 @@
         <h1 class="text-2xl font-bold">@L.T("library.heading")</h1>
         <p class="mt-1 text-sm text-pb-fg-muted">@L.T("library.subheading")</p>
     </header>
+
+    @* FA-072: zentraler Sidecar-Workspace. Nur sichtbar, wo die File-System-
+       Access-Directory-API existiert (Chromium); sonst greift der manuelle
+       Download/Upload-Flow im Reader. *@
+    @if (_workspaceSupported)
+    {
+        <div class="max-w-4xl mx-auto mb-4 rounded-lg pb-glass p-3 flex flex-wrap items-center gap-2 text-sm">
+            <span class="text-pb-fg-muted">@L.T("library.workspace.label")</span>
+            @if (_workspaceName is not null)
+            {
+                <span class="inline-flex items-center gap-1 rounded border border-pb-border bg-pb-bg px-2 py-1 font-mono text-xs">📁 @_workspaceName</span>
+                <button type="button"
+                        class="rounded border border-pb-border px-2 py-1 text-xs text-pb-fg-muted hover:text-pb-fg"
+                        @onclick="ClearWorkspaceAsync">
+                    @L.T("library.workspace.clear")
+                </button>
+            }
+            else
+            {
+                <span class="text-xs text-pb-fg-muted">@L.T("library.workspace.none")</span>
+            }
+            <button type="button"
+                    class="rounded bg-pb-accent px-3 py-1 text-xs text-white hover:opacity-90"
+                    @onclick="PickWorkspaceAsync">
+                @(_workspaceName is null ? L.T("library.workspace.pick") : L.T("library.workspace.change"))
+            </button>
+            <span class="ml-auto text-xs text-pb-fg-muted">@L.T("library.workspace.hint")</span>
+        </div>
+    }
 
     @if (_loading)
     {
@@ -259,9 +289,32 @@
     // damit der Input nicht bei jedem Re-Render geleert wird.
     private readonly Dictionary<string, string> _tagDraft = new();
 
+    // FA-072: zentraler Sidecar-Workspace-Ordner (Chromium-only).
+    private bool _workspaceSupported;
+    private string? _workspaceName;
+
     protected override async Task OnInitializedAsync()
     {
         await RefreshAsync();
+        _workspaceSupported = await Workspace.IsSupportedAsync(CancellationToken.None);
+        if (_workspaceSupported)
+        {
+            _workspaceName = await Workspace.GetWorkspaceNameAsync(CancellationToken.None);
+        }
+    }
+
+    private async Task PickWorkspaceAsync()
+    {
+        var name = await Workspace.PickWorkspaceAsync(CancellationToken.None);
+        if (name is not null) _workspaceName = name;
+        StateHasChanged();
+    }
+
+    private async Task ClearWorkspaceAsync()
+    {
+        await Workspace.ClearWorkspaceAsync(CancellationToken.None);
+        _workspaceName = null;
+        StateHasChanged();
     }
 
     private async Task RefreshAsync()

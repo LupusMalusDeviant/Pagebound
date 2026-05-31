@@ -11,6 +11,7 @@
 @inject IIntegrityService Integrity
 @inject IStorageService Storage
 @inject ISidecarService Sidecar
+@inject IWorkspaceService Workspace
 @inject ILibraryService Library
 @inject IOcrService Ocr
 @inject IFileHandleService Files
@@ -375,6 +376,16 @@
                         @onclick="ExportSidecarAsync">
                     @(_isExportingSidecar ? L.T("reader.sidecar.exporting") : L.T("reader.sidecar.export"))
                 </button>
+                @if (_workspaceName is not null)
+                {
+                    <button type="button"
+                            class="rounded border border-pb-border bg-pb-bg px-2 py-0.5 text-pb-fg-muted hover:text-pb-fg disabled:opacity-40 disabled:cursor-not-allowed"
+                            disabled="@(_isSavingToWorkspace || _annotations.Count == 0)"
+                            title="@L.T("reader.workspace.saveTitle", new Dictionary<string, object> { ["folder"] = _workspaceName })"
+                            @onclick="SaveToWorkspaceAsync">
+                        @(_isSavingToWorkspace ? L.T("reader.workspace.saving") : L.T("reader.workspace.save"))
+                    </button>
+                }
                 <label class="rounded border border-pb-border bg-pb-bg px-2 py-0.5 text-pb-fg-muted hover:text-pb-fg cursor-pointer @(_handle is null ? "opacity-40 cursor-not-allowed" : "")"
                        title="@L.T("reader.sidecar.importTitle")">
                     @L.T("reader.sidecar.import")
@@ -1200,6 +1211,10 @@
     private string? _currentFilename;
     private bool _isExporting;
     private bool _isExportingSidecar;
+    // FA-072: Name des aktiven Sidecar-Workspace (null = keiner gesetzt), wird beim
+    // PDF-Öffnen geladen und steuert die Sichtbarkeit des "In Workspace speichern".
+    private string? _workspaceName;
+    private bool _isSavingToWorkspace;
     private string? _sidecarStatus;
     private bool _sidecarStatusIsError;
     private IReadOnlyList<Annotation> _annotations = Array.Empty<Annotation>();
@@ -1430,6 +1445,34 @@
         _currentPage = 1;
 
         _annotations = await Annotations.GetForDocumentAsync(_currentPdfId.Value, CancellationToken.None).ConfigureAwait(false);
+
+        // FA-072/073: Wenn ein zentraler Sidecar-Workspace gesetzt ist, dort nach
+        // einem Sidecar für diesen Hash suchen und neue (noch nicht in IndexedDB
+        // vorhandene) Annotationen zusammenführen — so synchronisiert der Ordner
+        // Annotationen zwischen Geräten/Browsern.
+        _workspaceName = await Workspace.GetWorkspaceNameAsync(CancellationToken.None).ConfigureAwait(false);
+        if (_workspaceName is not null)
+        {
+            try
+            {
+                var wsJson = await Workspace.LoadSidecarAsync(hash, CancellationToken.None).ConfigureAwait(false);
+                if (!string.IsNullOrWhiteSpace(wsJson))
+                {
+                    var added = await MergeSidecarJsonAsync(wsJson!).ConfigureAwait(false);
+                    if (added > 0)
+                    {
+                        _sidecarStatus = L.T("reader.workspace.autoloaded",
+                            new Dictionary<string, object> { ["added"] = added, ["folder"] = _workspaceName });
+                        _sidecarStatusIsError = false;
+                    }
+                }
+            }
+            catch
+            {
+                // Best-effort — Workspace-Probleme dürfen das Öffnen nicht blockieren.
+            }
+        }
+
         await RecomputeSignatureStatusesAsync().ConfigureAwait(false);
 
         // FA-060: Library-Tracking + Persistenz der Bytes für späteres One-Click-Open.
@@ -2780,19 +2823,8 @@
         _sidecarStatus = null;
         try
         {
-            var meta = new PdfMeta(
-                Filename: _currentFilename ?? "document.pdf",
-                FileHashSha256: _currentPdfId.Value.Value,
-                FileSize: _originalPdfBytes?.LongLength ?? 0,
-                PageCount: _handle.PageCount);
-            var template = await Sidecar.CreateNewAsync(_currentFilename ?? string.Empty, meta, CancellationToken.None)
-                .ConfigureAwait(false);
-            var withAnnotations = template with
-            {
-                UpdatedAt = DateTimeOffset.UtcNow,
-                Annotations = _annotations.ToList()
-            };
-            var json = await Sidecar.SerializeAsync(withAnnotations, CancellationToken.None).ConfigureAwait(false);
+            var json = await BuildCurrentSidecarJsonAsync().ConfigureAwait(false);
+            if (json is null) return;
             var sidecarFilename = BuildSidecarFilename(_currentFilename);
             await JS.InvokeVoidAsync(
                 "pageboundShortcuts.downloadFile",
@@ -2811,6 +2843,88 @@
             _isExportingSidecar = false;
             await InvokeAsync(StateHasChanged);
         }
+    }
+
+    /// <summary>
+    /// Baut das Sidecar-JSON für die aktuell offene PDF (Annotationen + Meta).
+    /// Gemeinsam genutzt von Download-Export und Workspace-Speichern. Null, wenn
+    /// keine PDF offen ist.
+    /// </summary>
+    private async Task<string?> BuildCurrentSidecarJsonAsync()
+    {
+        if (_currentPdfId is null || _handle is null) return null;
+        var meta = new PdfMeta(
+            Filename: _currentFilename ?? "document.pdf",
+            FileHashSha256: _currentPdfId.Value.Value,
+            FileSize: _originalPdfBytes?.LongLength ?? 0,
+            PageCount: _handle.PageCount);
+        var template = await Sidecar.CreateNewAsync(_currentFilename ?? string.Empty, meta, CancellationToken.None)
+            .ConfigureAwait(false);
+        var withAnnotations = template with
+        {
+            UpdatedAt = DateTimeOffset.UtcNow,
+            Annotations = _annotations.ToList()
+        };
+        return await Sidecar.SerializeAsync(withAnnotations, CancellationToken.None).ConfigureAwait(false);
+    }
+
+    /// <summary>FA-072: das aktuelle Sidecar in den zentralen Workspace schreiben.</summary>
+    private async Task SaveToWorkspaceAsync()
+    {
+        if (_currentPdfId is null || _isSavingToWorkspace) return;
+        _isSavingToWorkspace = true;
+        _sidecarStatus = null;
+        try
+        {
+            var json = await BuildCurrentSidecarJsonAsync().ConfigureAwait(false);
+            if (json is null) return;
+            var ok = await Workspace.SaveSidecarAsync(_currentPdfId.Value.Value, json, CancellationToken.None)
+                .ConfigureAwait(false);
+            _sidecarStatus = ok
+                ? L.T("reader.workspace.saved", new Dictionary<string, object> { ["folder"] = _workspaceName ?? "" })
+                : L.T("reader.workspace.saveFailed");
+            _sidecarStatusIsError = !ok;
+        }
+        catch (Exception ex)
+        {
+            _sidecarStatus = L.T("reader.sidecar.importError",
+                new Dictionary<string, object> { ["message"] = ex.Message });
+            _sidecarStatusIsError = true;
+        }
+        finally
+        {
+            _isSavingToWorkspace = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    /// <summary>
+    /// Parst ein Sidecar-JSON und führt dessen Annotationen zusammen — überspringt
+    /// solche, deren Id bereits vorhanden ist, sodass das Workspace-Auto-Load beim
+    /// Wieder-Öffnen keine Duplikate erzeugt. Gibt die Anzahl neu übernommener
+    /// Annotationen zurück.
+    /// </summary>
+    private async Task<int> MergeSidecarJsonAsync(string json)
+    {
+        if (_currentPdfId is null || string.IsNullOrWhiteSpace(json)) return 0;
+        await using var ms = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(json));
+        var parsed = await Sidecar.ParseAsync(ms, CancellationToken.None).ConfigureAwait(false);
+        if (parsed is null) return 0;
+        var migration = await Sidecar.MigrateAsync(parsed, CancellationToken.None).ConfigureAwait(false);
+        var sidecar = migration.Result;
+        var pdfId = _currentPdfId.Value;
+        var existingIds = _annotations.Select(a => a.Id.Value).ToHashSet();
+        var added = new List<Annotation>();
+        foreach (var imported in sidecar.Annotations)
+        {
+            if (existingIds.Contains(imported.Id.Value)) continue;
+            var fresh = await Annotations.CreateAsync(
+                new NewAnnotation(pdfId, imported.Type, imported.PageNumber, imported.Payload),
+                CancellationToken.None).ConfigureAwait(false);
+            added.Add(fresh);
+        }
+        if (added.Count > 0) _annotations = _annotations.Concat(added).ToList();
+        return added.Count;
     }
 
     private static string BuildSidecarFilename(string? pdfFilename)

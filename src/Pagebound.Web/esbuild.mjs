@@ -71,6 +71,12 @@ const builds = [
     globalName: "pageboundSplit",
     entryPoints: [resolve(__dirname, "wwwroot/js/split-bridge.ts")],
     outfile: resolve(__dirname, "wwwroot/js/split-bridge.js")
+  },
+  {
+    ...sharedOptions,
+    globalName: "pageboundWorkspace",
+    entryPoints: [resolve(__dirname, "wwwroot/js/workspace-bridge.ts")],
+    outfile: resolve(__dirname, "wwwroot/js/workspace-bridge.js")
   }
 ];
 

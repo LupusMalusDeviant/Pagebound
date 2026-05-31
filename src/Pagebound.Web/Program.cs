@@ -12,6 +12,7 @@ using Pagebound.Infrastructure.Sidecars;
 using Pagebound.Infrastructure.Storage;
 using Pagebound.Infrastructure.Telemetry;
 using Pagebound.Infrastructure.Theme;
+using Pagebound.Infrastructure.Workspace;
 using Pagebound.Web;
 
 var builder = WebAssemblyHostBuilder.CreateDefault(args);
@@ -50,6 +51,7 @@ builder.Services.AddScoped<IOcrService, TesseractOcrService>();
 builder.Services.AddScoped<IFileHandleService, FileSystemAccessHandleService>();
 builder.Services.AddScoped<IPdfFormService, JsPdfFormService>();
 builder.Services.AddScoped<IImageToPdfConverter, JsImageToPdfConverter>();
+builder.Services.AddScoped<IWorkspaceService, BrowserWorkspaceService>();
 
 var host = builder.Build();
 

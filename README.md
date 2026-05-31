@@ -30,7 +30,7 @@ Pagebound ist ein quelloffenes PDF-Werkzeug, das den Adobe Acrobat Reader im All
 - **Bilder → PDF** — PNG/JPG zu PDF (Seitengröße wählbar, Reihenfolge per Drag & Drop)
 - **Verschlüsseln** — Passwortschutz mit AES-256 (WebCrypto, gegen PDF.js verifiziert)
 - **OCR** — Tesseract.js für nicht-durchsuchbare PDFs (Scans, Designer-Layouts)
-- **Library** — automatisch erfasst, Tags, Suche, drei Ansichten (Liste/Tabelle/Raster), JSON-Sidecar-Export/Import
+- **Library** — automatisch erfasst, Tags, Suche, drei Ansichten (Liste/Tabelle/Raster), optionaler zentraler Sidecar-Workspace-Ordner, JSON-Sidecar-Export/Import
 - **Markdown-Export** — Highlights + Notizen, Obsidian-kompatibel (YAML-Frontmatter, Wikilinks)
 - **Komfort** — Theme-Switcher (Auto/Hell/Dunkel/Sepia), DE/EN, Offline-PWA, keine Telemetrie
 
@@ -66,7 +66,7 @@ Pagebound wird in **10 nutzbaren Releases** (0.1 → 1.0) entwickelt. Jeder Rele
 | 0.2 | + Stift, Formen, Outline, Markdown-Notizen, Thumbnails | ✅ |
 | 0.3 | + Seitenoperationen (merge/split/rotate/delete) | ✅ |
 | 0.4 | + PNG-Signatur + Hash-Integrität | ✅ |
-| 0.5 | + Library-Verwaltung + Tabelle/Grid/Liste-Ansichten + Tags | 🟡 Ansichten ✅ — Auto-Collapse-Sidebar + zentraler Workspace folgen |
+| 0.5 | + Library + Tabelle/Grid/Liste + Tags + Auto-Collapse-Sidebar + Sidecar-Workspace | ✅ |
 | 0.6 | + Multi-PDF Split-View + Sync-Scroll + ziehbare Trennlinie | ✅ |
 | 0.7 | + Markdown-Export + Obsidian-Integration | ✅ |
 | 0.8 | + Formulare + Verschlüsselung + Bild→PDF + Compress | ✅ |
