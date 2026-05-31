@@ -47,6 +47,7 @@
             <div class="flex flex-wrap items-center gap-2 text-sm">
                 <span class="text-pb-fg-muted">@L.T("batch.operation")</span>
                 <select @bind="_operation"
+                        aria-label="@L.T("batch.operation")"
                         class="rounded border border-pb-border bg-pb-bg px-2 py-1 text-sm">
                     <option value="@BatchOp.Compress">@L.T("batch.op.compress")</option>
                     <option value="@BatchOp.Encrypt">@L.T("batch.op.encrypt")</option>

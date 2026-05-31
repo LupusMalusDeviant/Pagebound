@@ -510,6 +510,7 @@
                                             {
                                                 case PdfFormFieldType.Text:
                                                     <input type="text"
+                                                           aria-label="@f.Name"
                                                            class="w-full rounded border border-pb-border bg-pb-bg px-2 py-1 text-sm disabled:opacity-50"
                                                            value="@GetSingle(f.Name)"
                                                            disabled="@f.ReadOnly"
@@ -541,7 +542,8 @@
                                                     </div>
                                                     break;
                                                 case PdfFormFieldType.Dropdown:
-                                                    <select class="w-full rounded border border-pb-border bg-pb-bg px-2 py-1 text-sm disabled:opacity-50"
+                                                    <select aria-label="@f.Name"
+                                                            class="w-full rounded border border-pb-border bg-pb-bg px-2 py-1 text-sm disabled:opacity-50"
                                                             disabled="@f.ReadOnly"
                                                             @onchange="@(e => SetSingle(f.Name, e.Value?.ToString()))">
                                                         <option value="" selected="@(GetSingle(f.Name).Length == 0)">@L.T("reader.form.dropdownEmpty")</option>
@@ -554,6 +556,7 @@
                                                     break;
                                                 case PdfFormFieldType.ListBox:
                                                     <select multiple
+                                                            aria-label="@f.Name"
                                                             class="w-full rounded border border-pb-border bg-pb-bg px-2 py-1 text-sm disabled:opacity-50 min-h-[4rem]"
                                                             disabled="@f.ReadOnly"
                                                             @onchange="@(e => SetMulti(f.Name, e.Value))">

@@ -73,9 +73,9 @@ Pagebound wird in **10 nutzbaren Releases** (0.1 → 1.0) entwickelt. Jeder Rele
 | 0.7 | + Markdown-Export + Obsidian-Integration | ✅ |
 | 0.8 | + Formulare + Verschlüsselung + Bild→PDF + Compress | ✅ |
 | 0.9 | + OCR (Tesseract.js) + Stapelverarbeitung | ✅ (gespeicherte Batch-Regeln FA-052 folgen) |
-| 1.0 | + Konvertierungen + A11y-Polish + Doku komplett + Tests | ⏳ |
+| 1.0 | + Konvertierungen + Redesign + Security-Check + A11y (WCAG AA) + Doku + Tests | ⏳ (Konvertierungen ✅, „Warm Ink"-Redesign ✅, Security ✅, A11y-Audit AA ✅ — Doku + E2E-Harness/Coverage offen) |
 
-**Zusatz** (außerhalb Pflichtenheft): Theme-Switcher (Auto/Light/Dark/Sepia), DE/EN-Sprachumschaltung, Sidecar Export/Import, pixel-genauer Text-Layer via PDF.js nativem `TextLayer`.
+**Zusatz** (außerhalb Pflichtenheft): „Warm Ink"-Redesign mit Settings/Tweaks (Dark/Light, Akzentfarben, Schriftgröße, Dichte, Bewegung), DE/EN-Sprachumschaltung, Sidecar Export/Import, pixel-genauer Text-Layer via PDF.js nativem `TextLayer`.
 
 Details: [docs/02-lastenheft.md](docs/02-lastenheft.md) Abschnitt 6.
 

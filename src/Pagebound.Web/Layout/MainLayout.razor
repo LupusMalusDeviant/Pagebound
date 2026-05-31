@@ -7,8 +7,11 @@
 
 <div class="@($"app{(IsCollapsed ? " collapsed" : "")}")">
 
+    @* Skip-Link (WCAG 2.4.1): erstes fokussierbares Element, springt an <main> *@
+    <a href="#main" class="skip-link">@L.T("a11y.skipToContent")</a>
+
     @* RAIL — typografischer Index (FA-064: klappt im Lesemodus ein) *@
-    <nav class="@($"rail{(_railOpen ? " open" : "")}")" aria-label="@L.T("nav.heading")">
+    <nav id="app-rail" class="@($"rail{(_railOpen ? " open" : "")}")" aria-label="@L.T("nav.heading")">
         <div class="masthead">
             <a href="/" class="masthead-logo-link" @onclick="@(() => Go(""))" @onclick:preventDefault="true" aria-label="@L.T("app.title")">
                 <img class="masthead-logo" src="favicon.ico" alt="@L.T("app.title")" />
@@ -66,7 +69,8 @@
 
     @* TOPBAR — running head *@
     <header class="topbar">
-        <button class="icon-btn menu-btn" @onclick="@(() => _railOpen = !_railOpen)" aria-label="@L.T("nav.sidebar.toggle")">
+        <button class="icon-btn menu-btn" @onclick="@(() => _railOpen = !_railOpen)" aria-label="@L.T("nav.sidebar.toggle")"
+                aria-expanded="@(_railOpen ? "true" : "false")" aria-controls="app-rail">
 <Icon Name="menu" />
         </button>
         <div class="runhead">
@@ -78,7 +82,8 @@
             <span class="bar" aria-hidden="true"></span>
             <button aria-pressed="@((_theme == "dark").ToString().ToLowerInvariant())" @onclick='@(() => SetThemeAsync("dark"))'>@L.T("settings.theme.dark")</button>
         </div>
-        <button class="icon-btn" @onclick="@(() => _settingsOpen = true)" aria-label="@L.T("settings.open")" title="@L.T("settings.open")">
+        <button class="icon-btn" @ref="_gearBtn" @onclick="@(() => _settingsOpen = true)" aria-label="@L.T("settings.open")" title="@L.T("settings.open")"
+                aria-haspopup="dialog" aria-expanded="@(_settingsOpen ? "true" : "false")" aria-controls="settings-panel">
 <Icon Name="sliders" />
         </button>
         <button class="icon-btn" style="width:auto;padding:0 0.55em;font-family:var(--font-mono);font-size:0.72rem"
@@ -112,6 +117,7 @@
     private bool _settingsOpen;
     private string _theme = "dark";
     private List<LibraryEntry> _recent = new();
+    private ElementReference _gearBtn;
 
     private bool IsCollapsed => _route is "reader" or "split";
 
@@ -213,5 +219,7 @@
     {
         _settingsOpen = false;
         await SyncThemeAsync(); // Theme könnte im Panel geändert worden sein
+        // Fokus zurück auf den Auslöser (WCAG 2.4.3 Fokus-Reihenfolge).
+        try { await _gearBtn.FocusAsync(); } catch { /* Element evtl. nicht gerendert */ }
     }
 }

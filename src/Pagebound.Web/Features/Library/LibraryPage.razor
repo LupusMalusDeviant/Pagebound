@@ -73,6 +73,7 @@
 
             <span class="text-pb-fg-muted">@L.T("library.sort.label")</span>
             <select @bind="_sort" @bind:after="RefreshAsync"
+                    aria-label="@L.T("library.sort.label")"
                     class="rounded border border-pb-border bg-pb-bg px-2 py-1 text-sm">
                 <option value="@LibrarySort.LastOpenedDesc">@L.T("library.sort.lastOpened")</option>
                 <option value="@LibrarySort.AddedDesc">@L.T("library.sort.added")</option>

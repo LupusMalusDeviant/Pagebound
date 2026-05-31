@@ -13,14 +13,15 @@
 {
     <div class="fixed inset-0 z-[120]" @onclick="CloseAsync">
         <div class="absolute inset-0" style="background: rgb(0 0 0 / 0.35)"></div>
-        <div class="absolute top-14 right-3 w-[300px] max-h-[calc(100vh-5rem)] overflow-y-auto rounded-[14px] pb-glass-strong"
+        <div id="settings-panel" class="absolute top-14 right-3 w-[300px] max-h-[calc(100vh-5rem)] overflow-y-auto rounded-[14px] pb-glass-strong"
              style="box-shadow: var(--shadow-pop)"
-             role="dialog" aria-label="@L.T("settings.title")"
+             role="dialog" aria-label="@L.T("settings.title")" tabindex="-1"
+             @onkeydown="HandleKeyAsync"
              @onclick:stopPropagation="true">
 
             <div class="flex items-center justify-between px-4 py-3" style="border-bottom: 1px solid var(--line)">
                 <b style="font-family: var(--font-display); font-size: 1.05rem; font-weight: 600;">@L.T("settings.title")</b>
-                <button type="button" class="icon-btn" style="width:2rem;height:2rem" aria-label="@L.T("common.close")" @onclick="CloseAsync">✕</button>
+                <button type="button" class="icon-btn" style="width:2rem;height:2rem" aria-label="@L.T("common.close")" @ref="_closeBtn" @onclick="CloseAsync"><Icon Name="x" /></button>
             </div>
 
             <div class="px-4 py-3 flex flex-col gap-4 text-sm">
@@ -112,6 +113,8 @@
 
     private TweaksState _t = new();
     private bool _loaded;
+    private bool _wasOpen;
+    private ElementReference _closeBtn;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -125,6 +128,23 @@
             }
             catch { /* Bridge noch nicht da — Defaults bleiben */ }
         }
+
+        // Beim Öffnen Fokus in den Dialog ziehen (WCAG 2.4.3); beim Schließen
+        // setzt MainLayout den Fokus zurück auf den Zahnrad-Button.
+        if (Open && !_wasOpen)
+        {
+            _wasOpen = true;
+            try { await _closeBtn.FocusAsync(); } catch { /* noch nicht gerendert */ }
+        }
+        else if (!Open && _wasOpen)
+        {
+            _wasOpen = false;
+        }
+    }
+
+    private async Task HandleKeyAsync(KeyboardEventArgs e)
+    {
+        if (e.Key is "Escape" or "Esc") await CloseAsync();
     }
 
     private static string SegClass(bool active) => active ? "pb-seg-btn active" : "pb-seg-btn";
