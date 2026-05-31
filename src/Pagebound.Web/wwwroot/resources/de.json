@@ -27,6 +27,7 @@
   "nav.reader": "Reader (Demo)",
   "nav.tools": "PDF-Werkzeuge",
   "nav.split": "Split-View",
+  "nav.sidebar.toggle": "Seitenleiste ein-/ausblenden",
   "nav.library": "Library",
   "nav.library.empty": "Noch leer — öffne eine PDF.",
   "nav.library.recent": "Zuletzt geöffnet",

@@ -27,6 +27,7 @@
   "nav.reader": "Reader (demo)",
   "nav.tools": "PDF tools",
   "nav.split": "Split view",
+  "nav.sidebar.toggle": "Toggle sidebar",
   "nav.library": "Library",
   "nav.library.empty": "Empty — open a PDF.",
   "nav.library.recent": "Recently opened",

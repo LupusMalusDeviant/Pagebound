@@ -12,7 +12,7 @@
        überschreiben unten + oben + links auf 0, damit die Sidebar an die
        Viewport-Kante bündig stößt und nur die rechte Trennlinie sichtbar
        bleibt. *@
-    <aside class="hidden md:flex w-64 flex-col pb-glass"
+    <aside class="@(_sidebarCollapsed ? "hidden" : "hidden md:flex") w-64 flex-col pb-glass"
            style="border-top: 0; border-bottom: 0; border-left: 0; border-radius: 0;"
            aria-label="@L.T("nav.library")">
         <div class="px-4 py-3"
@@ -84,7 +84,17 @@
         @* Tab-Leiste — vorerst Stub, rechts Theme + Sprache + Version (FA-100/101) *@
         <header class="flex items-center justify-between px-4 h-12 gap-3 pb-glass"
                 style="border-top: 0; border-left: 0; border-right: 0; border-radius: 0;">
-            <div class="text-sm text-pb-fg-muted">@L.T("tabs.comingSoon")</div>
+            <div class="flex items-center gap-2 min-w-0">
+                <button type="button"
+                        class="hidden md:inline-flex px-2 py-1 rounded border border-pb-border text-pb-fg-muted hover:text-pb-fg hover:bg-pb-surface"
+                        title="@L.T("nav.sidebar.toggle")"
+                        aria-label="@L.T("nav.sidebar.toggle")"
+                        aria-expanded="@((!_sidebarCollapsed).ToString().ToLowerInvariant())"
+                        @onclick="ToggleSidebar">
+                    ☰
+                </button>
+                <div class="text-sm text-pb-fg-muted truncate">@L.T("tabs.comingSoon")</div>
+            </div>
             <div class="flex items-center gap-2 text-xs">
                 <button type="button"
                         class="px-2 py-1 rounded border border-pb-border text-pb-fg-muted hover:text-pb-fg hover:bg-pb-surface"
@@ -112,10 +122,16 @@
     // "Zuletzt geöffnet" Mini-Liste in der Sidebar (FA-064).
     private List<LibraryEntry> _recent = new();
 
+    // FA-064: Im Lesemodus (Reader/Split) klappt die Sidebar automatisch ein;
+    // der ☰-Button im Header blendet sie jederzeit wieder ein/aus. Die nächste
+    // Navigation wendet die Auto-Regel erneut an.
+    private bool _sidebarCollapsed;
+
     protected override async Task OnInitializedAsync()
     {
         Theme.ThemeChanged += OnThemeChanged;
         Nav.LocationChanged += OnLocationChanged;
+        ApplyAutoCollapse();
         await RefreshRecentAsync();
     }
 
@@ -141,12 +157,25 @@
 
     private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs args)
     {
-        // Nach Navigation (z.B. zurück vom Reader) Liste neu laden, damit der
-        // gerade geöffnete Eintrag oben in der Sidebar steht.
+        // Beim Routenwechsel die Auto-Collapse-Regel neu anwenden (FA-064) …
+        ApplyAutoCollapse();
+        // … und die "Zuletzt geöffnet"-Liste neu laden, damit der gerade
+        // geöffnete Eintrag oben in der Sidebar steht (RefreshRecentAsync
+        // ruft StateHasChanged, rendert also auch die Collapse-Änderung).
         _ = RefreshRecentAsync();
     }
 
     private void OnThemeChanged(ThemeName _) => InvokeAsync(StateHasChanged);
+
+    // FA-064: Reader und Split-View sind "Lesemodus" → Sidebar einklappen,
+    // alle anderen Routen → ausklappen.
+    private void ApplyAutoCollapse()
+    {
+        var path = Nav.ToBaseRelativePath(Nav.Uri).Split('?', '#')[0].Trim('/').ToLowerInvariant();
+        _sidebarCollapsed = path is "reader" or "split";
+    }
+
+    private void ToggleSidebar() => _sidebarCollapsed = !_sidebarCollapsed;
 
     private async Task CycleThemeAsync()
     {
