@@ -34,7 +34,7 @@ Pagebound ist ein quelloffenes PDF-Werkzeug, das den Adobe Acrobat Reader im All
 - **OCR** — Tesseract.js für nicht-durchsuchbare PDFs (Scans, Designer-Layouts)
 - **Library** — automatisch erfasst, Tags, Suche, drei Ansichten (Liste/Tabelle/Raster), optionaler zentraler Sidecar-Workspace-Ordner, JSON-Sidecar-Export/Import
 - **Markdown-Export** — Highlights + Notizen, Obsidian-kompatibel (YAML-Frontmatter, Wikilinks)
-- **Komfort** — Theme-Switcher (Auto/Hell/Dunkel/Sepia), DE/EN, Offline-PWA, keine Telemetrie
+- **Darstellung** — „Warm Ink"-Design, Settings-Panel mit Theme (Hell/Dunkel), Akzentfarbe, Schriftgröße, Dichte & Bewegung; DE/EN, Offline-PWA, keine Telemetrie
 
 ## Quick-Start
 
@@ -98,7 +98,7 @@ Details: [docs/02-lastenheft.md](docs/02-lastenheft.md) Abschnitt 6.
 - **Verschlüsselung:** AES-256 (ISO 32000-2 V5/R6) via WebCrypto — hardware-beschleunigt, kein MD5, im Browser gegen PDF.js verifiziert
 - **Formulare:** AcroForms lesen + ausfüllen über die pdf-lib-Form-API (alle Standard-Feldtypen)
 - **OCR:** Tesseract.js im Web-Worker mit lazy-loaded Sprach-Modellen
-- **Styling:** Tailwind CSS v4 mit CSS-Custom-Properties für Themes
+- **Styling:** „Warm Ink"-Design-System (warm-dunkle oklch-Tokens, editorial) auf Tailwind v4; self-gehostete Fonts (Newsreader/Hanken Grotesk/JetBrains Mono, kein Google-Fonts-Request); Theme/Akzent/Dichte/Schriftgröße/Bewegung im Settings-Panel (`pageboundTweaks` → CSS-Variablen + localStorage)
 - **State:** Service-basiert via DI, Interface-First (ADR-001)
 - **Persistenz:** IndexedDB für Annotations + Library, JSON-Sidecar für Export/Import
 - **Hosting:** Statisch (kein Server), Docker mit nginx im Mehrstufen-Build
