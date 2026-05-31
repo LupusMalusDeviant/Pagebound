@@ -52,6 +52,7 @@ builder.Services.AddScoped<IFileHandleService, FileSystemAccessHandleService>();
 builder.Services.AddScoped<IPdfFormService, JsPdfFormService>();
 builder.Services.AddScoped<IImageToPdfConverter, JsImageToPdfConverter>();
 builder.Services.AddScoped<IWorkspaceService, BrowserWorkspaceService>();
+builder.Services.AddScoped<IPdfConverter, JsPdfConverter>();
 
 var host = builder.Build();
 

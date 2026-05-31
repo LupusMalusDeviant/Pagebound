@@ -10,6 +10,7 @@
 
 import * as pdfjsLib from "pdfjs-dist";
 import { TextLayer } from "pdfjs-dist";
+import { zipSync } from "fflate";
 import type {
   PDFDocumentProxy,
   PDFPageProxy
@@ -308,6 +309,115 @@ export async function extractText(
     const tx = it.transform[4];
     const ty = viewportHeight - it.transform[5] - it.height * 0.80;
     return { text: it.str, x: tx, y: ty, width: it.width, height: it.height };
+  });
+}
+
+// ============================================================================
+// Konvertierungen (FA-030 PNG/JPG, FA-031 Text, FA-032 HTML)
+// ----------------------------------------------------------------------------
+// One-Shot-Konverter: nehmen die rohen PDF-Bytes, laden ein transientes
+// Dokument (NICHT in der documents-Map), erzeugen das Zielformat und räumen
+// wieder auf. Aufrufer ist IPdfConverter / die /tools-Seite.
+// ============================================================================
+
+async function withTransientDoc<T>(
+  data: Uint8Array,
+  fn: (doc: PDFDocumentProxy) => Promise<T>
+): Promise<T> {
+  const task = pdfjsLib.getDocument({
+    data,
+    isEvalSupported: false,
+    disableAutoFetch: true
+  });
+  const doc = await task.promise;
+  try {
+    return await fn(doc);
+  } finally {
+    try { await doc.cleanup(); await doc.destroy(); } catch { /* ignore */ }
+  }
+}
+
+async function renderPageToCanvas(
+  doc: PDFDocumentProxy,
+  pageNumber: number,
+  scale: number
+): Promise<HTMLCanvasElement> {
+  const page = await doc.getPage(pageNumber);
+  const viewport = page.getViewport({ scale });
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.ceil(viewport.width);
+  canvas.height = Math.ceil(viewport.height);
+  const ctx = canvas.getContext("2d", { alpha: false });
+  if (!ctx) throw new Error("Pagebound: 2D context unavailable.");
+  await page.render({ canvasContext: ctx, viewport, canvas }).promise;
+  return canvas;
+}
+
+function dataUrlToBytes(dataUrl: string): Uint8Array {
+  const b64 = dataUrl.substring(dataUrl.indexOf(",") + 1);
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
+
+/** FA-031: ganzes PDF als reiner Text, Seiten durch Form-Feed getrennt. */
+export async function convertToText(data: Uint8Array): Promise<string> {
+  return withTransientDoc(data, async (doc) => {
+    const parts: string[] = [];
+    for (let i = 1; i <= doc.numPages; i++) {
+      const { pageText } = await readPageText(doc, i);
+      parts.push(pageText);
+    }
+    return parts.join("\n\n\f\n");
+  });
+}
+
+/**
+ * FA-030: jede Seite als PNG/JPG rendern und in ein (store-only) ZIP packen.
+ * Bilder sind bereits komprimiert, daher level 0 — schneller, kaum größer.
+ */
+export async function convertToImagesZip(
+  data: Uint8Array,
+  format: "png" | "jpeg",
+  quality: number,
+  scale: number
+): Promise<Uint8Array> {
+  return withTransientDoc(data, async (doc) => {
+    const mime = format === "jpeg" ? "image/jpeg" : "image/png";
+    const ext = format === "jpeg" ? "jpg" : "png";
+    const files: Record<string, Uint8Array> = {};
+    const pad = String(doc.numPages).length;
+    for (let i = 1; i <= doc.numPages; i++) {
+      const canvas = await renderPageToCanvas(doc, i, scale);
+      const dataUrl = format === "jpeg" ? canvas.toDataURL(mime, quality) : canvas.toDataURL(mime);
+      files[`seite-${String(i).padStart(pad, "0")}.${ext}`] = dataUrlToBytes(dataUrl);
+    }
+    return zipSync(files, { level: 0 });
+  });
+}
+
+/**
+ * FA-032: PDF als eigenständiges HTML mit pixel-genauer Treue — jede Seite als
+ * eingebettetes PNG (base64). Kein externer Request, offline öffenbar.
+ */
+export async function convertToHtml(data: Uint8Array, scale: number): Promise<string> {
+  return withTransientDoc(data, async (doc) => {
+    const pages: string[] = [];
+    for (let i = 1; i <= doc.numPages; i++) {
+      const canvas = await renderPageToCanvas(doc, i, scale);
+      const dataUrl = canvas.toDataURL("image/png");
+      pages.push(
+        `<section class="page"><img alt="Seite ${i}" width="${canvas.width}" height="${canvas.height}" src="${dataUrl}"></section>`
+      );
+    }
+    return `<!DOCTYPE html><html lang="de"><head><meta charset="utf-8">`
+      + `<meta name="viewport" content="width=device-width,initial-scale=1">`
+      + `<title>Pagebound Export</title>`
+      + `<style>body{margin:0;background:#525659}.page{display:flex;justify-content:center;padding:16px}`
+      + `img{max-width:100%;height:auto;box-shadow:0 2px 8px rgba(0,0,0,.4)}</style></head><body>\n`
+      + pages.join("\n")
+      + `\n</body></html>`;
   });
 }
 

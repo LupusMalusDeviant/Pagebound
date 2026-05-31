@@ -5,6 +5,7 @@
 @inject IPdfRenderer Renderer
 @inject IPdfManipulator Manipulator
 @inject IImageToPdfConverter ImageConverter
+@inject IPdfConverter Converter
 @inject ILocalizationService L
 @inject IJSRuntime JS
 @implements IAsyncDisposable
@@ -266,6 +267,37 @@
         <p class="max-w-4xl mx-auto mt-1 text-xs text-pb-fg-muted">@L.T("tools.encrypt.note")</p>
         }
 
+        @* Konvertieren (FA-030 PNG/JPG, FA-031 Text, FA-032 HTML) *@
+        <div class="max-w-4xl mx-auto mt-2 rounded-lg pb-glass p-3 flex flex-wrap items-center gap-2 text-sm">
+            <span class="text-pb-fg-muted">@L.T("tools.convert.label")</span>
+            <select @bind="_convertFormat"
+                    class="rounded border border-pb-border bg-pb-bg px-2 py-1 text-sm"
+                    aria-label="@L.T("tools.convert.label")">
+                <option value="@ConversionFormat.Png">@L.T("tools.convert.png")</option>
+                <option value="@ConversionFormat.Jpg">@L.T("tools.convert.jpg")</option>
+                <option value="@ConversionFormat.Text">@L.T("tools.convert.text")</option>
+                <option value="@ConversionFormat.Html">@L.T("tools.convert.html")</option>
+            </select>
+            <button type="button"
+                    class="ml-auto rounded border border-pb-border bg-pb-bg px-3 py-1 text-pb-fg-muted hover:text-pb-fg disabled:opacity-40"
+                    disabled="@(_isConverting || _handle is null)"
+                    title="@L.T("tools.convert.title")"
+                    @onclick="ConvertPdfAsync">
+                @(_isConverting ? L.T("tools.convert.running") : L.T("tools.convert.button"))
+            </button>
+        </div>
+        @if (_convertStatus is not null)
+        {
+            <div class="max-w-4xl mx-auto mt-2 rounded border border-green-300/40 bg-green-50/10 px-3 py-2 text-sm text-pb-fg">
+                @_convertStatus
+                <button type="button"
+                        class="float-right text-pb-fg-muted hover:text-pb-fg"
+                        @onclick="@(() => _convertStatus = null)"
+                        aria-label="@L.T("common.close")">✕</button>
+            </div>
+        }
+        <p class="max-w-4xl mx-auto mt-1 text-xs text-pb-fg-muted">@L.T("tools.convert.note")</p>
+
         <div class="mt-6 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
             @{
                 var visiblePages = _pages.Where(p => !p.Deleted).ToList();
@@ -369,6 +401,10 @@
     private bool _isBuildingImagesPdf;
     private string? _imgStatus;
     private int _dragIndex = -1;
+    // FA-030/031/032: Konvertieren des geladenen PDF.
+    private bool _isConverting;
+    private ConversionFormat _convertFormat = ConversionFormat.Png;
+    private string? _convertStatus;
 
     private static readonly (PdfPageSizeMode Mode, string LabelKey)[] ImagePageSizeModes =
     {
@@ -777,6 +813,47 @@
         var safe = string.Concat(baseName.Select(c =>
             char.IsLetterOrDigit(c) || c is '_' or '-' or '.' or ' ' ? c : '_'));
         return $"{safe}.encrypted.pdf";
+    }
+
+    // --- Konvertieren (FA-030/031/032) ---------------------------------------
+
+    private async Task ConvertPdfAsync()
+    {
+        if (_originalPdfBytes is null || _isConverting) return;
+        _isConverting = true;
+        _convertStatus = null;
+        _errorMessage = null;
+        try
+        {
+            var result = await Converter.ConvertAsync(_originalPdfBytes, _convertFormat, CancellationToken.None)
+                .ConfigureAwait(false);
+            var filename = BuildConvertedFilename(_currentFilename, result.FileExtension);
+            await JS.InvokeVoidAsync(
+                "pageboundShortcuts.downloadBytes",
+                filename,
+                Convert.ToBase64String(result.Bytes),
+                result.MimeType).ConfigureAwait(false);
+            _convertStatus = L.T("tools.convert.done", new Dictionary<string, object> { ["file"] = filename });
+        }
+        catch (Exception ex)
+        {
+            _convertStatus = L.T("tools.convert.error", new Dictionary<string, object> { ["message"] = ex.Message });
+        }
+        finally
+        {
+            _isConverting = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private static string BuildConvertedFilename(string? originalName, string extension)
+    {
+        var baseName = string.IsNullOrWhiteSpace(originalName) ? "dokument" : originalName;
+        if (baseName.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
+            baseName = baseName[..^4];
+        var safe = string.Concat(baseName.Select(c =>
+            char.IsLetterOrDigit(c) || c is '_' or '-' or '.' or ' ' ? c : '_'));
+        return $"{safe}.{extension}";
     }
 
     // --- Bilder → PDF (FA-025) -----------------------------------------------
