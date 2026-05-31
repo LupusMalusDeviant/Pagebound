@@ -77,6 +77,12 @@ const builds = [
     globalName: "pageboundWorkspace",
     entryPoints: [resolve(__dirname, "wwwroot/js/workspace-bridge.ts")],
     outfile: resolve(__dirname, "wwwroot/js/workspace-bridge.js")
+  },
+  {
+    ...sharedOptions,
+    globalName: "pageboundTweaks",
+    entryPoints: [resolve(__dirname, "wwwroot/js/tweaks-bridge.ts")],
+    outfile: resolve(__dirname, "wwwroot/js/tweaks-bridge.js")
   }
 ];
 

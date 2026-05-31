@@ -1,149 +1,175 @@
 @inherits LayoutComponentBase
 @implements IDisposable
-@inject IThemeService Theme
 @inject ILocalizationService L
 @inject ILibraryService LibrarySvc
 @inject NavigationManager Nav
+@inject IJSRuntime JS
 
-<div class="flex h-screen w-screen overflow-hidden text-pb-fg">
+<div class="@($"app{(IsCollapsed ? " collapsed" : "")}")">
 
-    @* Library-Sidebar — auto-collapse beim Lesen, hier vorerst Stub.
-       pb-glass setzt Background, Border (rundherum) und Shadow; wir
-       überschreiben unten + oben + links auf 0, damit die Sidebar an die
-       Viewport-Kante bündig stößt und nur die rechte Trennlinie sichtbar
-       bleibt. *@
-    <aside class="@(_sidebarCollapsed ? "hidden" : "hidden md:flex") w-64 flex-col pb-glass"
-           style="border-top: 0; border-bottom: 0; border-left: 0; border-radius: 0;"
-           aria-label="@L.T("nav.library")">
-        <div class="px-4 py-3"
-             style="border-bottom: 1px solid var(--pb-glass-border)">
-            <a href="/" class="block">
-                <h1 class="text-lg font-semibold tracking-tight">@L.T("app.title")</h1>
-                <p class="text-xs text-pb-fg-muted">@L.T("app.preAlpha")</p>
-            </a>
+    @* RAIL — typografischer Index (FA-064: klappt im Lesemodus ein) *@
+    <nav class="@($"rail{(_railOpen ? " open" : "")}")" aria-label="@L.T("nav.heading")">
+        <div class="masthead">
+            <a href="/" class="word" @onclick="@(() => Go(""))" @onclick:preventDefault="true">Page<em>bound</em></a>
+            <div class="tagline"><span class="dot" aria-hidden="true"></span> @L.T("app.preAlpha")</div>
         </div>
-        <nav class="flex-1 overflow-y-auto p-2 text-sm space-y-1" aria-label="@L.T("nav.heading")">
-            <NavLink href="/"
-                     Match="NavLinkMatch.All"
-                     class="block px-2 py-1.5 rounded hover:bg-pb-bg"
-                     ActiveClass="bg-pb-bg font-medium text-pb-accent">
-                @L.T("nav.start")
-            </NavLink>
-            <NavLink href="/reader"
-                     class="block px-2 py-1.5 rounded hover:bg-pb-bg"
-                     ActiveClass="bg-pb-bg font-medium text-pb-accent">
-                @L.T("nav.reader")
-            </NavLink>
-            <NavLink href="/tools"
-                     class="block px-2 py-1.5 rounded hover:bg-pb-bg"
-                     ActiveClass="bg-pb-bg font-medium text-pb-accent">
-                @L.T("nav.tools")
-            </NavLink>
-            <NavLink href="/split"
-                     class="block px-2 py-1.5 rounded hover:bg-pb-bg"
-                     ActiveClass="bg-pb-bg font-medium text-pb-accent">
-                @L.T("nav.split")
-            </NavLink>
-            <NavLink href="/batch"
-                     class="block px-2 py-1.5 rounded hover:bg-pb-bg"
-                     ActiveClass="bg-pb-bg font-medium text-pb-accent">
-                @L.T("nav.batch")
-            </NavLink>
-            <div class="mt-4 px-2 text-xs uppercase tracking-wide text-pb-fg-muted flex items-center justify-between">
-                <span>@L.T("nav.library")</span>
-                @if (_recent.Count > 0)
-                {
-                    <NavLink href="/library"
-                             class="text-[10px] normal-case tracking-normal text-pb-fg-muted hover:text-pb-fg">
-                        @L.T("nav.library.viewAll")
-                    </NavLink>
-                }
+
+        <div class="nav">
+            @foreach (var n in Navs)
+            {
+                var item = n;
+                <button type="button" class="nav-item"
+                        aria-current="@(_route == item.Route ? "page" : null)"
+                        @onclick="@(() => Go(item.Route))">
+                    <span class="ix" aria-hidden="true">@item.Ix</span>
+                    <span class="lbl">@L.T(item.LabelKey)</span>
+                </button>
+            }
+        </div>
+
+        <div class="rail-lib">
+            <div class="coll-label">
+                @L.T("nav.collection")
+                <button type="button" class="focusable" @onclick="@(() => Go("library"))">@L.T("nav.library.viewAll")</button>
             </div>
             @if (_recent.Count == 0)
             {
-                <span class="block px-2 py-1 text-pb-fg-muted italic text-xs">
-                    @L.T("nav.library.empty")
-                </span>
+                <span class="block py-1 text-xs italic" style="color: var(--ink-4)">@L.T("nav.library.empty")</span>
             }
             else
             {
-                <ul class="space-y-0.5">
-                    @foreach (var entry in _recent)
-                    {
-                        <li>
-                            <button type="button"
-                                    class="block w-full text-left px-2 py-1 rounded text-xs text-pb-fg-muted hover:bg-pb-bg hover:text-pb-fg truncate"
-                                    title="@entry.Title"
-                                    @onclick="@(() => Nav.NavigateTo("/library"))">
-                                @entry.Title
-                            </button>
-                        </li>
-                    }
-                </ul>
+                @foreach (var entry in _recent)
+                {
+                    var e = entry;
+                    <button type="button" class="lib-file" title="@e.Title" @onclick="@(() => OpenRecent(e))">
+                        <span class="nm">@e.Title</span>
+                        <span class="hsh">@ShortHash(e)</span>
+                    </button>
+                }
             }
-        </nav>
-    </aside>
+        </div>
 
-    @* Hauptbereich (Tabs + Content) *@
-    <main class="flex-1 flex flex-col min-w-0" role="main">
-        @* Tab-Leiste — vorerst Stub, rechts Theme + Sprache + Version (FA-100/101) *@
-        <header class="flex items-center justify-between px-4 h-12 gap-3 pb-glass"
-                style="border-top: 0; border-left: 0; border-right: 0; border-radius: 0;">
-            <div class="flex items-center gap-2 min-w-0">
-                <button type="button"
-                        class="hidden md:inline-flex px-2 py-1 rounded border border-pb-border text-pb-fg-muted hover:text-pb-fg hover:bg-pb-surface"
-                        title="@L.T("nav.sidebar.toggle")"
-                        aria-label="@L.T("nav.sidebar.toggle")"
-                        aria-expanded="@((!_sidebarCollapsed).ToString().ToLowerInvariant())"
-                        @onclick="ToggleSidebar">
-                    ☰
-                </button>
-                <div class="text-sm text-pb-fg-muted truncate">@L.T("tabs.comingSoon")</div>
-            </div>
-            <div class="flex items-center gap-2 text-xs">
-                <button type="button"
-                        class="px-2 py-1 rounded border border-pb-border text-pb-fg-muted hover:text-pb-fg hover:bg-pb-surface"
-                        title="@L.T("theme.cycle.title")"
-                        @onclick="CycleThemeAsync">
-                    @ThemeGlyph(Theme.CurrentTheme) @ThemeLabel(Theme.CurrentTheme)
-                </button>
-                <button type="button"
-                        class="px-2 py-1 rounded border border-pb-border text-pb-fg-muted hover:text-pb-fg hover:bg-pb-surface uppercase"
-                        title="@L.T("lang.toggle.title")"
-                        @onclick="ToggleLanguageAsync">
-                    @L.CurrentLanguage
-                </button>
-                <span class="text-pb-fg-muted">@L.T("app.version")</span>
-            </div>
-        </header>
+        <div class="rail-foot">
+            <span class="priv">
+                <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                @L.T("nav.privacy")
+            </span>
+        </div>
+    </nav>
 
-        <article class="flex-1 overflow-auto">
-            @Body
-        </article>
+    @if (_railOpen)
+    {
+        <div class="scrim" @onclick="@(() => _railOpen = false)" aria-hidden="true"></div>
+    }
+
+    @* TOPBAR — running head *@
+    <header class="topbar">
+        <button class="icon-btn menu-btn" @onclick="@(() => _railOpen = !_railOpen)" aria-label="@L.T("nav.sidebar.toggle")">
+            <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+        </button>
+        <div class="runhead">
+            <span>@L.T("app.title")</span><span class="sep">—</span><b>@CrumbLabel</b>
+        </div>
+        <span class="spacer"></span>
+        <div class="theme-toggle" role="group" aria-label="@L.T("settings.theme")">
+            <button aria-pressed="@((_theme == "light").ToString().ToLowerInvariant())" @onclick='@(() => SetThemeAsync("light"))'>@L.T("settings.theme.light")</button>
+            <span class="bar" aria-hidden="true"></span>
+            <button aria-pressed="@((_theme == "dark").ToString().ToLowerInvariant())" @onclick='@(() => SetThemeAsync("dark"))'>@L.T("settings.theme.dark")</button>
+        </div>
+        <button class="icon-btn" @onclick="@(() => _settingsOpen = true)" aria-label="@L.T("settings.open")" title="@L.T("settings.open")">
+            <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        </button>
+        <button class="icon-btn" style="width:auto;padding:0 0.55em;font-family:var(--font-mono);font-size:0.72rem"
+                @onclick="ToggleLanguageAsync" aria-label="@L.T("lang.toggle.title")" title="@L.T("lang.toggle.title")">
+            @L.CurrentLanguage.ToUpperInvariant()
+        </button>
+        <span class="ver">@L.T("app.version")</span>
+    </header>
+
+    @* MAIN *@
+    <main class="main" id="main" tabindex="-1">
+        @Body
     </main>
 </div>
 
+<SettingsPanel Open="_settingsOpen" OnClose="OnSettingsClosedAsync" />
+
 @code {
-    // "Zuletzt geöffnet" Mini-Liste in der Sidebar (FA-064).
+    private sealed record NavDef(string Ix, string Route, string LabelKey);
+    private static readonly NavDef[] Navs =
+    {
+        new("01", "",      "nav.start"),
+        new("02", "reader","nav.reader"),
+        new("03", "tools", "nav.tools"),
+        new("04", "split", "nav.split"),
+        new("05", "batch", "nav.batch"),
+    };
+
+    private string _route = "";
+    private bool _railOpen;
+    private bool _settingsOpen;
+    private string _theme = "dark";
     private List<LibraryEntry> _recent = new();
 
-    // FA-064: Im Lesemodus (Reader/Split) klappt die Sidebar automatisch ein;
-    // der ☰-Button im Header blendet sie jederzeit wieder ein/aus. Die nächste
-    // Navigation wendet die Auto-Regel erneut an.
-    private bool _sidebarCollapsed;
+    private bool IsCollapsed => _route is "reader" or "split";
+
+    private string CrumbLabel => _route switch
+    {
+        "reader" => L.T("nav.reader"),
+        "tools" => L.T("nav.tools"),
+        "split" => L.T("nav.split"),
+        "batch" => L.T("nav.batch"),
+        "library" => L.T("nav.library"),
+        _ => L.T("nav.start"),
+    };
 
     protected override async Task OnInitializedAsync()
     {
-        Theme.ThemeChanged += OnThemeChanged;
         Nav.LocationChanged += OnLocationChanged;
-        ApplyAutoCollapse();
+        UpdateRoute();
         await RefreshRecentAsync();
     }
 
-    public void Dispose()
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        Theme.ThemeChanged -= OnThemeChanged;
-        Nav.LocationChanged -= OnLocationChanged;
+        if (firstRender)
+        {
+            await SyncThemeAsync();
+        }
+    }
+
+    public void Dispose() => Nav.LocationChanged -= OnLocationChanged;
+
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
+    {
+        UpdateRoute();
+        _railOpen = false;
+        _ = RefreshRecentAsync();
+    }
+
+    private void UpdateRoute()
+    {
+        _route = Nav.ToBaseRelativePath(Nav.Uri).Split('?', '#')[0].Trim('/').ToLowerInvariant();
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void Go(string route)
+    {
+        _railOpen = false;
+        Nav.NavigateTo(route.Length == 0 ? "/" : "/" + route);
+    }
+
+    private void OpenRecent(LibraryEntry entry)
+    {
+        _railOpen = false;
+        var hash = entry.PdfMeta?.FileHashSha256;
+        Nav.NavigateTo(string.IsNullOrWhiteSpace(hash) ? "/reader" : $"/reader?pdf={Uri.EscapeDataString(hash)}");
+    }
+
+    private static string ShortHash(LibraryEntry e)
+    {
+        var h = e.PdfMeta?.FileHashSha256;
+        return string.IsNullOrEmpty(h) ? "" : h[..Math.Min(4, h.Length)];
     }
 
     private async Task RefreshRecentAsync()
@@ -153,68 +179,37 @@
             var query = new LibraryQuery(Sort: LibrarySort.LastOpenedDesc, Take: 5);
             _recent = (await LibrarySvc.QueryAsync(query, CancellationToken.None)).ToList();
         }
-        catch
-        {
-            _recent = new();
-        }
+        catch { _recent = new(); }
         await InvokeAsync(StateHasChanged);
     }
 
-    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs args)
+    private async Task SetThemeAsync(string theme)
     {
-        // Beim Routenwechsel die Auto-Collapse-Regel neu anwenden (FA-064) …
-        ApplyAutoCollapse();
-        // … und die "Zuletzt geöffnet"-Liste neu laden, damit der gerade
-        // geöffnete Eintrag oben in der Sidebar steht (RefreshRecentAsync
-        // ruft StateHasChanged, rendert also auch die Collapse-Änderung).
-        _ = RefreshRecentAsync();
-    }
-
-    private void OnThemeChanged(ThemeName _) => InvokeAsync(StateHasChanged);
-
-    // FA-064: Reader und Split-View sind "Lesemodus" → Sidebar einklappen,
-    // alle anderen Routen → ausklappen.
-    private void ApplyAutoCollapse()
-    {
-        var path = Nav.ToBaseRelativePath(Nav.Uri).Split('?', '#')[0].Trim('/').ToLowerInvariant();
-        _sidebarCollapsed = path is "reader" or "split";
-    }
-
-    private void ToggleSidebar() => _sidebarCollapsed = !_sidebarCollapsed;
-
-    private async Task CycleThemeAsync()
-    {
-        var next = Theme.CurrentTheme switch
-        {
-            ThemeName.Auto => ThemeName.Light,
-            ThemeName.Light => ThemeName.Dark,
-            ThemeName.Dark => ThemeName.Sepia,
-            _ => ThemeName.Auto
-        };
-        await Theme.SetThemeAsync(next, CancellationToken.None);
+        _theme = theme;
+        try { await JS.InvokeVoidAsync("pageboundTweaks.set", "theme", theme); }
+        catch { /* Bridge nicht da */ }
+        await InvokeAsync(StateHasChanged);
     }
 
     private async Task ToggleLanguageAsync()
     {
-        // Aktuell nur DE ↔ EN — wenn weitere Sprachen dazukommen, hier auf
-        // einen Dropdown umstellen statt zyklisch.
         var next = L.CurrentLanguage == "de" ? "en" : "de";
         await L.SetLanguageAsync(next, CancellationToken.None);
     }
 
-    private static string ThemeGlyph(ThemeName name) => name switch
+    private async Task SyncThemeAsync()
     {
-        ThemeName.Light => "☀",
-        ThemeName.Dark => "🌙",
-        ThemeName.Sepia => "📜",
-        _ => "🌓"
-    };
+        try
+        {
+            var t = await JS.InvokeAsync<System.Text.Json.JsonElement>("pageboundTweaks.load");
+            if (t.TryGetProperty("theme", out var th) && th.GetString() is { } s) { _theme = s; await InvokeAsync(StateHasChanged); }
+        }
+        catch { /* ignore */ }
+    }
 
-    private string ThemeLabel(ThemeName name) => name switch
+    private async Task OnSettingsClosedAsync()
     {
-        ThemeName.Light => L.T("theme.light"),
-        ThemeName.Dark => L.T("theme.dark"),
-        ThemeName.Sepia => L.T("theme.sepia"),
-        _ => L.T("theme.auto")
-    };
+        _settingsOpen = false;
+        await SyncThemeAsync(); // Theme könnte im Panel geändert worden sein
+    }
 }

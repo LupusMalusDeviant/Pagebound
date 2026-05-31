@@ -285,6 +285,19 @@ h1, h2, h3, h4 { font-family: var(--font-display); font-weight: 600; line-height
 
 .divider { height: 1px; background: var(--line); border: 0; }
 
+/* ---- Settings-Panel-Controls (segmented / slider / switch) ---- */
+.pb-seg { display: flex; padding: 2px; border-radius: 8px; background: var(--bg-sunken); border: 1px solid var(--line); gap: 2px; }
+.pb-seg-btn { flex: 1; padding: 0.4em 0.6em; border-radius: 6px; font-size: 0.82rem; font-weight: 500; color: var(--ink-3); background: transparent; border: 0; cursor: pointer; transition: background var(--speed), color var(--speed); min-height: 30px; }
+.pb-seg-btn:hover { color: var(--ink-2); }
+.pb-seg-btn.active { background: var(--bg-raised); color: var(--ink); box-shadow: 0 1px 2px rgb(0 0 0 / 0.15); }
+.pb-range { -webkit-appearance: none; appearance: none; width: 100%; height: 4px; border-radius: 999px; background: var(--line); outline: none; }
+.pb-range::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 16px; height: 16px; border-radius: 50%; background: var(--accent); border: 2px solid var(--bg-base); cursor: pointer; }
+.pb-range::-moz-range-thumb { width: 16px; height: 16px; border-radius: 50%; background: var(--accent); border: 2px solid var(--bg-base); cursor: pointer; }
+.pb-switch { position: relative; width: 38px; height: 22px; border-radius: 999px; background: var(--bg-hover); border: 1px solid var(--line); cursor: pointer; transition: background var(--speed); flex: none; padding: 0; }
+.pb-switch.on { background: var(--accent); border-color: transparent; }
+.pb-switch i { position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--bg-raised); box-shadow: 0 1px 2px rgb(0 0 0 / 0.3); transition: transform var(--speed); }
+.pb-switch.on i { transform: translateX(16px); background: var(--accent-ink); }
+
 /* =============================================================================
    pb-glass compat — jetzt flache Warm-Ink-Surfaces (kein Glassmorphism mehr,
    editorial = ruhige, papierne Flächen). Bestehendes Markup mit .pb-glass /
@@ -354,6 +367,13 @@ body.pb-app-bg { background: var(--bg-base); }
 .main { grid-area: main; overflow-y: auto; min-height: 0; scroll-behavior: smooth; }
 .wrap { max-width: var(--maxw); margin: 0 auto; padding: var(--sp-7) var(--sp-6) var(--sp-8); }
 .menu-btn { display: none; }
+
+/* FA-064: im Lesemodus (Reader/Split) klappt die Rail ein — gleiche Drawer-
+   Mechanik wie mobil, der ☰-Button blendet sie wieder ein. */
+.app.collapsed { grid-template-columns: 1fr; grid-template-areas: "topbar" "main"; }
+.app.collapsed .rail { position: fixed; inset: 0 auto 0 0; width: min(82vw, 320px); z-index: 80; transform: translateX(-102%); transition: transform var(--speed); box-shadow: var(--shadow-pop); }
+.app.collapsed .rail.open { transform: translateX(0); }
+.app.collapsed .menu-btn { display: inline-grid; }
 
 @media (max-width: 940px) {
   .app { grid-template-columns: 1fr; grid-template-areas: "topbar" "main"; }

@@ -22,16 +22,26 @@
         // mit den richtigen CSS-Variablen läuft (kein Flash of Unstyled Content).
         (function () {
             try {
-                var t = window.localStorage.getItem("pb.theme");
-                if (t && t.toLowerCase() !== "auto") {
-                    document.documentElement.setAttribute("data-theme", t.toLowerCase());
-                }
                 var lang = window.localStorage.getItem("pb.lang");
-                if (lang) {
-                    document.documentElement.setAttribute("lang", lang);
-                }
+                if (lang) document.documentElement.setAttribute("lang", lang);
+
+                // Warm-Ink Tweaks (Theme/Akzent/Schriftgröße/Dichte/Bewegung) vor
+                // dem ersten Paint anwenden — kein FOUC. Spiegelt tweaks-bridge.ts.
+                var ACC = { teal: [192, 0.115], jade: [158, 0.115], aqua: [205, 0.085], coral: [35, 0.130] };
+                var DEN = { kompakt: 0.82, normal: 1, luftig: 1.2 };
+                var t = { theme: "dark", accent: "teal", fontScale: 1, density: "normal", motion: true };
+                var raw = window.localStorage.getItem("pagebound:tweaks");
+                if (raw) { var s = JSON.parse(raw); for (var k in s) t[k] = s[k]; }
+                var r = document.documentElement, a = ACC[t.accent] || ACC.teal;
+                r.setAttribute("data-theme", t.theme === "light" ? "light" : "dark");
+                r.setAttribute("data-motion", t.motion ? "on" : "off");
+                r.style.setProperty("--accent-h", a[0]);
+                r.style.setProperty("--accent-c", a[1]);
+                var fs = Number(t.fontScale) || 1; fs = Math.min(1.35, Math.max(0.85, fs));
+                r.style.setProperty("--font-scale", fs);
+                r.style.setProperty("--d", DEN[t.density] || 1);
             } catch (e) {
-                // localStorage gesperrt (Privatsphäre-Modus o.ä.) — Auto-Defaults greifen.
+                // localStorage gesperrt (Privatsphäre-Modus o.ä.) — Dark-Defaults greifen.
             }
         })();
     </script>
@@ -62,6 +72,7 @@
     <script src="js/file-handle-bridge.js"></script>
     <script src="js/split-bridge.js"></script>
     <script src="js/workspace-bridge.js"></script>
+    <script src="js/tweaks-bridge.js"></script>
     <script src="_framework/blazor.webassembly#[.{fingerprint}].js"></script>
     <script>
         if ('serviceWorker' in navigator) {
