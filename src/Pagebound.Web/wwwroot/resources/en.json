@@ -84,9 +84,11 @@
   "split.heading": "Split view",
   "split.hint": "Two PDFs side by side — each pane has its own navigation, annotations and search (FA-090..091).",
   "split.sync.label": "Sync scrolling",
-  "split.sync.title": "Page changes in one pane mirror to the other (FA-092)",
+  "split.sync.title": "Both panes scroll together, proportionally (FA-092)",
   "split.pane.left": "Left pane",
   "split.pane.right": "Right pane",
+  "split.resize.aria": "Drag the divider to resize the panes",
+  "split.resize.title": "Drag to resize the panes",
 
   "library.pageTitle": "Library — Pagebound",
   "library.heading": "Library",

@@ -65,6 +65,12 @@ const builds = [
     globalName: "pageboundFiles",
     entryPoints: [resolve(__dirname, "wwwroot/js/file-handle-bridge.ts")],
     outfile: resolve(__dirname, "wwwroot/js/file-handle-bridge.js")
+  },
+  {
+    ...sharedOptions,
+    globalName: "pageboundSplit",
+    entryPoints: [resolve(__dirname, "wwwroot/js/split-bridge.ts")],
+    outfile: resolve(__dirname, "wwwroot/js/split-bridge.js")
   }
 ];
 

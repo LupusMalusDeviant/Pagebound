@@ -84,9 +84,11 @@
   "split.heading": "Split-View",
   "split.hint": "Zwei PDFs nebeneinander — jede Seite mit unabhängiger Navigation, Annotation und Suche (FA-090..091).",
   "split.sync.label": "Synchron scrollen",
-  "split.sync.title": "Page-Wechsel in einer Pane spiegelt sich in die andere (FA-092)",
+  "split.sync.title": "Beide Bereiche scrollen proportional mit (FA-092)",
   "split.pane.left": "Linke Pane",
   "split.pane.right": "Rechte Pane",
+  "split.resize.aria": "Trennlinie verschieben, um die Bereichsbreite anzupassen",
+  "split.resize.title": "Ziehen, um die Breite der Bereiche anzupassen",
 
   "library.pageTitle": "Library — Pagebound",
   "library.heading": "Library",
