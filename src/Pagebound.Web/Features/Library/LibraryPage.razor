@@ -28,7 +28,7 @@
             <span class="text-pb-fg-muted">@L.T("library.workspace.label")</span>
             @if (_workspaceName is not null)
             {
-                <span class="inline-flex items-center gap-1 rounded border border-pb-border bg-pb-bg px-2 py-1 font-mono text-xs">📁 @_workspaceName</span>
+                <span class="inline-flex items-center gap-1 rounded border border-pb-border bg-pb-bg px-2 py-1 font-mono text-xs"><Icon Name="folder" /> @_workspaceName</span>
                 <button type="button"
                         class="rounded border border-pb-border px-2 py-1 text-xs text-pb-fg-muted hover:text-pb-fg"
                         @onclick="ClearWorkspaceAsync">
@@ -160,7 +160,7 @@
                                 <td class="px-3 py-2 text-right">
                                     <button type="button" class="text-pb-fg-muted hover:text-red-500"
                                             title="@L.T("library.entry.removeTitle")"
-                                            @onclick="@(() => RemoveEntryAsync(entry))">🗑</button>
+                                            @onclick="@(() => RemoveEntryAsync(entry))"><Icon Name="trash" /></button>
                                 </td>
                             </tr>
                         }
@@ -196,7 +196,7 @@
                             <span class="tabular-nums">@FormatDate(entry.AddedAt)</span>
                             <button type="button" class="hover:text-red-500"
                                     title="@L.T("library.entry.removeTitle")"
-                                    @onclick="@(() => RemoveEntryAsync(entry))">🗑</button>
+                                    @onclick="@(() => RemoveEntryAsync(entry))"><Icon Name="trash" /></button>
                         </div>
                     </div>
                 }
@@ -261,7 +261,7 @@
                                 class="text-pb-fg-muted hover:text-red-500"
                                 title="@L.T("library.entry.removeTitle")"
                                 @onclick="@(() => RemoveEntryAsync(entry))">
-                            🗑
+                            <Icon Name="trash" />
                         </button>
                     </div>
                 </li>

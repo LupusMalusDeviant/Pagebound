@@ -42,7 +42,7 @@
                         class="self-start rounded bg-pb-accent px-3 py-1.5 text-sm text-white disabled:opacity-40"
                         disabled="@_isLoading"
                         @onclick="PickPdfViaFsaAsync">
-                    📂 @L.T("reader.choosePdf")
+                    <Icon Name="folder" /> @L.T("reader.choosePdf")
                 </button>
             }
             else
@@ -1060,7 +1060,7 @@
                                 aria-label="@L.T("reader.note.pinAria", new Dictionary<string, object> { ["page"] = n.PageNumber, ["preview"] = previewText })"
                                 @onclick="@(() => OpenEditor(n))"
                                 @onclick:stopPropagation>
-                            📝
+                            <Icon Name="note" />
                         </button>
                     }
 
