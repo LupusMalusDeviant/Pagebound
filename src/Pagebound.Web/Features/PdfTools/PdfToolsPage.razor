@@ -349,11 +349,9 @@
 @code {
     private const long MaxFileSize = 200L * 1024 * 1024; // 200 MB für Editor-Modus
 
-    // FA-027: Encrypt-UI ausgeblendet bis zum WASM-Perf-Umbau. Die managed
-    // AES-256-R6-Krypto ist korrekt (Unit-Tests grün), friert aber den
-    // Single-Thread-WASM ~30s ein (kein Hardware-AES) → geplant WebCrypto/qpdf.
-    // Code (EncryptPdfAsync, ManagedPdfEncryptor) bleibt für den Umbau erhalten.
-    private const bool EncryptionUiEnabled = false;
+    // FA-027: Verschlüsselung läuft über WebCrypto (Bridge encryptPdf) — ~15 ms
+    // statt ~30 s Freeze, im Browser gegen PDF.js verifiziert (öffnet mit Passwort).
+    private const bool EncryptionUiEnabled = true;
 
     private PdfDocumentHandle? _handle;
     private string? _currentFilename;

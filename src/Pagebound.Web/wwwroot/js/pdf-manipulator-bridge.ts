@@ -27,7 +27,10 @@ import * as pdfjsLib from "pdfjs-dist";
 // Eigene Worker-Konfig — diese Bridge ist ein separater IIFE-Bundle, der
 // seinen eigenen pdfjs-Modulscope hat. Der Worker selbst (gleiche .mjs-Datei)
 // kann shared sein, daher reicht der Pfad wie in pdfjs-bridge.ts.
-pdfjsLib.GlobalWorkerOptions.workerSrc = "/js/pdf.worker.min.mjs";
+// Shim statt direkt pdf.worker.min.mjs: polyfillt Math.sumPrecise im Worker
+// (pdfjs 5.7 braucht es), bevor der echte Worker lädt — sonst crasht PDF.js in
+// Browsern ohne dieses sehr neue JS-API.
+pdfjsLib.GlobalWorkerOptions.workerSrc = "/js/pdfjs-worker-shim.mjs";
 
 export interface EmbeddedSignatureInput {
   pageNumber: number;
@@ -533,4 +536,376 @@ export async function rotatePages(
     pages[idx].setRotation(degrees((((current + deg) % 360) + 360) % 360));
   }
   return await doc.save({ useObjectStreams: false });
+}
+
+// ============================================================================
+// AES-256-Krypto (ISO 32000-2 /V5 /R6) über WebCrypto (FA-027)
+// ----------------------------------------------------------------------------
+// Portierung von Pagebound.Infrastructure.Pdf.Encryption.AesR6 nach WebCrypto:
+// hardware-beschleunigtes AES (managed AES fror den WASM-Thread ~30s ein).
+// Nur SHA-256/384/512 + AES, kein MD5. WebCrypto-AES-CBC padded immer (PKCS7);
+// für Algorithm 2.B (no-padding) verschlüsseln wir block-aligned und schneiden
+// den angehängten Padding-Block ab — die ersten n Blöcke sind bei CBC identisch.
+// AES-256-ECB (für /Perms) = AES-256-CBC mit IV=0 für einen einzelnen Block.
+// ============================================================================
+
+const EMPTY = new Uint8Array(0);
+
+function concatBytes(...parts: Uint8Array[]): Uint8Array {
+  let len = 0;
+  for (const p of parts) len += p.length;
+  const out = new Uint8Array(len);
+  let off = 0;
+  for (const p of parts) { out.set(p, off); off += p.length; }
+  return out;
+}
+
+async function sha(bits: 256 | 384 | 512, data: Uint8Array): Promise<Uint8Array> {
+  const algo = bits === 256 ? "SHA-256" : bits === 384 ? "SHA-384" : "SHA-512";
+  return new Uint8Array(await crypto.subtle.digest(algo, data));
+}
+
+/** AES-CBC ohne Padding: verschlüsselt block-alignte Daten, schneidet den PKCS7-Extra-Block ab. */
+async function aesCbcNoPad(key: Uint8Array, iv: Uint8Array, data: Uint8Array): Promise<Uint8Array> {
+  const k = await crypto.subtle.importKey("raw", key, { name: "AES-CBC" }, false, ["encrypt"]);
+  const enc = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-CBC", iv }, k, data));
+  return enc.slice(0, data.length);
+}
+
+/** AES-256-CBC mit zufälligem IV + PKCS7 (für Stream-/String-Daten, /CFM AESV3). IV wird vorangestellt. */
+async function aesCbcEncrypt(key: Uint8Array, plaintext: Uint8Array): Promise<Uint8Array> {
+  const iv = crypto.getRandomValues(new Uint8Array(16));
+  const k = await crypto.subtle.importKey("raw", key, { name: "AES-CBC" }, false, ["encrypt"]);
+  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-CBC", iv }, k, plaintext));
+  return concatBytes(iv, ct);
+}
+
+/** Algorithm 2.B — iterierter Hardening-Hash. */
+async function hash2B(password: Uint8Array, salt: Uint8Array, udata: Uint8Array): Promise<Uint8Array> {
+  let k = await sha(256, concatBytes(password, salt, udata));
+  let e = new Uint8Array(0);
+  for (let round = 0; round < 64 || e[e.length - 1] > round - 32; round++) {
+    const block = concatBytes(password, k, udata);
+    const k1 = new Uint8Array(block.length * 64);
+    for (let i = 0; i < 64; i++) k1.set(block, i * block.length);
+    e = await aesCbcNoPad(k.slice(0, 16), k.slice(16, 32), k1);
+    let sum = 0;
+    for (let i = 0; i < 16; i++) sum += e[i];
+    const mod = sum % 3;
+    k = await sha(mod === 0 ? 256 : mod === 1 ? 384 : 512, e);
+  }
+  return k.slice(0, 32);
+}
+
+interface R6Keys { u: Uint8Array; ue: Uint8Array; o: Uint8Array; oe: Uint8Array; perms: Uint8Array; }
+
+/** Algorithmen 8–10: /U /UE /O /OE /Perms aus File-Key + Passwörtern. */
+async function deriveR6Keys(
+  ownerPw: Uint8Array, userPw: Uint8Array, fileKey: Uint8Array, permissions: number, encryptMetadata: boolean
+): Promise<R6Keys> {
+  const rnd = () => crypto.getRandomValues(new Uint8Array(8));
+  // User
+  const uVal = rnd(), uKey = rnd();
+  const uHash = await hash2B(userPw, uVal, EMPTY);
+  const u = concatBytes(uHash, uVal, uKey);
+  const uInter = await hash2B(userPw, uKey, EMPTY);
+  const ue = await aesCbcNoPad(uInter, new Uint8Array(16), fileKey);
+  // Owner (über /U)
+  const oVal = rnd(), oKey = rnd();
+  const oHash = await hash2B(ownerPw, oVal, u);
+  const o = concatBytes(oHash, oVal, oKey);
+  const oInter = await hash2B(ownerPw, oKey, u);
+  const oe = await aesCbcNoPad(oInter, new Uint8Array(16), fileKey);
+  // /Perms (16-Byte-Block, AES-256-ECB = CBC/IV0 für einen Block)
+  const block = new Uint8Array(16);
+  block[0] = permissions & 0xff; block[1] = (permissions >> 8) & 0xff;
+  block[2] = (permissions >> 16) & 0xff; block[3] = (permissions >> 24) & 0xff;
+  block[4] = block[5] = block[6] = block[7] = 0xff;
+  block[8] = encryptMetadata ? 0x54 : 0x46; // 'T' / 'F'
+  block[9] = 0x61; block[10] = 0x64; block[11] = 0x62; // 'a','d','b'
+  block.set(crypto.getRandomValues(new Uint8Array(4)), 12);
+  const perms = await aesCbcNoPad(fileKey, new Uint8Array(16), block);
+  return { u, ue, o, oe, perms };
+}
+
+/** Auth-Pfad (User): prüft Passwort gegen /U, rekonstruiert File-Key aus /UE. Für Tests. */
+async function recoverFileKeyFromUser(password: Uint8Array, u: Uint8Array, ue: Uint8Array): Promise<Uint8Array | null> {
+  if (u.length !== 48 || ue.length !== 32) return null;
+  const vSalt = u.slice(32, 40), kSalt = u.slice(40, 48);
+  const hash = await hash2B(password, vSalt, EMPTY);
+  for (let i = 0; i < 32; i++) if (hash[i] !== u[i]) return null;
+  const inter = await hash2B(password, kSalt, EMPTY);
+  // UE entschlüsseln (AES-256-CBC no-pad, IV=0): liefert den 32-Byte File-Key.
+  const k = await crypto.subtle.importKey("raw", inter, { name: "AES-CBC" }, false, ["decrypt"]);
+  // no-pad-Decrypt: ue um einen Block (IV0-CBC) „verlängern" geht nicht direkt; wir
+  // entschlüsseln manuell, indem wir AES-CBC mit padding umgehen → eigener Decrypt:
+  // CBC-Decrypt von 32 Byte (2 Blöcke) ohne Padding-Erwartung.
+  return await aesCbcDecryptNoPad(inter, new Uint8Array(16), ue);
+}
+
+/** AES-CBC-Decrypt ohne Padding-Annahme (WebCrypto erzwingt PKCS7 beim Decrypt → eigener Weg über encrypt-Trick entfällt; wir nutzen AES-CTR-Äquivalent nicht, sondern raw ECB-Ketten). */
+async function aesCbcDecryptNoPad(key: Uint8Array, iv: Uint8Array, data: Uint8Array): Promise<Uint8Array> {
+  // WebCrypto AES-CBC-Decrypt verlangt gültiges PKCS7. Trick: an die Ciphertext-
+  // Blöcke einen selbst erzeugten Padding-Block anhängen, dessen Klartext 0x10×16
+  // ist, damit der Decrypt das Padding akzeptiert. Dazu C_{n+1} = E(K, 0x10..0x10 XOR C_n).
+  const kEnc = await crypto.subtle.importKey("raw", key, { name: "AES-CBC" }, false, ["encrypt"]);
+  const lastBlock = data.slice(data.length - 16);
+  const padPlain = new Uint8Array(16).fill(0x10);
+  const xored = new Uint8Array(16);
+  for (let i = 0; i < 16; i++) xored[i] = padPlain[i] ^ lastBlock[i];
+  // E(K, xored) mit IV=0, ein Block, padding abschneiden:
+  const eBlock = (new Uint8Array(await crypto.subtle.encrypt({ name: "AES-CBC", iv: new Uint8Array(16) }, kEnc, xored))).slice(0, 16);
+  const withPad = concatBytes(data, eBlock);
+  const kDec = await crypto.subtle.importKey("raw", key, { name: "AES-CBC" }, false, ["decrypt"]);
+  const dec = new Uint8Array(await crypto.subtle.decrypt({ name: "AES-CBC", iv }, kDec, withPad));
+  return dec;
+}
+
+/** Self-Test des Krypto-Kerns (gegen die C#-AesR6-Semantik): Round-Trips + Auth. */
+export async function encryptSelfTest(): Promise<Record<string, boolean>> {
+  const enc = new TextEncoder();
+  const fileKey = crypto.getRandomValues(new Uint8Array(32));
+  const pw = enc.encode("öffnen-123");
+  const wrong = enc.encode("nope");
+  const vSalt = crypto.getRandomValues(new Uint8Array(8));
+  const kSalt = crypto.getRandomValues(new Uint8Array(8));
+
+  // Hash2B deterministisch?
+  const h1 = await hash2B(pw, vSalt, EMPTY);
+  const h2 = await hash2B(pw, vSalt, EMPTY);
+  const deterministic = h1.length === 32 && h1.every((b, i) => b === h2[i]);
+
+  // User-Key Round-Trip
+  const keys = await deriveR6Keys(pw, pw, fileKey, -1, true);
+  const rec = await recoverFileKeyFromUser(pw, keys.u, keys.ue);
+  const roundTrip = !!rec && rec.length === 32 && rec.every((b, i) => b === fileKey[i]);
+  const wrongFails = (await recoverFileKeyFromUser(wrong, keys.u, keys.ue)) === null;
+
+  // Daten-Round-Trip (AES-256-CBC + IV-Prefix)
+  const plain = enc.encode("Hallo Welt — ümläüte!");
+  const ct = await aesCbcEncrypt(fileKey, plain);
+  const kDec = await crypto.subtle.importKey("raw", fileKey, { name: "AES-CBC" }, false, ["decrypt"]);
+  const back = new Uint8Array(await crypto.subtle.decrypt({ name: "AES-CBC", iv: ct.slice(0, 16) }, kDec, ct.slice(16)));
+  const dataRoundTrip = back.length === plain.length && back.every((b, i) => b === plain[i]);
+
+  return {
+    deterministic,
+    lengthsOk: keys.u.length === 48 && keys.ue.length === 32 && keys.o.length === 48 && keys.oe.length === 32 && keys.perms.length === 16,
+    roundTrip,
+    wrongFails,
+    dataRoundTrip,
+  };
+}
+
+// ============================================================================
+// PDF-Verschlüsselung (FA-027) — Port von PdfAesEncryptor.cs nach TS
+// ----------------------------------------------------------------------------
+// Normalisiert (pdf-lib, klassische Struktur), parst die Objekte byte-genau
+// über die xref-Tabelle, verschlüsselt jeden Stream (AES-256-CBC + IV-Prefix,
+// /CFM AESV3) und schreibt /Encrypt + xref + Trailer neu. MVP: nur Streams
+// (/StmF StdCF), Strings /Identity.
+// ============================================================================
+
+function latin1Decode(b: Uint8Array): string { return new TextDecoder("latin1").decode(b); }
+function latin1Encode(s: string): Uint8Array { const o = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) o[i] = s.charCodeAt(i) & 0xff; return o; }
+function toHex(b: Uint8Array): string { let s = ""; for (let i = 0; i < b.length; i++) s += b[i].toString(16).padStart(2, "0"); return s.toUpperCase(); }
+function preparePassword(pw: string): Uint8Array { const b = new TextEncoder().encode(pw || ""); return b.length <= 127 ? b : b.slice(0, 127); }
+
+interface PdfObjEntry { num: number; gen: number; isStream: boolean; objBytes?: Uint8Array; dictText?: string; streamData?: Uint8Array; }
+
+function indexOfStreamKw(text: string, from: number, end: number): number {
+  let i = from;
+  while (i < end) {
+    const idx = text.indexOf("stream", i);
+    if (idx < 0 || idx >= end) return -1;
+    const prevD = idx > 0 && text[idx - 1] === "d";
+    const after = idx + 6;
+    const eol = after < text.length && (text[after] === "\r" || text[after] === "\n");
+    if (!prevD && eol) return idx;
+    i = idx + 6;
+  }
+  return -1;
+}
+
+function parsePdfStructure(pdf: Uint8Array): { header: Uint8Array; objects: PdfObjEntry[]; maxObj: number; rootRef: string; infoRef: string | null } {
+  const text = latin1Decode(pdf);
+  const isD = (c: string) => c >= "0" && c <= "9";
+  const isWs = (c: string) => c === " " || c === "\r" || c === "\n" || c === "\t" || c === "\f" || c === "\0";
+
+  const sx = text.lastIndexOf("startxref");
+  if (sx < 0) throw new Error("kein startxref — PDF nicht klassisch");
+  let p = sx + 9;
+  while (p < text.length && !isD(text[p])) p++;
+  let s = p; while (p < text.length && isD(text[p])) p++;
+  const xrefOffset = parseInt(text.slice(s, p), 10);
+
+  const offsets = new Map<number, number>();
+  let xp = xrefOffset;
+  while (xp < text.length && isWs(text[xp])) xp++;
+  if (text.slice(xp, xp + 4) !== "xref") throw new Error("kein klassisches xref (evtl. xref-Stream)");
+  xp += 4;
+  while (true) {
+    while (xp < text.length && isWs(text[xp])) xp++;
+    if (xp >= text.length || !isD(text[xp])) break;
+    s = xp; while (isD(text[xp])) xp++; const start = parseInt(text.slice(s, xp), 10);
+    while (isWs(text[xp])) xp++;
+    s = xp; while (isD(text[xp])) xp++; const count = parseInt(text.slice(s, xp), 10);
+    while (xp < text.length && text[xp] !== "\n") xp++; xp++;
+    for (let i = 0; i < count; i++) {
+      const entry = text.slice(xp, xp + 20);
+      const off = parseInt(entry.slice(0, 10), 10);
+      if (entry[17] === "n") offsets.set(start + i, off);
+      xp += 20;
+    }
+  }
+  if (offsets.size === 0) throw new Error("xref ohne In-Use-Objekte");
+
+  const tp = text.indexOf("trailer", xrefOffset);
+  const trailer = tp >= 0 ? text.slice(tp, Math.min(text.length, tp + 4000)) : "";
+  const rootM = trailer.match(/\/Root\s+(\d+)\s+(\d+)\s+R/);
+  if (!rootM) throw new Error("kein /Root im Trailer");
+  const infoM = trailer.match(/\/Info\s+(\d+)\s+(\d+)\s+R/);
+
+  const maxObj = Math.max(...offsets.keys());
+  const sorted = [...offsets.entries()].sort((a, b) => a[1] - b[1]);
+  const header = pdf.slice(0, sorted[0][1]);
+
+  const objects: PdfObjEntry[] = [];
+  for (let idx = 0; idx < sorted.length; idx++) {
+    const start = sorted[idx][1];
+    const end = idx + 1 < sorted.length ? sorted[idx + 1][1] : xrefOffset;
+    let q = start;
+    while (isWs(text[q])) q++;
+    let a = q; while (isD(text[q])) q++; const num = parseInt(text.slice(a, q), 10);
+    while (isWs(text[q])) q++;
+    a = q; while (isD(text[q])) q++; const gen = parseInt(text.slice(a, q), 10);
+    while (isWs(text[q])) q++;
+    q += 3; // "obj"
+    const bodyStart = q;
+    const kw = indexOfStreamKw(text, bodyStart, end);
+    if (kw < 0) {
+      const eo = text.indexOf("endobj", bodyStart);
+      const sliceEnd = eo >= 0 && eo < end ? eo + 6 : end;
+      objects.push({ num, gen, isStream: false, objBytes: pdf.slice(start, sliceEnd) });
+    } else {
+      const dictText = text.slice(bodyStart, kw);
+      let dataStart = kw + 6;
+      if (text[dataStart] === "\r") dataStart++;
+      if (text[dataStart] === "\n") dataStart++;
+      let dataEnd: number;
+      const lenM = dictText.match(/\/Length\s+(\d+)(?!\s+\d+\s+R)/);
+      const len = lenM ? parseInt(lenM[1], 10) : -1;
+      if (len >= 0 && dataStart + len <= end) dataEnd = dataStart + len;
+      else { let es = text.indexOf("endstream", dataStart); dataEnd = es < 0 || es > end ? end : es; if (text[dataEnd - 1] === "\n") dataEnd--; if (text[dataEnd - 1] === "\r") dataEnd--; }
+      objects.push({ num, gen, isStream: true, dictText, streamData: pdf.slice(dataStart, dataEnd) });
+    }
+  }
+  return { header, objects, maxObj, rootRef: `${rootM[1]} ${rootM[2]} R`, infoRef: infoM ? `${infoM[1]} ${infoM[2]} R` : null };
+}
+
+function bumpVersion(header: Uint8Array): Uint8Array {
+  const h = header.slice();
+  for (let i = 0; i + 7 < h.length; i++) {
+    if (h[i] === 0x25 && h[i + 1] === 0x50 && h[i + 2] === 0x44 && h[i + 3] === 0x46 && h[i + 4] === 0x2d && h[i + 5] === 0x31 && h[i + 6] === 0x2e) {
+      if (h[i + 7] < 0x37) h[i + 7] = 0x37;
+      break;
+    }
+  }
+  return h;
+}
+
+function withFreshLength(dict: string, len: number): string {
+  const stripped = dict.replace(/\/Length\s+\d+(\s+\d+\s+R)?/, "");
+  const open = stripped.indexOf("<<");
+  const at = open >= 0 ? open + 2 : 0;
+  return stripped.slice(0, at) + ` /Length ${len}` + stripped.slice(at).replace(/\s+$/, "");
+}
+
+function buildEncryptDict(keys: R6Keys, permissions: number, encryptMetadata: boolean): string {
+  return "<< /Filter /Standard /V 5 /R 6 /Length 256 " +
+    `/P ${permissions} /EncryptMetadata ${encryptMetadata ? "true" : "false"} ` +
+    "/CF << /StdCF << /CFM /AESV3 /AuthEvent /DocOpen /Length 32 >> >> " +
+    "/StmF /StdCF /StrF /Identity " +
+    `/U <${toHex(keys.u)}> /UE <${toHex(keys.ue)}> /O <${toHex(keys.o)}> /OE <${toHex(keys.oe)}> /Perms <${toHex(keys.perms)}> >>`;
+}
+
+export async function encryptPdf(
+  pdfBytes: Uint8Array, ownerPassword: string, userPassword: string,
+  permissions = -1, encryptMetadata = true
+): Promise<Uint8Array> {
+  const normDoc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
+  const normalized = await normDoc.save({ useObjectStreams: false });
+  const struct = parsePdfStructure(normalized);
+
+  const owner = preparePassword(ownerPassword);
+  const user = preparePassword(userPassword && userPassword.length ? userPassword : ownerPassword);
+  const fileKey = crypto.getRandomValues(new Uint8Array(32));
+  const keys = await deriveR6Keys(owner, user, fileKey, permissions, encryptMetadata);
+
+  const encNum = struct.maxObj + 1;
+  const size = encNum + 1;
+  const parts: Uint8Array[] = [];
+  let pos = 0;
+  const offsets = new Map<number, number>();
+  const pushBytes = (b: Uint8Array) => { parts.push(b); pos += b.length; };
+  const pushStr = (s: string) => pushBytes(latin1Encode(s));
+
+  pushBytes(bumpVersion(struct.header));
+
+  for (const o of struct.objects.slice().sort((a, b) => a.num - b.num)) {
+    offsets.set(o.num, pos);
+    if (!o.isStream) {
+      pushBytes(o.objBytes!);
+      if (o.objBytes!.length === 0 || o.objBytes![o.objBytes!.length - 1] !== 0x0a) pushStr("\n");
+    } else {
+      const enc = await aesCbcEncrypt(fileKey, o.streamData!);
+      pushStr(`${o.num} ${o.gen} obj\n`);
+      pushStr(withFreshLength(o.dictText!, enc.length));
+      pushStr("\nstream\n");
+      pushBytes(enc);
+      pushStr("\nendstream\nendobj\n");
+    }
+  }
+
+  offsets.set(encNum, pos);
+  pushStr(`${encNum} 0 obj\n`);
+  pushStr(buildEncryptDict(keys, permissions, encryptMetadata));
+  pushStr("\nendobj\n");
+
+  const xrefOffset = pos;
+  pushStr(`xref\n0 ${size}\n`);
+  pushStr("0000000000 65535 f \n");
+  for (let n = 1; n < size; n++) {
+    const off = offsets.get(n);
+    pushStr(`${(off ?? 0).toString().padStart(10, "0")} 00000 ${off !== undefined ? "n" : "f"} \n`);
+  }
+  const id = toHex(crypto.getRandomValues(new Uint8Array(16)));
+  pushStr("trailer\n<< ");
+  pushStr(`/Size ${size} /Root ${struct.rootRef}`);
+  if (struct.infoRef) pushStr(` /Info ${struct.infoRef}`);
+  pushStr(` /Encrypt ${encNum} 0 R /ID [<${id}><${id}>] >>\n`);
+  pushStr(`startxref\n${xrefOffset}\n%%EOF\n`);
+
+  let total = 0; for (const p of parts) total += p.length;
+  const out = new Uint8Array(total);
+  let off = 0; for (const p of parts) { out.set(p, off); off += p.length; }
+  return out;
+}
+
+/** Verifikation: erzeugt eine Test-PDF, verschlüsselt sie, öffnet das Ergebnis mit PDF.js (Fremd-Reader). */
+export async function encryptVerify(): Promise<any> {
+  const b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+  const src = await imagesToPdf([{ base64: b64, mime: "image/png" }, { base64: b64, mime: "image/png" }], { pageSize: "a4", marginPt: 18 });
+  const t0 = performance.now();
+  const enc = await encryptPdf(src, "open-me", "open-me", -1);
+  const ms = Math.round(performance.now() - t0);
+  const txt = latin1Decode(enc);
+  const encLen = enc.length;
+  let pages = -1, opensWithPw = false, openError: string | null = null, wrongRejected = false;
+  try { const d = await pdfjsLib.getDocument({ data: enc.slice(), password: "open-me" }).promise; pages = d.numPages; opensWithPw = true; await d.destroy(); }
+  catch (e: any) { openError = (e && e.name ? e.name : "?") + ": " + (e && e.message ? e.message : String(e)); }
+  try { const d = await pdfjsLib.getDocument({ data: enc.slice(), password: "falsch" }).promise; await d.destroy(); }
+  catch (e: any) { wrongRejected = !!e && e.name === "PasswordException"; }
+  const di = txt.indexOf("/Filter /Standard");
+  return { ms, encLen, pages, opensWithPw, openError, wrongRejected, encryptDict: di >= 0 ? txt.slice(di, di + 360) : null };
 }
