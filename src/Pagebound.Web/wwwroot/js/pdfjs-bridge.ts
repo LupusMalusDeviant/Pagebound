@@ -15,7 +15,10 @@ import type {
   PDFPageProxy
 } from "pdfjs-dist/types/src/display/api";
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = "/js/pdf.worker.min.mjs";
+// Shim statt direkt pdf.worker.min.mjs: polyfillt Math.sumPrecise (pdfjs 5.7
+// braucht es) im Worker, bevor der echte Worker lädt — sonst crasht das
+// Rendering in Browsern ohne dieses sehr neue API. Siehe pdfjs-worker-shim.mjs.
+pdfjsLib.GlobalWorkerOptions.workerSrc = "/js/pdfjs-worker-shim.mjs";
 
 const documents = new Map<string, PDFDocumentProxy>();
 
