@@ -19,6 +19,21 @@ Pagebound ist ein quelloffenes PDF-Werkzeug, das den Adobe Acrobat Reader im All
 - 📚 **Library mit Sidecar-Dateien** — alle Annotationen + Metadaten als JSON neben der PDF, mit Tags, Inline-Filter und schlanker Such-Funktion.
 - 🔗 **Markdown-Export für Obsidian/Zettelkasten** — Highlights und Notizen rauskippen als Markdown mit YAML-Frontmatter (Wikilink-Optionen, page-grouped, Y-sortiert).
 
+## Funktionen (bereits drin)
+
+- **Viewer** — PDFs öffnen, Seitennavigation, Zoom, Volltext-Suche, Inhaltsverzeichnis-Sidebar, Thumbnails
+- **Split-View** — zwei PDFs nebeneinander, je mit eigener Navigation, Annotation und Suche
+- **Annotieren** — Text-Highlights (5 Farben), Sticky Notes mit Markdown-Vorschau, Stift, Rechteck/Pfeil/Linie
+- **Signieren** — PNG-Signatur platzieren (Drag/Resize) + Signer-Daten + Hash-Integritäts-Badge
+- **Formulare** — AcroForms ausfüllen (Text/Checkbox/Radio/Dropdown/Listbox), editierbar oder geflattet speichern
+- **Seiten-Werkzeuge** — Merge, Split, Neu-Sortieren, Löschen, Drehen, JPEG-Komprimierung
+- **Bilder → PDF** — PNG/JPG zu PDF (Seitengröße wählbar, Reihenfolge per Drag & Drop)
+- **Verschlüsseln** — Passwortschutz mit AES-256 (WebCrypto, gegen PDF.js verifiziert)
+- **OCR** — Tesseract.js für nicht-durchsuchbare PDFs (Scans, Designer-Layouts)
+- **Library** — automatisch erfasst, Tags, Suche, JSON-Sidecar-Export/Import
+- **Markdown-Export** — Highlights + Notizen, Obsidian-kompatibel (YAML-Frontmatter, Wikilinks)
+- **Komfort** — Theme-Switcher (Auto/Hell/Dunkel/Sepia), DE/EN, Offline-PWA, keine Telemetrie
+
 ## Quick-Start
 
 ### Per Docker (empfohlen)
