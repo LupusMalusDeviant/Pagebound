@@ -97,6 +97,9 @@
 
   "home.ed.folio": "Pflichtenheft-Vorschau",
   "home.ed.local": "100 % lokal",
+  "tools.folio.noUpload": "kein Upload",
+  "library.folio": "SHA-256 · Sidecar",
+  "batch.folio": "ZIP-Ausgabe",
   "home.ed.uspHeading": "Drei Funktionen, die Acrobat fehlen",
   "home.ed.specPrefix": "Vollständige Spezifikation:",
   "home.have.read": "Lesen",
@@ -191,8 +194,8 @@
   "library.entry.removeTag.aria": "Tag „{tag}\" entfernen",
 
   "reader.pageTitle": "Reader — Pagebound",
-  "reader.heading": "Reader (Demo)",
-  "reader.subheading": "Erste vertikale Skelett-Iteration für Release 0.1. Volltext-Suche, Outline, Highlights folgen.",
+  "reader.heading": "Reader",
+  "reader.subheading": "PDF öffnen, lesen, durchsuchen, annotieren, signieren — alles lokal im Browser.",
   "reader.choosePdf": "PDF auswählen",
   "reader.empty": "Wähle eine PDF-Datei aus, um sie zu öffnen.",
 

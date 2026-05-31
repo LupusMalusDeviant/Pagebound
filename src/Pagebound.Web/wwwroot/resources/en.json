@@ -97,6 +97,9 @@
 
   "home.ed.folio": "Spec preview",
   "home.ed.local": "100% local",
+  "tools.folio.noUpload": "no upload",
+  "library.folio": "SHA-256 · sidecar",
+  "batch.folio": "ZIP output",
   "home.ed.uspHeading": "Three features Acrobat lacks",
   "home.ed.specPrefix": "Full specification:",
   "home.have.read": "Read",
@@ -191,8 +194,8 @@
   "library.entry.removeTag.aria": "Remove tag “{tag}”",
 
   "reader.pageTitle": "Reader — Pagebound",
-  "reader.heading": "Reader (demo)",
-  "reader.subheading": "First vertical skeleton iteration for release 0.1. Full-text search, outline, highlights follow.",
+  "reader.heading": "Reader",
+  "reader.subheading": "Open, read, search, annotate and sign PDFs — all locally in the browser.",
   "reader.choosePdf": "Choose PDF",
   "reader.empty": "Pick a PDF file to open it.",
 
