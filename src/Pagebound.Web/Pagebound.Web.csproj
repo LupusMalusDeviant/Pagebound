@@ -7,11 +7,10 @@
     <OverrideHtmlAssetPlaceholders>true</OverrideHtmlAssetPlaceholders>
     <ServiceWorkerAssetsManifest>service-worker-assets.js</ServiceWorkerAssetsManifest>
     <!--
-      Trimming aus: PdfSharpCore nutzt intern Reflection (Type.GetType auf
-      Dictionary-Subtypes im Save-Pfad, Font-/Image-Resolver-Lookups), die
-      beim Publish ohne Roots wegoptimiert werden. Solange wir keine
-      gezielten TrimmerRoots-Descriptors pflegen, ist die Bundle-Differenz
-      akzeptabel.
+      Trimming aus: Blazor WASM nutzt reflexionsbasierte System.Text.Json-
+      Serialisierung (IndexedDB-Storage, Sidecar) ohne Source-Generator plus
+      JS-Interop-Marshalling. Ohne gepflegte TrimmerRoots würde Publish-Trimming
+      diese Pfade wegoptimieren. (PdfSharpCore — der ursprüngliche Grund — ist raus.)
     -->
     <PublishTrimmed>false</PublishTrimmed>
   </PropertyGroup>
