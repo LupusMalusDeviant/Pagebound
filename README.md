@@ -51,10 +51,10 @@ Pagebound wird in **10 nutzbaren Releases** (0.1 → 1.0) entwickelt. Jeder Rele
 | 0.2 | + Stift, Formen, Outline, Markdown-Notizen, Thumbnails | ✅ |
 | 0.3 | + Seitenoperationen (merge/split/rotate/delete) | ✅ |
 | 0.4 | + PNG-Signatur + Hash-Integrität | ✅ |
-| 0.5 | + Library-Verwaltung + Tags | ✅ Phase 1 (File-System-Access-API folgt) |
+| 0.5 | + Library-Verwaltung + Tags | ✅ Phase 1 (Tabelle/Grid-Ansichten + Workspace folgen) |
 | 0.6 | + Multi-PDF Split-View | ✅ Phase 1 (Sync-Scroll folgt) |
 | 0.7 | + Markdown-Export + Obsidian-Integration | ✅ |
-| 0.8 | + Formulare + Verschlüsselung + Bild→PDF + Compress | 🟡 Compress ✅ — Rest in Arbeit |
+| 0.8 | + Formulare + Verschlüsselung + Bild→PDF + Compress | ✅ |
 | 0.9 | + OCR (Tesseract.js) + Stapelverarbeitung | 🟡 OCR ✅ Phase 1 — Batch folgt |
 | 1.0 | + Konvertierungen + A11y-Polish + Doku komplett + Tests | ⏳ |
 
@@ -77,7 +77,9 @@ Details: [docs/02-lastenheft.md](docs/02-lastenheft.md) Abschnitt 6.
 
 - **Frontend:** Blazor WebAssembly auf .NET 10
 - **PDF-Rendering:** PDF.js via JS-Interop (`pageboundPdf`-Bridge)
-- **PDF-Manipulation:** Hybrid — pdf-lib (JS) für Save-Operationen (kein MD5-Crash unter WASM), PdfSharpCore für Page-Ops
+- **PDF-Manipulation:** vollständig pdf-lib (JS) — Merge/Split/Reorder/Delete/Rotate, Compress, Bild→PDF, Signatur-Embed. PdfSharpCore ist **nicht** im Web-Pfad (sein Save-Pfad ruft `MD5.Create()` auf, das unter Blazor WASM crasht)
+- **Verschlüsselung:** AES-256 (ISO 32000-2 V5/R6) via WebCrypto — hardware-beschleunigt, kein MD5, im Browser gegen PDF.js verifiziert
+- **Formulare:** AcroForms lesen + ausfüllen über die pdf-lib-Form-API (alle Standard-Feldtypen)
 - **OCR:** Tesseract.js im Web-Worker mit lazy-loaded Sprach-Modellen
 - **Styling:** Tailwind CSS v4 mit CSS-Custom-Properties für Themes
 - **State:** Service-basiert via DI, Interface-First (ADR-001)
