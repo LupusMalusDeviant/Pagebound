@@ -29,6 +29,7 @@ Pagebound ist ein quelloffenes PDF-Werkzeug, das den Adobe Acrobat Reader im All
 - **Seiten-Werkzeuge** — Merge, Split, Neu-Sortieren, Löschen, Drehen, JPEG-Komprimierung
 - **Bilder → PDF** — PNG/JPG zu PDF (Seitengröße wählbar, Reihenfolge per Drag & Drop)
 - **Konvertieren** — PDF → PNG/JPG (ZIP, je Seite ein Bild), reiner Text (.txt) oder eigenständiges HTML
+- **Stapelverarbeitung** — mehrere PDFs auf einmal komprimieren / verschlüsseln / → Text, Ergebnis als eine ZIP
 - **Verschlüsseln** — Passwortschutz mit AES-256 (WebCrypto, gegen PDF.js verifiziert)
 - **OCR** — Tesseract.js für nicht-durchsuchbare PDFs (Scans, Designer-Layouts)
 - **Library** — automatisch erfasst, Tags, Suche, drei Ansichten (Liste/Tabelle/Raster), optionaler zentraler Sidecar-Workspace-Ordner, JSON-Sidecar-Export/Import
@@ -71,7 +72,7 @@ Pagebound wird in **10 nutzbaren Releases** (0.1 → 1.0) entwickelt. Jeder Rele
 | 0.6 | + Multi-PDF Split-View + Sync-Scroll + ziehbare Trennlinie | ✅ |
 | 0.7 | + Markdown-Export + Obsidian-Integration | ✅ |
 | 0.8 | + Formulare + Verschlüsselung + Bild→PDF + Compress | ✅ |
-| 0.9 | + OCR (Tesseract.js) + Stapelverarbeitung | 🟡 OCR ✅ Phase 1 — Batch folgt |
+| 0.9 | + OCR (Tesseract.js) + Stapelverarbeitung | ✅ (gespeicherte Batch-Regeln FA-052 folgen) |
 | 1.0 | + Konvertierungen + A11y-Polish + Doku komplett + Tests | ⏳ |
 
 **Zusatz** (außerhalb Pflichtenheft): Theme-Switcher (Auto/Light/Dark/Sepia), DE/EN-Sprachumschaltung, Sidecar Export/Import, pixel-genauer Text-Layer via PDF.js nativem `TextLayer`.

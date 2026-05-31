@@ -421,6 +421,21 @@ export async function convertToHtml(data: Uint8Array, scale: number): Promise<st
   });
 }
 
+/**
+ * Generisches ZIP für die Stapelverarbeitung (FA-051): parallele Arrays aus
+ * Dateinamen + Base64-Inhalten → ein deflate-komprimiertes ZIP.
+ */
+export function zipFiles(names: string[], base64Contents: string[]): Uint8Array {
+  const files: Record<string, Uint8Array> = {};
+  for (let i = 0; i < names.length; i++) {
+    const bin = atob(base64Contents[i]);
+    const bytes = new Uint8Array(bin.length);
+    for (let j = 0; j < bin.length; j++) bytes[j] = bin.charCodeAt(j);
+    files[names[i]] = bytes;
+  }
+  return zipSync(files, { level: 6 });
+}
+
 // ============================================================================
 // Native Text-Layer-Rendering (FA-005 Selection, FA-010 Highlight-Picking)
 // ----------------------------------------------------------------------------
