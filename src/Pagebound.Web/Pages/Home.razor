@@ -3,127 +3,120 @@
 
 <PageTitle>@L.T("app.title")</PageTitle>
 
-<section class="mx-auto max-w-5xl px-6 py-12">
-
-    @* Hero *@
-    <header>
-        <div class="flex items-baseline gap-3 flex-wrap">
-            <h1 class="text-4xl font-bold tracking-tight">@L.T("app.title")</h1>
-            <span class="inline-block rounded bg-pb-accent/10 px-2 py-0.5 text-xs font-medium text-pb-accent">
-                @L.T("app.preAlpha")
-            </span>
+<article class="ed">
+    <header class="masthead-pg">
+        <div class="folio-line">
+            <span>@L.T("home.ed.folio")</span><span class="sep">·</span>
+            <span>@L.T("app.version")</span><span class="sep">·</span>
+            <span>@L.T("home.ed.local")</span>
         </div>
-        <p class="mt-4 text-base text-pb-fg-muted max-w-3xl">@L.T("home.hero.lead")</p>
-        <div class="mt-6 flex flex-wrap gap-2">
-            <a href="/reader"
-               class="inline-block rounded bg-pb-accent px-4 py-2 text-sm text-white hover:opacity-90">
-                @L.T("home.hero.ctaReader")
-            </a>
-            <a href="/library"
-               class="inline-block rounded border border-pb-border bg-pb-surface px-4 py-2 text-sm text-pb-fg hover:bg-pb-bg">
-                @L.T("home.hero.ctaLibrary")
-            </a>
-            <a href="/tools"
-               class="inline-block rounded border border-pb-border bg-pb-surface px-4 py-2 text-sm text-pb-fg hover:bg-pb-bg">
-                @L.T("home.hero.ctaTools")
-            </a>
+        <h1 class="wordmark-xl">Page<em>bound</em></h1>
+        <p class="standfirst">@L.T("home.hero.lead")</p>
+        <div class="actions">
+            <a href="/reader" class="btn primary">@L.T("home.hero.ctaReader")</a>
+            <a href="/library" class="link-cta">@L.T("home.hero.ctaLibrary") <span aria-hidden="true">→</span></a>
+            <a href="/tools" class="link-cta">@L.T("home.hero.ctaTools") <span aria-hidden="true">→</span></a>
         </div>
     </header>
 
-    @* USP-Cards (FA-015 Signature, FA-070 Sidecar, FA-080 Markdown) *@
-    <section class="mt-12">
-        <h2 class="text-lg font-semibold text-pb-fg-muted uppercase tracking-wide text-xs">
-            @L.T("home.usp.heading")
-        </h2>
-        <div class="mt-3 grid gap-4 sm:grid-cols-3">
-            <article class="rounded-lg pb-glass p-4">
-                <div class="text-2xl">📝</div>
-                <h3 class="mt-2 text-sm font-semibold">@L.T("home.usp.signature.title")</h3>
-                <p class="mt-1 text-xs text-pb-fg-muted leading-relaxed">@L.T("home.usp.signature.body")</p>
-            </article>
-            <article class="rounded-lg pb-glass p-4">
-                <div class="text-2xl">📚</div>
-                <h3 class="mt-2 text-sm font-semibold">@L.T("home.usp.library.title")</h3>
-                <p class="mt-1 text-xs text-pb-fg-muted leading-relaxed">@L.T("home.usp.library.body")</p>
-            </article>
-            <article class="rounded-lg pb-glass p-4">
-                <div class="text-2xl">🔗</div>
-                <h3 class="mt-2 text-sm font-semibold">@L.T("home.usp.markdown.title")</h3>
-                <p class="mt-1 text-xs text-pb-fg-muted leading-relaxed">@L.T("home.usp.markdown.body")</p>
-            </article>
-        </div>
-    </section>
+    <div class="ed-grid">
+        <div class="ed-main">
+            <section class="ed-sec" aria-labelledby="home-usp-h">
+                <h2 class="ed-h" id="home-usp-h">@L.T("home.ed.uspHeading")</h2>
+                <ol class="toc">
+                    <li class="toc-item">
+                        <span class="toc-num" aria-hidden="true">01</span>
+                        <div class="toc-body"><h3>@L.T("home.usp.signature.title")</h3><p>@L.T("home.usp.signature.body")</p></div>
+                    </li>
+                    <li class="toc-item">
+                        <span class="toc-num" aria-hidden="true">02</span>
+                        <div class="toc-body"><h3>@L.T("home.usp.library.title")</h3><p>@L.T("home.usp.library.body")</p></div>
+                    </li>
+                    <li class="toc-item">
+                        <span class="toc-num" aria-hidden="true">03</span>
+                        <div class="toc-body"><h3>@L.T("home.usp.markdown.title")</h3><p>@L.T("home.usp.markdown.body")</p></div>
+                    </li>
+                </ol>
+            </section>
 
-    @* Built-in Features *@
-    <section class="mt-12 rounded-lg pb-glass p-6">
-        <h2 class="text-lg font-semibold">@L.T("home.builtin.heading")</h2>
-        <ul class="mt-3 space-y-2 text-sm">
-            <li>📄 @L.T("home.builtin.viewer")</li>
-            <li>🖍 @L.T("home.builtin.annotations")</li>
-            <li>✍️ @L.T("home.builtin.signature")</li>
-            <li>🛠 @L.T("home.builtin.tools")</li>
-            <li>🔍 @L.T("home.builtin.ocr")</li>
-            <li>🪟 @L.T("home.builtin.viewerExtras")</li>
-        </ul>
-    </section>
-
-    @* Roadmap *@
-    <section class="mt-8">
-        <h2 class="text-lg font-semibold">@L.T("home.status.heading")</h2>
-        <div class="mt-3 overflow-x-auto rounded-lg pb-glass">
-            <table class="w-full text-sm">
-                <tbody class="divide-y divide-pb-border">
-                    @foreach (var (release, label, status, statusColor) in RoadmapRows())
+            <section class="ed-sec" aria-labelledby="home-have-h">
+                <h2 class="ed-h" id="home-have-h">@L.T("home.builtin.heading")</h2>
+                <ul class="feat-list">
+                    @foreach (var (kKey, dKey) in Haves)
                     {
-                        <tr>
-                            <th scope="row" class="text-left px-3 py-2 align-top w-16 font-medium">@release</th>
-                            <td class="px-3 py-2 text-pb-fg-muted">@label</td>
-                            <td class="px-3 py-2 w-32 text-right">
-                                <span class="@($"inline-block rounded px-2 py-0.5 text-xs font-medium {statusColor}")">
-                                    @status
-                                </span>
-                            </td>
-                        </tr>
+                        <li><span class="k">@L.T(kKey)</span><p>@L.T(dKey)</p></li>
                     }
-                </tbody>
-            </table>
-        </div>
-        <p class="mt-4 text-xs text-pb-fg-muted">
-            @((MarkupString)L.T("home.releaseHint", new Dictionary<string, object>
-            {
-                ["0"] = "<code class=\"rounded bg-pb-bg px-1 py-0.5\">docs/03-pflichtenheft.md</code>"
-            }))
-        </p>
-    </section>
+                </ul>
+            </section>
 
-    @* Anti-Tracking-Hinweis *@
-    <section class="mt-8 rounded-lg pb-glass p-4 text-xs text-pb-fg-muted">
-        <strong class="text-pb-fg">@L.T("home.privacy.title").</strong>
-        @L.T("home.privacy.body")
-    </section>
-</section>
+            <section class="ed-sec" aria-labelledby="home-road-h">
+                <h2 class="ed-h" id="home-road-h">@L.T("home.status.heading") <span class="ed-h-meta">@L.T("app.version") → v1.0</span></h2>
+                <ol class="ledger">
+                    @foreach (var r in RoadmapRows())
+                    {
+                        <li class="ledger-row">
+                            <span class="ver">@r.Release</span>
+                            <span class="ttl">@r.Label</span>
+                            <span class="dots" aria-hidden="true"></span>
+                            <span class="@($"status {r.Kind}")">@r.StatusText</span>
+                        </li>
+                    }
+                </ol>
+                <p class="spec-note">@L.T("home.ed.specPrefix") <code>docs/03-pflichtenheft.md</code></p>
+            </section>
+        </div>
+
+        <aside class="ed-margin" aria-label="@L.T("home.margin.heading")">
+            <div>
+                <h2 class="m-h">@L.T("home.margin.heading")</h2>
+                <dl class="m-facts">
+                    <div class="m-fact"><dt>@L.T("home.margin.version")</dt><dd class="mono">@L.T("app.version")</dd></div>
+                    <div class="m-fact"><dt>@L.T("home.margin.backend")</dt><dd>@L.T("home.margin.backendVal")</dd></div>
+                    <div class="m-fact"><dt>@L.T("home.margin.integrity")</dt><dd class="mono">SHA-256</dd></div>
+                    <div class="m-fact"><dt>@L.T("home.margin.export")</dt><dd>JSON-Sidecar · Markdown</dd></div>
+                    <div class="m-fact"><dt>@L.T("home.margin.language")</dt><dd>DE / EN</dd></div>
+                </dl>
+            </div>
+            <div class="colophon">
+                <div class="c-h">
+                    <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                    @L.T("home.colophon.heading")
+                </div>
+                <strong>@L.T("home.privacy.title").</strong> @L.T("home.privacy.body")
+            </div>
+        </aside>
+    </div>
+</article>
 
 @code {
-    // Roadmap-Tabelle: erste Spalte Release-Nr, zweite Spalte was drin ist, dritte Spalte Status.
-    // Reihenfolge entspricht docs/02-lastenheft.md Abschnitt 6.
-    private IEnumerable<(string Release, string Label, string Status, string Color)> RoadmapRows()
+    // Linke "Register"-Spalte: Kategorie-Label (k) + bestehende Beschreibung (d).
+    private static readonly (string K, string D)[] Haves =
+    {
+        ("home.have.read", "home.builtin.viewer"),
+        ("home.have.annotate", "home.builtin.annotations"),
+        ("home.have.sign", "home.builtin.signature"),
+        ("home.have.tools", "home.builtin.tools"),
+        ("home.have.ocr", "home.builtin.ocr"),
+        ("home.have.view", "home.builtin.viewerExtras"),
+    };
+
+    // Roadmap als Ledger — Status semantisch (ok/warn/muted). Aktueller Stand:
+    // 0.1–0.9 erledigt, 1.0 in Arbeit (Konvertierungen ✅, Politur/Security/Tests offen).
+    private IEnumerable<(string Release, string Label, string Kind, string StatusText)> RoadmapRows()
     {
         var done = L.T("home.status.done");
         var partial = L.T("home.status.partial");
         var pending = L.T("home.status.pending");
-        var greenPill = "bg-green-500/15 text-green-400";
-        var amberPill = "bg-amber-500/15 text-amber-400";
-        var grayPill = "bg-pb-fg-muted/10 text-pb-fg-muted";
 
-        yield return ("0.1", L.T("home.builtin.viewer"), done, greenPill);
-        yield return ("0.2", L.T("home.builtin.annotations"), done, greenPill);
-        yield return ("0.3", L.T("home.builtin.tools"), done, greenPill);
-        yield return ("0.4", L.T("home.usp.signature.title"), done, greenPill);
-        yield return ("0.5", L.T("home.usp.library.title"), done, greenPill);
-        yield return ("0.6", "Multi-PDF Split-View + Sync-Scroll", done, greenPill);
-        yield return ("0.7", L.T("home.usp.markdown.title"), done, greenPill);
-        yield return ("0.8", "AcroForms / Encrypt / Bild→PDF / Compress", done, greenPill);
-        yield return ("0.9", L.T("home.builtin.ocr"), done, greenPill);
-        yield return ("1.0", "Polish, A11y, Konvertierungen, Tests", pending, grayPill);
+        yield return ("0.1", L.T("home.builtin.viewer"), "ok", done);
+        yield return ("0.2", L.T("home.builtin.annotations"), "ok", done);
+        yield return ("0.3", L.T("home.builtin.tools"), "ok", done);
+        yield return ("0.4", L.T("home.usp.signature.title"), "ok", done);
+        yield return ("0.5", L.T("home.usp.library.title"), "ok", done);
+        yield return ("0.6", "Multi-PDF Split-View", "ok", done);
+        yield return ("0.7", L.T("home.usp.markdown.title"), "ok", done);
+        yield return ("0.8", "AcroForms / Encrypt / Bild→PDF / Compress", "ok", done);
+        yield return ("0.9", $"{L.T("home.builtin.ocr")} + Batch", "ok", done);
+        yield return ("1.0", L.T("home.road.v1"), "warn", partial);
     }
 }
