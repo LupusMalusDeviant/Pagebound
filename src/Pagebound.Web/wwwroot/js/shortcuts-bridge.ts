@@ -488,6 +488,9 @@ export function startDrawingCapture(
           const arrowSize = Math.min(len * 0.4, Math.max(0.024, options.strokeWidthFraction * aspect * 4.0));
           const baseX = exs - ux * arrowSize;
           const baseY = shapeEnd.y - uy * arrowSize;
+          // Schaft endet an der Spitzen-Basis (Rundkappe unter dem Dreieck → kein Punkt).
+          line.setAttribute("x2", String(baseX / aspect));
+          line.setAttribute("y2", String(baseY));
           // 90° gedrehte Normale (im skalierten Raum)
           const nx = -uy;
           const ny = ux;

@@ -119,7 +119,10 @@
     private List<LibraryEntry> _recent = new();
     private ElementReference _gearBtn;
 
-    private bool IsCollapsed => _route is "reader" or "split";
+    // Schiene bleibt auf allen Routen sichtbar (kein Auto-Einklappen mehr im
+    // Lesemodus — auf Nutzerwunsch). Auf schmalen Viewports (≤940px) wandert sie
+    // weiterhin per @media off-canvas und wird über den ☰-Button geöffnet.
+    private bool IsCollapsed => false;
 
     private string CrumbLabel => _route switch
     {

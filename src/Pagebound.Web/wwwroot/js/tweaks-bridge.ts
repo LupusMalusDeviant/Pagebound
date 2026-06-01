@@ -24,10 +24,14 @@ export interface Tweaks {
 }
 
 const ACCENTS: Record<string, { h: number; c: number }> = {
-  teal:  { h: 192, c: 0.115 },
-  jade:  { h: 158, c: 0.115 },
-  aqua:  { h: 205, c: 0.085 },
-  coral: { h: 35,  c: 0.130 },
+  teal:   { h: 192, c: 0.115 },
+  jade:   { h: 158, c: 0.115 },
+  aqua:   { h: 205, c: 0.085 },
+  coral:  { h: 35,  c: 0.130 },
+  violet: { h: 295, c: 0.105 },
+  blue:   { h: 255, c: 0.105 },
+  rose:   { h: 0,   c: 0.115 },
+  amber:  { h: 70,  c: 0.120 },
 };
 const DENSITY: Record<string, number> = { kompakt: 0.82, normal: 1, luftig: 1.2 };
 

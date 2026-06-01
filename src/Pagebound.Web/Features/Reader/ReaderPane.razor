@@ -851,32 +851,40 @@
                                 }
                                 else
                                 {
+                                    var aspect = pageH > 0 ? pageW / pageH : 1.0;
+                                    var head = kind == ShapeKind.Arrow
+                                        ? ComputeArrowHead(sx, sy, ex, ey, sw, aspect)
+                                        : null;
+                                    // Sichtbarer Schaft endet bei Pfeilen an der Spitzen-Basis,
+                                    // damit die runde Strich-Endkappe unter dem Dreieck
+                                    // verschwindet (sonst „Punkt" an der Spitze).
+                                    var lex = ex; var ley = ey;
+                                    if (head is { } hb) { lex = (hb.X2 + hb.X3) / 2; ley = (hb.Y2 + hb.Y3) / 2; }
                                     var x1 = sx.ToString("F4", CultureInfo.InvariantCulture);
                                     var y1 = sy.ToString("F4", CultureInfo.InvariantCulture);
-                                    var x2 = ex.ToString("F4", CultureInfo.InvariantCulture);
-                                    var y2 = ey.ToString("F4", CultureInfo.InvariantCulture);
-                                    <line x1="@x1" y1="@y1" x2="@x2" y2="@y2"
+                                    var hxe = ex.ToString("F4", CultureInfo.InvariantCulture);
+                                    var hye = ey.ToString("F4", CultureInfo.InvariantCulture);
+                                    var vxe = lex.ToString("F4", CultureInfo.InvariantCulture);
+                                    var vye = ley.ToString("F4", CultureInfo.InvariantCulture);
+                                    @* Hit-Helper über die volle Länge (auch über der Spitze klickbar) *@
+                                    <line x1="@x1" y1="@y1" x2="@hxe" y2="@hye"
                                           stroke="transparent" stroke-width="@HitStrokeWidth"
                                           stroke-linecap="round"
                                           style="@hitPointerCss"
                                           @onclick="@(() => OpenDrawingEditor(sa))"
                                           @onclick:stopPropagation />
-                                    <line x1="@x1" y1="@y1" x2="@x2" y2="@y2"
+                                    <line x1="@x1" y1="@y1" x2="@vxe" y2="@vye"
                                           stroke="@col" stroke-width="@swStr"
                                           stroke-linecap="round"
                                           style="pointer-events:none" />
-                                    @if (kind == ShapeKind.Arrow)
+                                    @if (head is { } h2)
                                     {
-                                        var head = ComputeArrowHead(sx, sy, ex, ey, sw, pageH > 0 ? pageW / pageH : 1.0);
-                                        if (head is not null)
-                                        {
-                                            var (hx1, hy1, hx2, hy2, hx3, hy3) = head.Value;
-                                            var points = string.Format(CultureInfo.InvariantCulture,
-                                                "{0:F4},{1:F4} {2:F4},{3:F4} {4:F4},{5:F4}",
-                                                hx1, hy1, hx2, hy2, hx3, hy3);
-                                            <polygon points="@points" fill="@col" stroke="none"
-                                                     style="pointer-events:none" />
-                                        }
+                                        var (hx1, hy1, hx2, hy2, hx3, hy3) = h2;
+                                        var points = string.Format(CultureInfo.InvariantCulture,
+                                            "{0:F4},{1:F4} {2:F4},{3:F4} {4:F4},{5:F4}",
+                                            hx1, hy1, hx2, hy2, hx3, hy3);
+                                        <polygon points="@points" fill="@col" stroke="none"
+                                                 style="pointer-events:none" />
                                     }
                                 }
                             }
