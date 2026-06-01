@@ -344,6 +344,12 @@ body.pb-app-bg { background: var(--bg-base); }
 .masthead .tagline .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); flex: none; }
 .masthead-logo-link { display: block; }
 .masthead-logo { display: block; width: 100%; max-width: 172px; height: auto; border-radius: 10px; background: #fff; padding: 8px 12px; box-shadow: 0 1px 2px rgb(0 0 0 / 0.25); }
+/* Logo-Asset gibt es nur als helle Variante (weiße Plakette). Im Dunkel-Theme
+   (= Default) invertieren: weiße Fläche → dunkel, Linien → hell. hue-rotate(180)
+   hält das Schloss-Badge im Teal statt es nach Rot zu kippen. Im hellen Theme
+   bleibt die Original-Plakette. */
+.masthead-logo, .pb-splash-img { filter: invert(1) hue-rotate(180deg); }
+[data-theme="light"] .masthead-logo, [data-theme="light"] .pb-splash-img { filter: none; }
 
 .nav { padding: var(--sp-4) var(--sp-4) var(--sp-2); display: flex; flex-direction: column; }
 .nav-item { display: grid; grid-template-columns: 1.7rem 1fr auto; align-items: baseline; gap: var(--sp-2); padding: calc(0.62em * var(--d)) 0; color: var(--ink-2); position: relative; text-align: left; min-height: 44px; border-bottom: 1px solid transparent; transition: color var(--speed); width: 100%; }
