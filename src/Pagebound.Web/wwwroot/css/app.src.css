@@ -375,9 +375,12 @@ body.pb-app-bg { background: var(--bg-base); }
 .lib-file .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lib-file .hsh { font-family: var(--font-mono); font-size: 0.66rem; color: var(--ink-4); }
 
-.rail-foot { padding: var(--sp-4) var(--sp-5); border-top: 1px solid var(--line); }
+.rail-foot { padding: var(--sp-4) var(--sp-5); border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: var(--sp-3); }
 .rail-foot .priv { display: flex; align-items: center; gap: var(--sp-2); color: var(--ok); font-family: var(--font-mono); font-size: 0.68rem; letter-spacing: 0.04em; }
 .rail-foot .priv .ic { width: 0.9rem; height: 0.9rem; }
+.rail-foot .rail-gh { display: inline-flex; align-items: center; gap: var(--sp-2); color: var(--ink-3); font-family: var(--font-mono); font-size: 0.68rem; letter-spacing: 0.04em; transition: color var(--speed); }
+.rail-foot .rail-gh:hover { color: var(--accent); }
+.rail-foot .rail-gh .ic { width: 0.9rem; height: 0.9rem; }
 
 .topbar { grid-area: topbar; display: flex; align-items: center; gap: var(--sp-4); padding: var(--sp-3) var(--sp-6); border-bottom: 1px solid var(--line); background: color-mix(in oklch, var(--bg-base) 85%, transparent); backdrop-filter: blur(8px); min-height: 56px; }
 .runhead { font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-3); display: flex; align-items: center; gap: 0.7em; min-width: 0; }
@@ -414,8 +417,16 @@ body.pb-app-bg { background: var(--bg-base); }
 }
 @media (max-width: 620px) {
   .topbar { padding: var(--sp-3) var(--sp-4); gap: var(--sp-3); }
+  /* Nur den Crumb behalten — "Pagebound —"-Präfix + Trenner weg, sonst sprengt
+     die nicht-schrumpfende Running-Head die Topbar (Horizontal-Overflow). */
+  .runhead span { display: none; }
   .ver { display: none; }
   .wrap { padding: var(--sp-5) var(--sp-4) var(--sp-7); }
+  .ed { padding-left: var(--sp-4); padding-right: var(--sp-4); }
+}
+@media (max-width: 400px) {
+  /* Sehr schmal: Theme-Schnellschalter raus (steckt auch im Einstellungs-Panel). */
+  .theme-toggle { display: none; }
 }
 
 /* =============================================================================
