@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
 using Pagebound.Core.Abstractions;
 using Pagebound.Infrastructure.Annotations;
 using Pagebound.Infrastructure.Crypto;
+using Pagebound.Infrastructure.Editor;
 using Pagebound.Infrastructure.Export;
 using Pagebound.Infrastructure.Library;
 using Pagebound.Infrastructure.Localization;
@@ -54,6 +55,7 @@ builder.Services.AddScoped<IPdfFormService, JsPdfFormService>();
 builder.Services.AddScoped<IImageToPdfConverter, JsImageToPdfConverter>();
 builder.Services.AddScoped<IWorkspaceService, BrowserWorkspaceService>();
 builder.Services.AddScoped<IPdfConverter, JsPdfConverter>();
+builder.Services.AddScoped<IEditorDraftService, EditorDraftService>();
 
 var host = builder.Build();
 

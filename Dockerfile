@@ -44,6 +44,7 @@ COPY --from=jsbuild /web/wwwroot/js/file-handle-bridge.js     /src/Pagebound.Web
 COPY --from=jsbuild /web/wwwroot/js/split-bridge.js           /src/Pagebound.Web/wwwroot/js/split-bridge.js
 COPY --from=jsbuild /web/wwwroot/js/workspace-bridge.js       /src/Pagebound.Web/wwwroot/js/workspace-bridge.js
 COPY --from=jsbuild /web/wwwroot/js/tweaks-bridge.js          /src/Pagebound.Web/wwwroot/js/tweaks-bridge.js
+COPY --from=jsbuild /web/wwwroot/js/wysiwyg-editor.js         /src/Pagebound.Web/wwwroot/js/wysiwyg-editor.js
 COPY --from=jsbuild /web/wwwroot/js/pdf.worker.min.mjs        /src/Pagebound.Web/wwwroot/js/pdf.worker.min.mjs
 
 WORKDIR /src/Pagebound.Web

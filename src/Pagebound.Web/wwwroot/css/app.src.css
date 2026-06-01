@@ -285,6 +285,23 @@ textarea, select {
 .btn.ghost:hover { background: var(--bg-hover); color: var(--ink); }
 .btn.sm { font-size: 0.82rem; padding: calc(0.42em * var(--d)) calc(0.7em * var(--d)); }
 
+/* WYSIWYG-Editor: kompakte Werkzeug-Buttons (Seitenleiste + Format-Leiste). */
+.btn-side {
+  display: inline-flex; align-items: center; justify-content: center; gap: 0.3em;
+  padding: calc(0.34em * var(--d)) calc(0.55em * var(--d));
+  border: 1px solid var(--ctl-border); border-radius: 6px;
+  background: var(--bg); color: var(--ink-2); font-size: 0.8rem; cursor: pointer; white-space: nowrap;
+}
+.btn-side:hover { background: var(--bg-hover); color: var(--ink); }
+.btn-side.is-on { border-color: var(--accent); color: var(--accent); }
+.btn-side.is-primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; font-weight: 700; }
+.btn-fmt {
+  min-width: 1.9em; padding: calc(0.3em * var(--d)) calc(0.45em * var(--d));
+  border: 1px solid var(--ctl-border); border-radius: 6px;
+  background: var(--bg); color: var(--ink); font-size: 0.85rem; cursor: pointer;
+}
+.btn-fmt:hover { background: var(--bg-hover); }
+
 .card { background: var(--bg-surface); border: 1px solid var(--line); border-radius: var(--radius-l); box-shadow: var(--shadow); }
 
 .eyebrow { font-family: var(--font-mono); font-size: 0.72rem; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-3); }
