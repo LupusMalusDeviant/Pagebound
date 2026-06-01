@@ -343,13 +343,16 @@ body.pb-app-bg { background: var(--bg-base); }
 .masthead .tagline { font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.2em; text-transform: uppercase; color: var(--ink-3); margin-top: var(--sp-3); display: flex; align-items: center; gap: 0.6em; }
 .masthead .tagline .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); flex: none; }
 .masthead-logo-link { display: block; }
-.masthead-logo { display: block; width: 100%; max-width: 172px; height: auto; border-radius: 10px; background: #fff; padding: 8px 12px; box-shadow: 0 1px 2px rgb(0 0 0 / 0.25); }
-/* Logo-Asset gibt es nur als helle Variante (weiße Plakette). Im Dunkel-Theme
-   (= Default) invertieren: weiße Fläche → dunkel, Linien → hell. hue-rotate(180)
-   hält das Schloss-Badge im Teal statt es nach Rot zu kippen. Im hellen Theme
-   bleibt die Original-Plakette. */
-.masthead-logo, .pb-splash-img { filter: invert(1) hue-rotate(180deg); }
-[data-theme="light"] .masthead-logo, [data-theme="light"] .pb-splash-img { filter: none; }
+.masthead-logo { display: block; width: 100%; max-width: 172px; height: auto; }
+/* Das Logo-Asset hat einen eingebackenen weißen Hintergrund (keine Transparenz).
+   Statt einer Plakette wird dieser Hintergrund per blend-mode „weggeschnitten",
+   sodass das Linien-Logo rahmenlos auf der Fläche sitzt:
+   • hell:   mix-blend-mode:multiply → Weiß verschmilzt mit dem Papier.
+   • dunkel: erst invertieren (Weiß→Schwarz, Linien→hell, hue-rotate hält das
+             Schloss-Badge im Teal), dann mix-blend-mode:screen → Schwarz
+             verschmilzt mit der dunklen Schiene. */
+.masthead-logo, .pb-splash-img { filter: invert(1) hue-rotate(180deg); mix-blend-mode: screen; }
+[data-theme="light"] .masthead-logo, [data-theme="light"] .pb-splash-img { filter: none; mix-blend-mode: multiply; }
 
 .nav { padding: var(--sp-4) var(--sp-4) var(--sp-2); display: flex; flex-direction: column; }
 .nav-item { display: grid; grid-template-columns: 1.7rem 1fr auto; align-items: baseline; gap: var(--sp-2); padding: calc(0.62em * var(--d)) 0; color: var(--ink-2); position: relative; text-align: left; min-height: 44px; border-bottom: 1px solid transparent; transition: color var(--speed); width: 100%; }
@@ -543,7 +546,7 @@ body.pb-app-bg { background: var(--bg-base); }
    ============================================================================= */
 .pb-splash { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; gap: 1rem; color: var(--ink-3); }
 .pb-splash-logo { font-family: var(--font-display); font-size: 1.6rem; font-weight: 500; color: var(--ink); letter-spacing: -0.02em; }
-.pb-splash-img { width: 132px; height: auto; border-radius: 14px; background: #fff; padding: 12px; box-shadow: var(--shadow-pop); }
+.pb-splash-img { width: 132px; height: auto; }
 .pb-splash-spinner { width: 2.5rem; height: 2.5rem; color: var(--accent); animation: pb-spin 1.2s linear infinite; }
 .pb-splash-text { font-size: 0.875rem; }
 @keyframes pb-spin { to { transform: rotate(360deg); } }
