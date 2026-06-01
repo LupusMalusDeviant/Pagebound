@@ -16,11 +16,13 @@
 **/npm-debug.log
 **/.npm/
 
-# Tailwind + esbuild Outputs (werden im Build-Stage neu erzeugt)
+# Tailwind + esbuild Outputs (werden im jsbuild-Stage neu erzeugt). Alle .js unter
+# wwwroot/js stammen aus .ts-Quellen → komplett ignorieren, damit das Image
+# reproduzierbar nur aus den Quellen entsteht (nie aus lokalen Build-Resten).
 src/Pagebound.Web/wwwroot/css/app.css
 src/Pagebound.Web/wwwroot/css/app.css.map
-src/Pagebound.Web/wwwroot/js/pdfjs-bridge.js
-src/Pagebound.Web/wwwroot/js/pdfjs-bridge.js.map
+src/Pagebound.Web/wwwroot/js/*.js
+src/Pagebound.Web/wwwroot/js/*.js.map
 src/Pagebound.Web/wwwroot/js/pdf.worker.min.mjs
 
 # Tests, Doku, Git

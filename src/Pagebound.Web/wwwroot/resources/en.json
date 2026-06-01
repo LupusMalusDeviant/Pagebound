@@ -52,6 +52,7 @@
   "settings.density.normal": "normal",
   "settings.density.luftig": "airy",
   "settings.motion": "Allow motion",
+  "settings.motion.hint": "Reduces animations & transitions (otherwise follows your system setting).",
   "nav.library": "Library",
   "nav.library.empty": "Empty — open a PDF.",
   "nav.library.recent": "Recently opened",

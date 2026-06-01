@@ -81,11 +81,14 @@
                 </div>
 
                 @* BEWEGUNG *@
-                <label class="flex items-center justify-between cursor-pointer">
-                    <span>@L.T("settings.motion")</span>
-                    <button type="button" class="@($"pb-switch {(_t.Motion ? "on" : "")}")" role="switch" aria-checked="@_t.Motion.ToString().ToLowerInvariant()"
-                            @onclick="@(() => SetMotionAsync(!_t.Motion))"><i></i></button>
-                </label>
+                <div class="flex flex-col gap-1">
+                    <label class="flex items-center justify-between cursor-pointer">
+                        <span>@L.T("settings.motion")</span>
+                        <button type="button" class="@($"pb-switch {(_t.Motion ? "on" : "")}")" role="switch" aria-checked="@_t.Motion.ToString().ToLowerInvariant()"
+                                @onclick="@(() => SetMotionAsync(!_t.Motion))"><i></i></button>
+                    </label>
+                    <span class="text-xs text-pb-fg-muted">@L.T("settings.motion.hint")</span>
+                </div>
             </div>
         </div>
     </div>

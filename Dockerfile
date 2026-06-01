@@ -29,13 +29,22 @@ WORKDIR /src
 # Copy source projects (Pagebound.Web references Core + Infrastructure)
 COPY src/ /src/
 
-# Drop the JS sources into the same layout the .csproj expects, replacing them
-# with the just-built outputs from the jsbuild stage.
-COPY --from=jsbuild /web/wwwroot/css/app.css              /src/Pagebound.Web/wwwroot/css/app.css
-COPY --from=jsbuild /web/wwwroot/js/pdfjs-bridge.js       /src/Pagebound.Web/wwwroot/js/pdfjs-bridge.js
-COPY --from=jsbuild /web/wwwroot/js/shortcuts-bridge.js   /src/Pagebound.Web/wwwroot/js/shortcuts-bridge.js
-COPY --from=jsbuild /web/wwwroot/js/storage-bridge.js     /src/Pagebound.Web/wwwroot/js/storage-bridge.js
-COPY --from=jsbuild /web/wwwroot/js/pdf.worker.min.mjs    /src/Pagebound.Web/wwwroot/js/pdf.worker.min.mjs
+# Drop the freshly built CSS + JS bridges into the layout the .csproj expects,
+# replacing the git-ignored source-tree outputs. WICHTIG: ALLE Bundles aus dem
+# jsbuild-Stage übernehmen — im sauberen CI-Checkout sind die .js nicht
+# eingecheckt, sonst fehlen Manipulator/OCR/Files/Split/Workspace/Tweaks und die
+# App ist halb tot (kein Theme, keine PDF-Ops, keine OCR …).
+COPY --from=jsbuild /web/wwwroot/css/app.css                  /src/Pagebound.Web/wwwroot/css/app.css
+COPY --from=jsbuild /web/wwwroot/js/pdfjs-bridge.js           /src/Pagebound.Web/wwwroot/js/pdfjs-bridge.js
+COPY --from=jsbuild /web/wwwroot/js/shortcuts-bridge.js       /src/Pagebound.Web/wwwroot/js/shortcuts-bridge.js
+COPY --from=jsbuild /web/wwwroot/js/storage-bridge.js         /src/Pagebound.Web/wwwroot/js/storage-bridge.js
+COPY --from=jsbuild /web/wwwroot/js/pdf-manipulator-bridge.js /src/Pagebound.Web/wwwroot/js/pdf-manipulator-bridge.js
+COPY --from=jsbuild /web/wwwroot/js/ocr-bridge.js             /src/Pagebound.Web/wwwroot/js/ocr-bridge.js
+COPY --from=jsbuild /web/wwwroot/js/file-handle-bridge.js     /src/Pagebound.Web/wwwroot/js/file-handle-bridge.js
+COPY --from=jsbuild /web/wwwroot/js/split-bridge.js           /src/Pagebound.Web/wwwroot/js/split-bridge.js
+COPY --from=jsbuild /web/wwwroot/js/workspace-bridge.js       /src/Pagebound.Web/wwwroot/js/workspace-bridge.js
+COPY --from=jsbuild /web/wwwroot/js/tweaks-bridge.js          /src/Pagebound.Web/wwwroot/js/tweaks-bridge.js
+COPY --from=jsbuild /web/wwwroot/js/pdf.worker.min.mjs        /src/Pagebound.Web/wwwroot/js/pdf.worker.min.mjs
 
 WORKDIR /src/Pagebound.Web
 RUN dotnet restore Pagebound.Web.csproj

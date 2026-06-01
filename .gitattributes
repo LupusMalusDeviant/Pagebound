@@ -1,0 +1,9 @@
+# Zeilenenden konsistent halten. Shell-Skripte MÜSSEN LF behalten, sonst bricht
+# der Shebang auf Linux (\r → "bad interpreter"). Gilt u.a. für infra/deploy/deploy.sh.
+* text=auto
+
+*.sh            text eol=lf
+Caddyfile*      text eol=lf
+*.yml           text eol=lf
+*.yaml          text eol=lf
+Dockerfile      text eol=lf

@@ -1,0 +1,20 @@
+# =============================================================================
+# Pagebound — Deploy auf dem LupusMalus-Host (Infomaniak), neben lupusmalus.dev.
+# Eigenes Compose-Projekt, hängt an dasselbe externe Netz `lupusmalus-net` wie
+# der bestehende Caddy-Reverse-Proxy. Caddy erreicht den Container intern unter
+# `pagebound:80` — kein Host-Port nötig, TLS macht Caddy automatisch.
+# =============================================================================
+services:
+  pagebound:
+    image: ghcr.io/lupusmalusdeviant/pagebound:latest
+    container_name: pagebound
+    restart: unless-stopped
+    # nginx im Image liefert die statische WASM-App auf Port 80 (siehe Dockerfile
+    # + infra/docker/nginx.conf mit Blazor-tauglichem CSP). Keine ports:-Map —
+    # nur Caddy spricht den Container über das Docker-Netz an.
+    networks:
+      - lupusmalus-net
+
+networks:
+  lupusmalus-net:
+    external: true

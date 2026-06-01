@@ -52,6 +52,7 @@
   "settings.density.normal": "normal",
   "settings.density.luftig": "luftig",
   "settings.motion": "Bewegung erlauben",
+  "settings.motion.hint": "Reduziert Animationen & Übergänge (folgt sonst der Systemeinstellung).",
   "nav.library": "Library",
   "nav.library.empty": "Noch leer — öffne eine PDF.",
   "nav.library.recent": "Zuletzt geöffnet",
