@@ -28,7 +28,7 @@
         <label class="flex flex-col gap-1 text-sm">
             <span class="font-medium">@L.T("batch.choose")</span>
             <InputFile OnChange="HandleFilesSelectedAsync" accept=".pdf" multiple
-                       class="block text-sm file:mr-3 file:rounded file:border-0 file:bg-pb-accent file:px-3 file:py-1.5 file:text-white file:cursor-pointer cursor-pointer" />
+                       class="block text-sm file:mr-3 file:rounded file:border-0 file:bg-pb-accent file:px-3 file:py-1.5 file:font-semibold file:text-[var(--accent-ink)] file:cursor-pointer cursor-pointer" />
         </label>
 
         @if (_files.Count > 0)
@@ -63,7 +63,7 @@
                            aria-label="@L.T("batch.password")" />
                 }
                 <button type="button"
-                        class="ml-auto rounded bg-pb-accent px-3 py-1.5 text-sm text-white disabled:opacity-40"
+                        class="btn primary ml-auto disabled:opacity-40"
                         disabled="@(_isRunning || ((_operation is BatchOp.Encrypt or BatchOp.CompressEncrypt) && string.IsNullOrEmpty(_password)))"
                         @onclick="RunBatchAsync">
                     @(_isRunning

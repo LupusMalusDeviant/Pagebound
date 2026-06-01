@@ -27,7 +27,7 @@
             <span class="font-medium">@L.T("tools.choosePdf")</span>
             <InputFile OnChange="HandleFileSelectedAsync"
                        accept=".pdf"
-                       class="block text-sm file:mr-3 file:rounded file:border-0 file:bg-pb-accent file:px-3 file:py-1.5 file:text-white file:cursor-pointer cursor-pointer" />
+                       class="block text-sm file:mr-3 file:rounded file:border-0 file:bg-pb-accent file:px-3 file:py-1.5 file:font-semibold file:text-[var(--accent-ink)] file:cursor-pointer cursor-pointer" />
         </label>
         @if (_errorMessage is not null)
         {
@@ -59,7 +59,7 @@
     <div class="max-w-4xl mx-auto mt-4 rounded-lg pb-glass p-4">
         <div class="flex items-center justify-between gap-3">
             <span class="font-medium text-sm">@L.T("tools.img2pdf.heading")</span>
-            <label class="rounded bg-pb-accent px-3 py-1.5 text-sm text-white cursor-pointer hover:opacity-90">
+            <label class="btn primary cursor-pointer">
                 @L.T("tools.img2pdf.choose")
                 <InputFile OnChange="HandleImagesSelectedAsync"
                            accept="image/png,image/jpeg"
@@ -84,7 +84,7 @@
                     </button>
                 }
                 <button type="button"
-                        class="ml-auto rounded bg-pb-accent px-3 py-1 text-white hover:opacity-90 disabled:opacity-40"
+                        class="btn primary sm ml-auto disabled:opacity-40"
                         disabled="@_isBuildingImagesPdf"
                         @onclick="BuildImagesPdfAsync">
                     @(_isBuildingImagesPdf
@@ -192,7 +192,7 @@
             }
 
             <button type="button"
-                    class="ml-auto rounded bg-pb-accent px-3 py-1 text-white hover:opacity-90 disabled:opacity-40"
+                    class="btn primary sm ml-auto disabled:opacity-40"
                     disabled="@(_isSaving || !HasChanges)"
                     @onclick="SaveAsync"
                     title="@(HasChanges ? L.T("tools.save.title") : L.T("tools.save.noChangesTitle"))">

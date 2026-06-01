@@ -39,7 +39,7 @@
                    höchstens einem dezenten Permission-Dialog statt einem
                    weiteren File-Picker durch. *@
                 <button type="button"
-                        class="self-start rounded bg-pb-accent px-3 py-1.5 text-sm text-white disabled:opacity-40"
+                        class="btn primary self-start disabled:opacity-40"
                         disabled="@_isLoading"
                         @onclick="PickPdfViaFsaAsync">
                     <Icon Name="folder" /> @L.T("reader.choosePdf")
@@ -49,7 +49,7 @@
             {
                 <InputFile OnChange="HandleFileSelected"
                            accept=".pdf"
-                           class="block text-sm file:mr-3 file:rounded file:border-0 file:bg-pb-accent file:px-3 file:py-1.5 file:text-white file:cursor-pointer cursor-pointer" />
+                           class="block text-sm file:mr-3 file:rounded file:border-0 file:bg-pb-accent file:px-3 file:py-1.5 file:font-semibold file:text-[var(--accent-ink)] file:cursor-pointer cursor-pointer" />
             }
         </label>
 
@@ -81,7 +81,7 @@
                            disabled="@_isSearching"
                            aria-label="@L.T("reader.search.label")" />
                     <button type="submit"
-                            class="rounded bg-pb-accent px-3 py-1.5 text-sm text-white disabled:opacity-40"
+                            class="btn primary disabled:opacity-40"
                             disabled="@(_isSearching || string.IsNullOrWhiteSpace(_searchQuery))">
                         @(_isSearching ? L.T("reader.search.searching") : L.T("reader.search.button"))
                     </button>
@@ -135,7 +135,7 @@
                             <div class="font-medium">@L.T("reader.search.noTextLayer.title")</div>
                             <p class="mt-1 text-pb-fg-muted">@L.T("reader.search.noTextLayer.body")</p>
                             <button type="button"
-                                    class="mt-2 rounded bg-pb-accent px-3 py-1 text-sm text-white disabled:opacity-40"
+                                    class="btn primary sm mt-2 disabled:opacity-40"
                                     disabled="@_isOcrRunning"
                                     title="@L.T("reader.ocr.title")"
                                     @onclick="RunOcrOnCurrentPageAsync">
@@ -456,7 +456,7 @@
                         @L.T("common.close")
                     </button>
                     <button type="button"
-                            class="rounded bg-pb-accent px-3 py-1 text-xs text-white disabled:opacity-40"
+                            class="btn primary sm disabled:opacity-40"
                             disabled="@(!_signer.IsComplete)"
                             @onclick="SaveSignerToStorageAsync"
                             title="@L.T("reader.signer.rememberTitle")">
@@ -593,7 +593,7 @@
                         </label>
                     </div>
                     <button type="button"
-                            class="rounded bg-pb-accent px-3 py-1.5 text-sm text-white disabled:opacity-40"
+                            class="btn primary disabled:opacity-40"
                             disabled="@_isFillingForm"
                             @onclick="SaveFilledFormAsync">
                         @(_isFillingForm ? L.T("reader.form.saving") : L.T("reader.form.save"))
@@ -1129,7 +1129,7 @@
                                     @L.T("common.delete")
                                 </button>
                                 <button type="button"
-                                        class="rounded bg-pb-accent px-3 py-1 text-xs text-white"
+                                        class="btn primary sm"
                                         @onclick="SaveEditingAnnotationAsync">
                                     @L.T("common.save")
                                 </button>
