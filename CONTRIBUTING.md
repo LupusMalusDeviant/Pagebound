@@ -68,6 +68,22 @@ PAGEBOUND_URL=http://localhost:5099 dotnet test tests/Pagebound.E2ETests
 In CI übernimmt das der eigene `e2e-tests`-Job (publish → statisch serven →
 Playwright `--with-deps` → `dotnet test`).
 
+### Code-Coverage (Ziel ≥ 60 %)
+
+```bash
+dotnet test --filter "FullyQualifiedName!~E2ETests" \
+  --settings coverlet.runsettings --collect:"XPlat Code Coverage"
+# Ergebnis: tests/**/TestResults/<guid>/coverage.cobertura.xml (line-rate)
+```
+
+`coverlet.runsettings` nimmt die reinen **JavaScript-Interop-Shims** aus der
+Messung (PDF.js-/pdf-lib-/WebCrypto-/Tesseract-/IndexedDB-/FSA-Wrapper) — deren
+Logik läuft im Browser und ist über die E2E-/Browser-Verifikation abgedeckt, nicht
+über Unit-Tests. Gemessen wird die testbare .NET-Logik (Services + Domain). Neue
+reine Interop-Wrapper bitte entweder dort eintragen oder mit
+`[ExcludeFromCodeCoverage]` markieren; **echte Logik gehört getestet, nicht
+ausgeschlossen.**
+
 ## Architektur-Prinzipien (verbindlich)
 
 Diese Prinzipien gelten für **jeden** Beitrag (siehe [ADR-001](docs/adrs/001-interface-first.md)):

@@ -50,7 +50,7 @@ jobs:
       - name: Run unit & component tests
         # E2E (Playwright) laufen im dedizierten e2e-tests-Job mit echtem Server —
         # hier ausschließen, sonst würden sie mangels Server nur (grün) übersprungen.
-        run: dotnet test --configuration Release --no-build --filter "FullyQualifiedName!~E2ETests" --collect:"XPlat Code Coverage" --logger "trx;LogFileName=test-results.trx"
+        run: dotnet test --configuration Release --no-build --filter "FullyQualifiedName!~E2ETests" --settings coverlet.runsettings --collect:"XPlat Code Coverage" --logger "trx;LogFileName=test-results.trx"
 
       - name: Upload test results
         if: always()

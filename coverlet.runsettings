@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Coverlet-Konfiguration für die Code-Coverage (NFA „≥60%").
+
+  Aus der Messung ausgeschlossen sind die reinen JavaScript-Interop-Shims:
+  dünne Wrapper über IJSRuntime, deren Logik (PDF.js / pdf-lib / WebCrypto /
+  Tesseract / IndexedDB / File-System-Access) ausschließlich im Browser läuft.
+  Sie sind über die E2E-/Browser-Verifikation abgedeckt, nicht über Unit-Tests
+  (ein gemocktes IJSRuntime würde nur die Aufruf-Argumente nachstellen, ohne die
+  eigentliche JS-Seite zu prüfen — geringer Wert, hohe Bröckeligkeit).
+
+  Die testbare Logik (LibraryService, AnnotationService, LocalizationService,
+  JsonSidecarService, MarkdownExporter, IntegrityService, Hash, AesR6,
+  JsPdfFormService [Marshalling], Domain-Typen) bleibt voll in der Messung.
+
+  Aufruf: siehe CONTRIBUTING.md (dotnet test mit settings=coverlet.runsettings
+  und collect="XPlat Code Coverage").
+-->
+<RunSettings>
+  <DataCollectionRunSettings>
+    <DataCollectors>
+      <DataCollector friendlyName="XPlat code coverage">
+        <Configuration>
+          <Format>cobertura</Format>
+          <ExcludeByAttribute>Obsolete,GeneratedCodeAttribute,CompilerGeneratedAttribute,ExcludeFromCodeCoverageAttribute</ExcludeByAttribute>
+          <Exclude>[Pagebound.Infrastructure]Pagebound.Infrastructure.Pdf.PdfJsRenderer*,[Pagebound.Infrastructure]Pagebound.Infrastructure.Pdf.JsPdfLibManipulator*,[Pagebound.Infrastructure]Pagebound.Infrastructure.Pdf.JsPdfEncryptor*,[Pagebound.Infrastructure]Pagebound.Infrastructure.Pdf.JsPdfConverter*,[Pagebound.Infrastructure]Pagebound.Infrastructure.Pdf.JsImageToPdfConverter*,[Pagebound.Infrastructure]Pagebound.Infrastructure.Ocr.TesseractOcrService*,[Pagebound.Infrastructure]Pagebound.Infrastructure.Storage.IndexedDbStorage*,[Pagebound.Infrastructure]Pagebound.Infrastructure.Storage.FileSystemAccessHandleService*,[Pagebound.Infrastructure]Pagebound.Infrastructure.Workspace.BrowserWorkspaceService*,[Pagebound.Infrastructure]Pagebound.Infrastructure.Theme.ThemeService*</Exclude>
+        </Configuration>
+      </DataCollector>
+    </DataCollectors>
+  </DataCollectionRunSettings>
+</RunSettings>
