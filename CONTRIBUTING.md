@@ -44,15 +44,29 @@ dotnet run --project src/Pagebound.Web
 ### Tests laufen lassen
 
 ```bash
-# Alle Unit- und Component-Tests
-dotnet test
+# Unit- & Component-Tests (ohne E2E)
+dotnet test --filter "FullyQualifiedName!~E2ETests"
 
 # Nur Unit-Tests
 dotnet test tests/Pagebound.Core.Tests
-
-# E2E-Tests (Playwright)
-dotnet test tests/Pagebound.E2ETests
 ```
+
+**E2E-Tests (Playwright).** Sie fahren einen echten Browser gegen die *laufende*
+App. Der Harness ist so gebaut, dass er sich **sauber überspringt** (statt rot zu
+werden), wenn weder Server noch Browser bereitstehen — `dotnet test` bleibt also
+auch ohne Setup grün. Für einen echten Lauf:
+
+```bash
+# 1) App in einem Terminal starten (Dev-Server auf :5099)
+dotnet run --project src/Pagebound.Web --urls http://localhost:5099
+
+# 2) In einem zweiten Terminal die E2E-Tests laufen lassen
+#    (lädt beim ersten Mal Chromium nach; PAGEBOUND_URL ist optional, Default :5099)
+PAGEBOUND_URL=http://localhost:5099 dotnet test tests/Pagebound.E2ETests
+```
+
+In CI übernimmt das der eigene `e2e-tests`-Job (publish → statisch serven →
+Playwright `--with-deps` → `dotnet test`).
 
 ## Architektur-Prinzipien (verbindlich)
 
