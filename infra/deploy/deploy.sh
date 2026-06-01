@@ -30,6 +30,12 @@ docker compose -f "$APP_DIR/docker-compose.yml" up -d
 # Entfernt einen evtl. vorhandenen Block der Domain (brace-aware, egal ob
 # zusätzliche handle{}-Unterblöcke enthalten sind) und hängt den frischen Block
 # aus Caddyfile.pagebound an. So greift auch die neue /mcp-Route bei Re-Runs.
+#
+# WICHTIG: Die Caddyfile ist als EINZELNE Datei in den Caddy-Container gemountet.
+# Schreibe immer IN-PLACE (`>`/`>>`/sed -i), NIEMALS per `mv neu Caddyfile` — ein
+# Rename tauscht den Inode, der Bind-Mount zeigt dann weiter auf den alten Inhalt
+# und `caddy reload` lädt eine veraltete Config (Route fehlt). In-place-Schreiben
+# behält den Inode, der Container sieht die Änderung sofort.
 echo "→ Caddy-Block synchronisieren, validieren, neu laden"
 BACKUP="$CADDY_DIR/Caddyfile.bak.$(date +%Y%m%d-%H%M%S)"
 cp "$CADDY_DIR/Caddyfile" "$BACKUP"
