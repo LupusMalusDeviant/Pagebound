@@ -20,6 +20,8 @@ import {
   PDFRadioGroup,
   PDFDropdown,
   PDFOptionList,
+  StandardFonts,
+  rgb,
   degrees
 } from "pdf-lib";
 import * as pdfjsLib from "pdfjs-dist";
@@ -535,6 +537,68 @@ export async function rotatePages(
     const current = pages[idx].getRotation().angle;
     pages[idx].setRotation(degrees((((current + deg) % 360) + 360) % 360));
   }
+  return await doc.save({ useObjectStreams: false });
+}
+
+// ============================================================================
+// Stempeln: Wasserzeichen (diagonal) + Seitenzahlen/Bates (pdf-lib drawText)
+// ============================================================================
+
+export interface StampOptions {
+  watermarkText?: string | null;
+  watermarkOpacity?: number;
+  watermarkFontSize?: number;
+  pageNumbers?: boolean;
+  pageNumberFormat?: string;
+  pageNumberPosition?: "bottom-center" | "bottom-right" | "bottom-left";
+  pageNumberFontSize?: number;
+  pageNumberStartAt?: number;
+}
+
+const clampNum = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+
+export async function stampPdf(pdfBytes: Uint8Array, opts: StampOptions): Promise<Uint8Array> {
+  const doc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const pages = doc.getPages();
+  const total = pages.length;
+
+  const wmText = (opts.watermarkText ?? "").trim();
+  const wmOpacity = clampNum(opts.watermarkOpacity ?? 0.12, 0.02, 0.6);
+  const wmSize = clampNum(opts.watermarkFontSize ?? 48, 8, 240);
+
+  const pnOn = !!opts.pageNumbers;
+  const pnFmt = opts.pageNumberFormat || "{n} / {total}";
+  const pnPos = opts.pageNumberPosition || "bottom-center";
+  const pnSize = clampNum(opts.pageNumberFontSize ?? 10, 6, 48);
+  const startAt = Number.isFinite(opts.pageNumberStartAt) ? (opts.pageNumberStartAt as number) : 1;
+  const margin = 24;
+
+  pages.forEach((page, i) => {
+    const { width, height } = page.getSize();
+    if (wmText) {
+      const tw = font.widthOfTextAtSize(wmText, wmSize);
+      const angle = Math.PI / 4; // 45° — die rotierte Baseline mittig durch die Seite legen
+      page.drawText(wmText, {
+        x: width / 2 - (tw / 2) * Math.cos(angle),
+        y: height / 2 - (tw / 2) * Math.sin(angle),
+        size: wmSize,
+        font,
+        color: rgb(0.5, 0.5, 0.5),
+        opacity: wmOpacity,
+        rotate: degrees(45),
+      });
+    }
+    if (pnOn) {
+      const label = pnFmt.replace("{n}", String(i + startAt)).replace("{total}", String(total));
+      const tw = font.widthOfTextAtSize(label, pnSize);
+      let x = (width - tw) / 2;
+      if (pnPos === "bottom-right") x = width - tw - margin;
+      else if (pnPos === "bottom-left") x = margin;
+      page.drawText(label, { x, y: margin, size: pnSize, font, color: rgb(0.3, 0.3, 0.3) });
+    }
+  });
+
   return await doc.save({ useObjectStreams: false });
 }
 

@@ -302,6 +302,41 @@
         }
         <p class="max-w-4xl mx-auto mt-1 text-xs text-pb-fg-muted">@L.T("tools.convert.note")</p>
 
+        @* Wasserzeichen + Seitenzahlen / Bates *@
+        <div class="max-w-4xl mx-auto mt-2 rounded-lg pb-glass p-3 flex flex-wrap items-center gap-2 text-sm">
+            <span class="text-pb-fg-muted">@L.T("tools.stamp.label")</span>
+            <input @bind="_watermarkText" @bind:event="oninput"
+                   class="flex-1 min-w-[10rem] rounded border border-pb-border bg-pb-bg px-3 py-1.5 text-sm"
+                   placeholder="@L.T("tools.stamp.watermarkPlaceholder")"
+                   aria-label="@L.T("tools.stamp.watermarkPlaceholder")" />
+            <label class="flex items-center gap-1.5 cursor-pointer whitespace-nowrap">
+                <input type="checkbox" @bind="_stampPageNumbers" /> @L.T("tools.stamp.pageNumbers")
+            </label>
+            <select @bind="_stampPnPosition"
+                    class="rounded border border-pb-border bg-pb-bg px-2 py-1 text-sm"
+                    aria-label="@L.T("tools.stamp.position")">
+                <option value="@PageNumberPosition.BottomCenter">@L.T("tools.stamp.pos.center")</option>
+                <option value="@PageNumberPosition.BottomRight">@L.T("tools.stamp.pos.right")</option>
+                <option value="@PageNumberPosition.BottomLeft">@L.T("tools.stamp.pos.left")</option>
+            </select>
+            <button type="button"
+                    class="ml-auto rounded border border-pb-border bg-pb-bg px-3 py-1 text-pb-fg-muted hover:text-pb-fg disabled:opacity-40"
+                    disabled="@(_isStamping || _handle is null || (string.IsNullOrWhiteSpace(_watermarkText) && !_stampPageNumbers))"
+                    title="@L.T("tools.stamp.title")"
+                    @onclick="StampPdfAsync">
+                @(_isStamping ? L.T("tools.stamp.running") : L.T("tools.stamp.button"))
+            </button>
+        </div>
+        @if (_stampStatus is not null)
+        {
+            <div class="max-w-4xl mx-auto mt-2 rounded border border-green-300/40 bg-green-50/10 px-3 py-2 text-sm text-pb-fg">
+                @_stampStatus
+                <button type="button" class="float-right text-pb-fg-muted hover:text-pb-fg"
+                        @onclick="@(() => _stampStatus = null)" aria-label="@L.T("common.close")">✕</button>
+            </div>
+        }
+        <p class="max-w-4xl mx-auto mt-1 text-xs text-pb-fg-muted">@L.T("tools.stamp.note")</p>
+
         <div class="mt-6 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
             @{
                 var visiblePages = _pages.Where(p => !p.Deleted).ToList();
@@ -392,6 +427,13 @@
     private PdfDocumentHandle? _handle;
     private string? _currentFilename;
     private byte[]? _originalPdfBytes;
+
+    // Wasserzeichen + Seitenzahlen (Stempeln)
+    private string _watermarkText = string.Empty;
+    private bool _stampPageNumbers = true;
+    private PageNumberPosition _stampPnPosition = PageNumberPosition.BottomCenter;
+    private bool _isStamping;
+    private string? _stampStatus;
     private bool _isLoading;
     private bool _isSaving;
     private bool _isCompressing;
@@ -817,6 +859,50 @@
         var safe = string.Concat(baseName.Select(c =>
             char.IsLetterOrDigit(c) || c is '_' or '-' or '.' or ' ' ? c : '_'));
         return $"{safe}.encrypted.pdf";
+    }
+
+    // --- Wasserzeichen + Seitenzahlen ----------------------------------------
+
+    private async Task StampPdfAsync()
+    {
+        if (_originalPdfBytes is null || _isStamping) return;
+        if (string.IsNullOrWhiteSpace(_watermarkText) && !_stampPageNumbers) return;
+        _isStamping = true;
+        _stampStatus = null;
+        _errorMessage = null;
+        try
+        {
+            var options = new StampOptions(
+                WatermarkText: string.IsNullOrWhiteSpace(_watermarkText) ? null : _watermarkText.Trim(),
+                PageNumbers: _stampPageNumbers,
+                PageNumberPosition: _stampPnPosition);
+            await using var stream = new MemoryStream(_originalPdfBytes);
+            var stamped = await Manipulator.StampAsync(stream, options, CancellationToken.None).ConfigureAwait(false);
+
+            var filename = BuildSuffixFilename(_currentFilename, "stamped");
+            await JS.InvokeVoidAsync("pageboundShortcuts.downloadBytes", filename, Convert.ToBase64String(stamped), "application/pdf")
+                .ConfigureAwait(false);
+            _stampStatus = L.T("tools.stamp.result", new Dictionary<string, object> { ["name"] = filename });
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = ex.Message;
+        }
+        finally
+        {
+            _isStamping = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private static string BuildSuffixFilename(string? originalName, string suffix)
+    {
+        var baseName = string.IsNullOrWhiteSpace(originalName) ? "document" : originalName;
+        if (baseName.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
+            baseName = baseName[..^4];
+        var safe = string.Concat(baseName.Select(c =>
+            char.IsLetterOrDigit(c) || c is '_' or '-' or '.' or ' ' ? c : '_'));
+        return $"{safe}.{suffix}.pdf";
     }
 
     // --- Konvertieren (FA-030/031/032) ---------------------------------------

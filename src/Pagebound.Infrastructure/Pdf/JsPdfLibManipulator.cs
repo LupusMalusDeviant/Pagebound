@@ -179,6 +179,42 @@ public sealed class JsPdfLibManipulator : IPdfManipulator
         }
     }
 
+    public async Task<byte[]> StampAsync(Stream pdf, StampOptions o, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(pdf);
+        ArgumentNullException.ThrowIfNull(o);
+        var bytes = await ReadAllAsync(pdf, cancellationToken).ConfigureAwait(false);
+
+        // Property-Namen müssen exakt zu StampOptions in der Bridge passen (camelCase).
+        var payload = new
+        {
+            watermarkText = string.IsNullOrWhiteSpace(o.WatermarkText) ? null : o.WatermarkText,
+            watermarkOpacity = o.WatermarkOpacity,
+            watermarkFontSize = o.WatermarkFontSize,
+            pageNumbers = o.PageNumbers,
+            pageNumberFormat = o.PageNumberFormat,
+            pageNumberPosition = o.PageNumberPosition switch
+            {
+                PageNumberPosition.BottomRight => "bottom-right",
+                PageNumberPosition.BottomLeft => "bottom-left",
+                _ => "bottom-center",
+            },
+            pageNumberFontSize = o.PageNumberFontSize,
+            pageNumberStartAt = o.PageNumberStartAt,
+        };
+
+        try
+        {
+            var result = await _js.InvokeAsync<byte[]>(
+                "pageboundPdfManipulator.stampPdf", cancellationToken, bytes, payload).ConfigureAwait(false);
+            return result ?? bytes;
+        }
+        catch (JSException jsex)
+        {
+            throw new InvalidOperationException($"[stage:stamp] pdf-lib stampPdf fehlgeschlagen: {jsex.Message}", jsex);
+        }
+    }
+
     private static async Task<byte[]> ReadAllAsync(Stream pdf, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(pdf);

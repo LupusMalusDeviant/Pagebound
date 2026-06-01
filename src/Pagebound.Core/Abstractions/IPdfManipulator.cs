@@ -59,6 +59,15 @@ public interface IPdfManipulator
         Stream pdf,
         IReadOnlyList<EmbeddedSignature> signatures,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Zeichnet ein diagonales Text-Wasserzeichen und/oder Seitenzahlen (Bates)
+    /// auf jede Seite und gibt die neue PDF zurück. Die Eingabe bleibt unverändert.
+    /// </summary>
+    Task<byte[]> StampAsync(
+        Stream pdf,
+        StampOptions options,
+        CancellationToken cancellationToken);
 }
 
 /// <summary>
