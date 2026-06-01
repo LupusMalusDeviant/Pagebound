@@ -867,7 +867,7 @@
                                           style="pointer-events:none" />
                                     @if (kind == ShapeKind.Arrow)
                                     {
-                                        var head = ComputeArrowHead(sx, sy, ex, ey, sw);
+                                        var head = ComputeArrowHead(sx, sy, ex, ey, sw, pageH > 0 ? pageW / pageH : 1.0);
                                         if (head is not null)
                                         {
                                             var (hx1, hy1, hx2, hy2, hx3, hy3) = head.Value;
@@ -2305,21 +2305,33 @@
     /// bleiben. Gibt <c>null</c> zurück, wenn Start und Ende identisch sind.
     /// </summary>
     private static (double X1, double Y1, double X2, double Y2, double X3, double Y3)?
-        ComputeArrowHead(double sx, double sy, double ex, double ey, double strokeWidth)
+        ComputeArrowHead(double sx, double sy, double ex, double ey, double strokeWidth, double aspect)
     {
-        var dx = ex - sx;
-        var dy = ey - sy;
-        var len = Math.Sqrt(dx * dx + dy * dy);
+        if (aspect <= 0) aspect = 1;
+        // Die Spitze wird im quadratischen Pixel-Raum berechnet (x mit dem Seiten-
+        // verhältnis skaliert), sonst verzerrt der SVG-viewBox 0..1 mit
+        // preserveAspectRatio=none die Geometrie und die Spitze wirkt schief.
+        var sxs = sx * aspect;
+        var exs = ex * aspect;
+        var dxs = exs - sxs;
+        var dys = ey - sy;
+        var len = Math.Sqrt(dxs * dxs + dys * dys);
         if (len <= 0) return null;
-        var arrowSize = Math.Max(0.012, strokeWidth * 3);
-        var ux = dx / len;
-        var uy = dy / len;
-        var bx = ex - ux * arrowSize;
-        var by = ey - uy * arrowSize;
+        var ux = dxs / len;
+        var uy = dys / len;
+        // Spitzenlänge: solide sichtbar, skaliert mit der Strichstärke
+        // (strokeWidth ist Seitenbreiten-Anteil → ×aspect = Höhen-Anteil),
+        // bei kurzen Pfeilen auf 40 % der Länge gedeckelt.
+        var arrowSize = Math.Min(len * 0.4, Math.Max(0.024, strokeWidth * aspect * 4.0));
+        var bxs = exs - ux * arrowSize;
+        var bys = ey - uy * arrowSize;
         var nx = -uy;
         var ny = ux;
         var hb = arrowSize * 0.5;
-        return (ex, ey, bx + nx * hb, by + ny * hb, bx - nx * hb, by - ny * hb);
+        // zurück in 0..1-Seiten-Koordinaten (x wieder „entzerren")
+        return (ex, ey,
+                (bxs + nx * hb) / aspect, bys + ny * hb,
+                (bxs - nx * hb) / aspect, bys - ny * hb);
     }
 
     private async Task HandlePdfClickAsync(MouseEventArgs e)

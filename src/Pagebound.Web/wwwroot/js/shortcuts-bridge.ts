@@ -471,24 +471,30 @@ export function startDrawingCapture(
       line.setAttribute("stroke-linecap", "round");
       line.setAttribute("vector-effect", "non-scaling-stroke");
       if (mode === "arrow") {
-        // Spitze als kleines Dreieck am Endpunkt. ViewBox ist 0..1 — wir bauen
-        // die Spitze in Page-Fraktionen, abhängig von der Strichstärke.
-        const arrowSize = Math.max(0.012, strokeWidthPx * 3 / container!.clientWidth);
-        const dx = shapeEnd.x - shapeStart.x;
-        const dy = shapeEnd.y - shapeStart.y;
-        const len = Math.hypot(dx, dy);
+        // Spitze im quadratischen Pixel-Raum berechnen (x mit dem Seiten-
+        // verhältnis skalieren), sonst verzerrt der viewBox 0..1 mit
+        // preserveAspectRatio=none die Geometrie → schiefe Spitze.
+        const aspect = container!.clientWidth / Math.max(1, container!.clientHeight);
+        const sxs = shapeStart.x * aspect;
+        const exs = shapeEnd.x * aspect;
+        const dxs = exs - sxs;
+        const dys = shapeEnd.y - shapeStart.y;
+        const len = Math.hypot(dxs, dys);
         if (len > 0) {
-          const ux = dx / len;
-          const uy = dy / len;
-          const baseX = shapeEnd.x - ux * arrowSize;
+          const ux = dxs / len;
+          const uy = dys / len;
+          // skaliert mit der Strichstärke (Seitenbreiten-Anteil → ×aspect),
+          // bei kurzen Pfeilen auf 40 % der Länge gedeckelt.
+          const arrowSize = Math.min(len * 0.4, Math.max(0.024, options.strokeWidthFraction * aspect * 4.0));
+          const baseX = exs - ux * arrowSize;
           const baseY = shapeEnd.y - uy * arrowSize;
-          // 90° gedrehte Normale
+          // 90° gedrehte Normale (im skalierten Raum)
           const nx = -uy;
           const ny = ux;
           const halfBase = arrowSize * 0.5;
           const p1 = `${shapeEnd.x},${shapeEnd.y}`;
-          const p2 = `${baseX + nx * halfBase},${baseY + ny * halfBase}`;
-          const p3 = `${baseX - nx * halfBase},${baseY - ny * halfBase}`;
+          const p2 = `${(baseX + nx * halfBase) / aspect},${baseY + ny * halfBase}`;
+          const p3 = `${(baseX - nx * halfBase) / aspect},${baseY - ny * halfBase}`;
           const tri = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
           tri.setAttribute("points", `${p1} ${p2} ${p3}`);
           tri.setAttribute("fill", options.color);
