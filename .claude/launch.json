@@ -6,6 +6,12 @@
       "runtimeExecutable": "dotnet",
       "runtimeArgs": ["run", "--project", "src/Pagebound.Web", "-c", "Release", "--urls", "http://127.0.0.1:5099"],
       "port": 5099
+    },
+    {
+      "name": "pagebound-dev",
+      "runtimeExecutable": "dotnet",
+      "runtimeArgs": ["run", "-c", "Debug", "--launch-profile", "http", "--project", "src/Pagebound.Web"],
+      "port": 5184
     }
   ]
 }

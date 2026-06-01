@@ -68,6 +68,18 @@ public interface IPdfManipulator
         Stream pdf,
         StampOptions options,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// „Annotationen einbrennen": brennt die übergebenen Sidecar-Annotationen
+    /// (Highlights, Ink, Formen, Notizen, Signaturen) dauerhaft in die PDF-Bytes
+    /// — das Ergebnis ist eine normale PDF mit fest eingezeichneten Markierungen,
+    /// unabhängig von der Sidecar. Die Eingabe bleibt unverändert; eine leere
+    /// Liste liefert die PDF unverändert zurück.
+    /// </summary>
+    Task<byte[]> FlattenAnnotationsAsync(
+        Stream pdf,
+        IReadOnlyList<Annotation> annotations,
+        CancellationToken cancellationToken);
 }
 
 /// <summary>

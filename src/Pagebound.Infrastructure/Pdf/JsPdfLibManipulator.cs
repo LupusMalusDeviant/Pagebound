@@ -215,6 +215,118 @@ public sealed class JsPdfLibManipulator : IPdfManipulator
         }
     }
 
+    public async Task<byte[]> FlattenAnnotationsAsync(
+        Stream pdf,
+        IReadOnlyList<Annotation> annotations,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(pdf);
+        ArgumentNullException.ThrowIfNull(annotations);
+
+        var bytes = await ReadAllAsync(pdf, cancellationToken).ConfigureAwait(false);
+        if (annotations.Count == 0) return bytes;
+
+        // Domain-Annotationen → flache DTOs für die Bridge (camelCase via STJ).
+        // Koordinaten bleiben 0..1/oben-links; die Bridge rechnet pro Seite um.
+        var items = new List<JsFlattenItem>(annotations.Count);
+        foreach (var a in annotations)
+        {
+            switch (a.Type)
+            {
+                case AnnotationType.Highlight:
+                    items.Add(new JsFlattenItem
+                    {
+                        Kind = "highlight",
+                        PageNumber = a.PageNumber,
+                        Color = HighlightAnnotation.GetColor(a),
+                        Rects = HighlightAnnotation.GetRects(a)
+                            .Select(r => new JsRect { X = r.X, Y = r.Y, W = r.Width, H = r.Height }).ToArray()
+                    });
+                    break;
+
+                case AnnotationType.Ink:
+                    items.Add(new JsFlattenItem
+                    {
+                        Kind = "ink",
+                        PageNumber = a.PageNumber,
+                        Color = InkAnnotation.GetColor(a),
+                        StrokeWidth = InkAnnotation.GetStrokeWidth(a),
+                        Strokes = InkAnnotation.GetStrokes(a)
+                            .Select(s => s.Points.Select(p => new JsPoint { X = p.X, Y = p.Y }).ToArray()).ToArray()
+                    });
+                    break;
+
+                case AnnotationType.Shape:
+                    items.Add(new JsFlattenItem
+                    {
+                        Kind = "shape",
+                        PageNumber = a.PageNumber,
+                        Color = ShapeAnnotation.GetColor(a),
+                        StrokeWidth = ShapeAnnotation.GetStrokeWidth(a),
+                        Shape = ShapeAnnotation.GetShape(a) switch
+                        {
+                            ShapeKind.Arrow => "arrow",
+                            ShapeKind.Line => "line",
+                            _ => "rectangle",
+                        },
+                        StartX = ShapeAnnotation.GetStartX(a),
+                        StartY = ShapeAnnotation.GetStartY(a),
+                        EndX = ShapeAnnotation.GetEndX(a),
+                        EndY = ShapeAnnotation.GetEndY(a)
+                    });
+                    break;
+
+                case AnnotationType.StickyNote:
+                    items.Add(new JsFlattenItem
+                    {
+                        Kind = "note",
+                        PageNumber = a.PageNumber,
+                        Color = StickyNoteAnnotation.GetColor(a),
+                        X = StickyNoteAnnotation.GetX(a),
+                        Y = StickyNoteAnnotation.GetY(a),
+                        Text = StickyNoteAnnotation.GetContent(a)
+                    });
+                    break;
+
+                case AnnotationType.Signature:
+                    var b64 = StripDataUrlPrefix(SignatureAnnotation.GetImageDataUrl(a));
+                    if (string.IsNullOrEmpty(b64)) break;
+                    items.Add(new JsFlattenItem
+                    {
+                        Kind = "signature",
+                        PageNumber = a.PageNumber,
+                        ImageBase64 = b64,
+                        X = SignatureAnnotation.GetX(a),
+                        Y = SignatureAnnotation.GetY(a),
+                        Width = SignatureAnnotation.GetWidth(a),
+                        Height = SignatureAnnotation.GetHeight(a)
+                    });
+                    break;
+            }
+        }
+
+        if (items.Count == 0) return bytes;
+
+        try
+        {
+            var result = await _js.InvokeAsync<byte[]>(
+                "pageboundPdfManipulator.flattenAnnotations", cancellationToken, bytes, items.ToArray()).ConfigureAwait(false);
+            return result ?? bytes;
+        }
+        catch (JSException jsex)
+        {
+            throw new InvalidOperationException($"[stage:flatten] pdf-lib flattenAnnotations fehlgeschlagen: {jsex.Message}", jsex);
+        }
+    }
+
+    /// <summary>Schneidet das "data:...;base64,"-Präfix einer Data-URL ab (liefert reines base64).</summary>
+    private static string StripDataUrlPrefix(string dataUrl)
+    {
+        if (string.IsNullOrEmpty(dataUrl)) return string.Empty;
+        var marker = dataUrl.IndexOf("base64,", StringComparison.OrdinalIgnoreCase);
+        return marker >= 0 ? dataUrl[(marker + "base64,".Length)..] : dataUrl;
+    }
+
     private static async Task<byte[]> ReadAllAsync(Stream pdf, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(pdf);
@@ -255,5 +367,46 @@ public sealed class JsPdfLibManipulator : IPdfManipulator
         public string? SignerReason { get; init; }
         public string? SignerLocation { get; init; }
         public string? IntegrityHash { get; init; }
+    }
+
+    /// <summary>
+    /// Flaches Union-DTO für <c>flattenAnnotations</c> in der Bridge. Je nach
+    /// <see cref="Kind"/> sind nur bestimmte Felder gesetzt; nicht zutreffende
+    /// bleiben null (die Bridge ignoriert sie). camelCase via System.Text.Json.
+    /// </summary>
+    private sealed class JsFlattenItem
+    {
+        public string Kind { get; init; } = string.Empty;
+        public int PageNumber { get; init; }
+        public string? Color { get; init; }
+        public double? Opacity { get; init; }
+        public double? StrokeWidth { get; init; }
+        public JsRect[]? Rects { get; init; }
+        public JsPoint[][]? Strokes { get; init; }
+        public string? Shape { get; init; }
+        public double? StartX { get; init; }
+        public double? StartY { get; init; }
+        public double? EndX { get; init; }
+        public double? EndY { get; init; }
+        public string? Text { get; init; }
+        public double? X { get; init; }
+        public double? Y { get; init; }
+        public string? ImageBase64 { get; init; }
+        public double? Width { get; init; }
+        public double? Height { get; init; }
+    }
+
+    private sealed class JsRect
+    {
+        public double X { get; init; }
+        public double Y { get; init; }
+        public double W { get; init; }
+        public double H { get; init; }
+    }
+
+    private sealed class JsPoint
+    {
+        public double X { get; init; }
+        public double Y { get; init; }
     }
 }

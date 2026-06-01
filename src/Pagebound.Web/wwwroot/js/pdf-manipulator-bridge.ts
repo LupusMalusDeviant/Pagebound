@@ -22,7 +22,9 @@ import {
   PDFOptionList,
   StandardFonts,
   rgb,
-  degrees
+  degrees,
+  BlendMode,
+  LineCapStyle
 } from "pdf-lib";
 import * as pdfjsLib from "pdfjs-dist";
 
@@ -600,6 +602,175 @@ export async function stampPdf(pdfBytes: Uint8Array, opts: StampOptions): Promis
   });
 
   return await doc.save({ useObjectStreams: false });
+}
+
+// ============================================================================
+// Annotationen einbrennen / Flatten (FA — Richtung 1.0)
+// ----------------------------------------------------------------------------
+// Brennt Sidecar-Annotationen dauerhaft in die PDF: Highlights, Ink (Freihand),
+// Formen (Rechteck/Linie/Pfeil), Notiz (Marker-Karte + Text) und Signaturen.
+// Reader-Koordinaten sind 0..1 mit Origin OBEN-LINKS; pdf-lib zeichnet in Punkten
+// mit Origin UNTEN-LINKS → pro Seite wird umgerechnet. Entspricht
+// JsPdfLibManipulator.FlattenAnnotationsAsync (projiziert die Domain-Typen).
+// ============================================================================
+
+export interface FlattenItem {
+  kind: "highlight" | "ink" | "shape" | "note" | "signature";
+  pageNumber: number;
+  color?: string | null;
+  opacity?: number | null;
+  /** Strichbreite als Anteil der Seitenbreite (wie im Reader). */
+  strokeWidth?: number | null;
+  rects?: { x: number; y: number; w: number; h: number }[] | null;
+  strokes?: { x: number; y: number }[][] | null;
+  shape?: "rectangle" | "line" | "arrow" | null;
+  startX?: number; startY?: number; endX?: number; endY?: number;
+  text?: string | null;
+  x?: number; y?: number;
+  imageBase64?: string | null;
+  width?: number; height?: number;
+}
+
+function hexToRgbColor(hex: string | null | undefined, fallback = rgb(0, 0, 0)) {
+  if (!hex) return fallback;
+  let h = hex.trim().replace(/^#/, "");
+  if (h.length === 3) h = h.split("").map((c) => c + c).join("");
+  if (h.length !== 6 || /[^0-9a-fA-F]/.test(h)) return fallback;
+  return rgb(
+    parseInt(h.slice(0, 2), 16) / 255,
+    parseInt(h.slice(2, 4), 16) / 255,
+    parseInt(h.slice(4, 6), 16) / 255
+  );
+}
+
+function wrapText(font: any, text: string, size: number, maxWidth: number): string[] {
+  const lines: string[] = [];
+  for (const para of text.split("\n")) {
+    const words = para.replace(/\s+/g, " ").trim().split(" ").filter(Boolean);
+    if (words.length === 0) { lines.push(""); continue; }
+    let line = "";
+    for (const w of words) {
+      const trial = line ? line + " " + w : w;
+      if (font.widthOfTextAtSize(trial, size) > maxWidth && line) { lines.push(line); line = w; }
+      else line = trial;
+    }
+    if (line) lines.push(line);
+  }
+  return lines;
+}
+
+function stripMarkdown(md: string): string {
+  return (md ?? "")
+    .replace(/```[\s\S]*?```/g, "")
+    .replace(/`([^`]*)`/g, "$1")
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/^\s*[-*+]\s+/gm, "• ")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/(\*|_){1,3}([^*_]+)(\*|_){1,3}/g, "$2")
+    .replace(/^>\s?/gm, "")
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .trim();
+}
+
+export async function flattenAnnotations(
+  pdfBytes: Uint8Array,
+  items: FlattenItem[]
+): Promise<Uint8Array> {
+  if (!items || items.length === 0) return pdfBytes;
+  const doc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
+  const pages = doc.getPages();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+
+  for (const it of items) {
+    const page = pages[it.pageNumber - 1];
+    if (!page) continue;
+    const { width: pw, height: ph } = page.getSize();
+    const flipY = (yTop: number) => ph - yTop * ph; // 0..1 oben → Punkte unten
+    const color = hexToRgbColor(it.color);
+    const thickness = Math.max(0.5, (it.strokeWidth ?? 0.004) * pw);
+
+    if (it.kind === "highlight" && it.rects) {
+      for (const r of it.rects) {
+        page.drawRectangle({
+          x: r.x * pw,
+          y: ph - (r.y + r.h) * ph,
+          width: r.w * pw,
+          height: r.h * ph,
+          color,
+          opacity: clampNum(it.opacity ?? 0.85, 0.05, 1),
+          blendMode: BlendMode.Multiply, // wie der Reader (mix-blend-mode: multiply)
+        });
+      }
+    } else if (it.kind === "ink" && it.strokes) {
+      for (const stroke of it.strokes) {
+        if (stroke.length === 1) {
+          page.drawCircle({ x: stroke[0].x * pw, y: flipY(stroke[0].y), size: thickness / 2, color });
+          continue;
+        }
+        for (let i = 1; i < stroke.length; i++) {
+          page.drawLine({
+            start: { x: stroke[i - 1].x * pw, y: flipY(stroke[i - 1].y) },
+            end: { x: stroke[i].x * pw, y: flipY(stroke[i].y) },
+            thickness, color, lineCap: LineCapStyle.Round,
+          });
+        }
+      }
+    } else if (it.kind === "shape") {
+      const sx = (it.startX ?? 0) * pw, sy = flipY(it.startY ?? 0);
+      const ex = (it.endX ?? 0) * pw, ey = flipY(it.endY ?? 0);
+      if (it.shape === "rectangle") {
+        page.drawRectangle({
+          x: Math.min(sx, ex), y: Math.min(sy, ey),
+          width: Math.abs(ex - sx), height: Math.abs(ey - sy),
+          borderColor: color, borderWidth: thickness, opacity: 0, // nur Rahmen, keine Füllung
+        });
+      } else if (it.shape === "line") {
+        page.drawLine({ start: { x: sx, y: sy }, end: { x: ex, y: ey }, thickness, color, lineCap: LineCapStyle.Round });
+      } else if (it.shape === "arrow") {
+        const dx = ex - sx, dy = ey - sy;
+        const len = Math.hypot(dx, dy) || 1;
+        const ux = dx / len, uy = dy / len;
+        const headLen = Math.max(6, thickness * 4);
+        const headW = headLen * 0.8;
+        const bcx = ex - ux * headLen, bcy = ey - uy * headLen; // Basis-Mitte der Spitze
+        const px = -uy, py = ux;                                 // Perpendikular
+        const c1x = bcx + px * (headW / 2), c1y = bcy + py * (headW / 2);
+        const c2x = bcx - px * (headW / 2), c2y = bcy - py * (headW / 2);
+        // Schaft endet an der Spitzen-Basis → keine runde Endkappe als „Punkt".
+        page.drawLine({ start: { x: sx, y: sy }, end: { x: bcx, y: bcy }, thickness, color, lineCap: LineCapStyle.Round });
+        // Gefüllte Spitze via SVG-Pfad in Oben-Links-Koordinaten ({x:0,y:ph}-Idiom).
+        page.drawSvgPath(`M ${ex} ${ph - ey} L ${c1x} ${ph - c1y} L ${c2x} ${ph - c2y} Z`, { x: 0, y: ph, color });
+      }
+    } else if (it.kind === "note") {
+      const size = 9, pad = 6, lineH = size * 1.35;
+      const cardW = Math.min(0.3 * pw, 220);
+      const txt = stripMarkdown(it.text ?? "");
+      const lines = (txt ? wrapText(font, txt, size, cardW - 2 * pad) : ["(Notiz)"]).slice(0, 14);
+      const cardH = pad * 2 + lines.length * lineH;
+      let x = clampNum((it.x ?? 0) * pw, 2, Math.max(2, pw - cardW - 2));
+      let yTop = clampNum((it.y ?? 0) * ph, 2, Math.max(2, ph - cardH - 2));
+      const yBl = ph - yTop - cardH;
+      page.drawRectangle({ x, y: yBl, width: cardW, height: cardH, color, opacity: 0.92, borderColor: rgb(0, 0, 0), borderWidth: 0.5, borderOpacity: 0.25 });
+      lines.forEach((ln, i) => {
+        page.drawText(ln, { x: x + pad, y: yBl + cardH - pad - size - i * lineH, size, font, color: rgb(0.12, 0.12, 0.12) });
+      });
+    } else if (it.kind === "signature" && it.imageBase64) {
+      try {
+        const img = await doc.embedPng(base64ToBytes(it.imageBase64));
+        page.drawImage(img, {
+          x: (it.x ?? 0) * pw,
+          y: ph - ((it.y ?? 0) + (it.height ?? 0)) * ph,
+          width: (it.width ?? 0) * pw,
+          height: (it.height ?? 0) * ph,
+        });
+      } catch (e) {
+        console.warn("[pagebound] flatten: Signatur-Bild nicht einbettbar:", e);
+      }
+    }
+  }
+
+  doc.setProducer("Pagebound Flatten");
+  return await doc.save({ updateMetadata: false });
 }
 
 // ============================================================================

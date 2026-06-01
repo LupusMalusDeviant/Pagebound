@@ -371,6 +371,13 @@
                 </button>
                 <button type="button"
                         class="rounded border border-pb-border bg-pb-bg px-2 py-0.5 text-pb-fg-muted hover:text-pb-fg disabled:opacity-40 disabled:cursor-not-allowed"
+                        disabled="@(_isFlattening || _annotations.Count == 0 || _originalPdfBytes is null)"
+                        title="@(_annotations.Count == 0 ? L.T("reader.flatten.empty") : L.T("reader.flatten.title"))"
+                        @onclick="FlattenAnnotationsAsync">
+                    @(_isFlattening ? L.T("reader.flatten.running") : L.T("reader.flatten.button"))
+                </button>
+                <button type="button"
+                        class="rounded border border-pb-border bg-pb-bg px-2 py-0.5 text-pb-fg-muted hover:text-pb-fg disabled:opacity-40 disabled:cursor-not-allowed"
                         disabled="@(_isExportingSidecar || _annotations.Count == 0)"
                         title="@(_annotations.Count == 0 ? L.T("reader.sidecar.exportEmpty") : L.T("reader.sidecar.exportTitle"))"
                         @onclick="ExportSidecarAsync">
@@ -1222,6 +1229,7 @@
     private string? _currentFilename;
     private bool _isExporting;
     private bool _isExportingSidecar;
+    private bool _isFlattening;
     // FA-072: Name des aktiven Sidecar-Workspace (null = keiner gesetzt), wird beim
     // PDF-Öffnen geladen und steuert die Sichtbarkeit des "In Workspace speichern".
     private string? _workspaceName;
@@ -2674,6 +2682,50 @@
         finally
         {
             _isSavingSignedPdf = false;
+        }
+    }
+
+    // „Annotationen einbrennen": brennt ALLE Sidecar-Annotationen (Highlights,
+    // Notizen, Ink, Formen, Signaturen) fest in die PDF-Bytes und lädt das
+    // Ergebnis als <name>.flach.pdf herunter. Die Sidecar/Originaldatei bleibt
+    // unangetastet — das Ergebnis ist eine eigenständige, „flache" PDF.
+    private async Task FlattenAnnotationsAsync()
+    {
+        if (_originalPdfBytes is null || _annotations.Count == 0 || _isFlattening) return;
+
+        _isFlattening = true;
+        _errorMessage = null;
+        try
+        {
+            using var ms = new MemoryStream(_originalPdfBytes);
+            var flattened = await Manipulator.FlattenAnnotationsAsync(ms, _annotations, CancellationToken.None);
+
+            var baseName = !string.IsNullOrWhiteSpace(_currentFilename)
+                ? System.IO.Path.GetFileNameWithoutExtension(_currentFilename)
+                : (_handle?.Title ?? "pagebound");
+            var safeBase = string.Concat(baseName.Select(c =>
+                char.IsLetterOrDigit(c) || c is '_' or '-' or '.' or ' ' ? c : '_'));
+
+            await JS.InvokeVoidAsync(
+                "pageboundShortcuts.downloadBytes",
+                $"{safeBase}.flach.pdf",
+                Convert.ToBase64String(flattened),
+                "application/pdf");
+        }
+        catch (Exception ex)
+        {
+            var details = new System.Text.StringBuilder();
+            var walker = ex;
+            while (walker is not null)
+            {
+                details.AppendLine($"{walker.GetType().FullName}: {walker.Message}");
+                walker = walker.InnerException;
+            }
+            _errorMessage = $"Annotationen konnten nicht eingebrannt werden:\n{details}";
+        }
+        finally
+        {
+            _isFlattening = false;
         }
     }
 
