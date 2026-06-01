@@ -1,27 +1,49 @@
 # pagebound-pdf-mcp-server
 
 Ein **MCP-Server**, der Pagebounds PDF-Operationen für **LLM-Agenten** bereitstellt
-— über **stdio**, also **lokal und ohne Token/Auth**. Es werden dieselben Engines
-wie in der Web-App genutzt: **pdf-lib** (Struktur/Manipulation) und **pdfjs-dist**
-(Text). Keine nativen Abhängigkeiten, kein Netzwerk: alles läuft lokal auf dem
-Dateisystem.
+— **tokenlos**, über zwei Transporte:
+
+- **stdio** (Default) — lokaler Unterprozess, bequem mit **Datei-Pfaden**.
+- **Streamable HTTP** (`MCP_TRANSPORT=http`) — der **gehostete**, „releaste" Endpunkt
+  unter `…/mcp`; **tokenlos, aber mit Größen-/Seiten-Limits**. I/O als **base64**.
+
+Es werden dieselben Engines wie in der Web-App genutzt: **pdf-lib** (Struktur/
+Manipulation) und **pdfjs-dist** (Text). Keine nativen Abhängigkeiten, kein
+Netzwerkzugriff während der Verarbeitung.
+
+## Gehosteter Endpunkt (tokenlos + Limits)
+
+```
+https://pagebound.app.lupusmalus.dev/mcp
+```
+
+Streamable HTTP, **kein Token/Login**. Schutzschranken statt Auth:
+
+- max. **25 MB** pro PDF/Bild (`MCP_MAX_PDF_BYTES`),
+- max. **1000 Seiten** pro Dokument (`MCP_MAX_PAGES`),
+- HTTP-Body-Limit ~40 MB.
+
+Im HTTP-Modus gibt es **kein Dateisystem**: Eingaben kommen als `dataBase64`
+(bzw. `dataBase64List` / `imagesBase64`), Ergebnisse kommen als `dataBase64`
+zurück. `path`/`outputPath` sind dem lokalen stdio-Betrieb vorbehalten.
 
 ## Tools
 
-Alle schreibenden Tools erzeugen eine **neue** Datei (Eingaben bleiben unangetastet).
-Ein- und Ausgaben sind **Dateipfade** (am besten absolut) — so bleiben die
-Tool-Ergebnisse klein, statt riesige PDFs als Base64 durch den Kontext zu schieben.
+Jedes Tool nimmt die Eingabe **entweder** als lokalen `path` **oder** inline als
+`dataBase64`. Schreibende Tools geben das Ergebnis nach `outputPath` (geschrieben,
+gibt den Pfad zurück) **oder** — wenn `outputPath` fehlt — als `dataBase64` zurück.
+Eingaben bleiben stets unangetastet (neue Datei/neue Bytes).
 
 | Tool | Zweck |
 |---|---|
 | `pdf_info` | Seitenzahl, Titel/Autor, Seitengrößen (read-only) |
 | `pdf_extract_text` | Text-Layer extrahieren, optional pro Seitenauswahl (read-only) |
-| `pdf_merge` | mehrere PDFs zusammenführen |
+| `pdf_merge` | mehrere PDFs zusammenführen (`paths` / `dataBase64List`) |
 | `pdf_extract_pages` | Seiten (in Reihenfolge) in eine neue PDF kopieren — auch zum Splitten |
 | `pdf_delete_pages` | Seiten entfernen |
 | `pdf_rotate_pages` | Seiten um ±90/180/270° drehen |
 | `pdf_reorder_pages` | Seiten neu anordnen |
-| `images_to_pdf` | PNG/JPG-Bilder zu einer PDF (eine Seite je Bild) |
+| `images_to_pdf` | PNG/JPG-Bilder zu einer PDF (`imagePaths` / `imagesBase64`) |
 
 Seitenauswahl überall als 1-basierte Angabe: `"1-3,5,8-10"` (Bereiche dürfen
 rückwärts laufen, z. B. `"3-1"`).
@@ -35,11 +57,11 @@ npm run build      # → dist/index.js
 npm run smoke      # optionaler Selbsttest aller Operationen
 ```
 
-## Einbinden (ohne Token)
+## Lokal einbinden (stdio, ohne Token)
 
 Der Server spricht JSON-RPC über **stdio** — der Agent startet ihn als
-Unterprozess, es gibt **keinen Token und keinen Login**. Er läuft mit den
-Dateirechten des Agenten.
+Unterprozess, **kein Token, kein Login**. Er läuft mit den Dateirechten des Agenten,
+daher sind hier `path`/`outputPath` praktisch.
 
 **Claude Desktop** (`claude_desktop_config.json`):
 
@@ -60,9 +82,7 @@ Dateirechten des Agenten.
 claude mcp add pagebound-pdf -- node /ABSOLUTER/PFAD/zu/Pagebound/mcp/dist/index.js
 ```
 
-**Beliebiger MCP-Client:** Befehl `node`, Argument `dist/index.js`, Transport stdio.
-
-### Schnelltest
+### Schnelltest (stdio)
 
 ```bash
 printf '%s\n' \
@@ -72,14 +92,41 @@ printf '%s\n' \
  | node dist/index.js
 ```
 
-## Beispiel-Workflow (Agentensicht)
+## Remote einbinden (HTTP)
+
+Den gehosteten Endpunkt als Streamable-HTTP-Server eintragen:
+
+```bash
+claude mcp add --transport http pagebound-pdf https://pagebound.app.lupusmalus.dev/mcp
+```
+
+Oder selbst hosten:
+
+```bash
+MCP_TRANSPORT=http PORT=3000 node dist/index.js
+# → POST http://127.0.0.1:3000/mcp   (Health: GET /healthz)
+```
+
+### Schnelltest (HTTP)
+
+```bash
+curl -s https://pagebound.app.lupusmalus.dev/mcp \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
+```
+
+## Beispiel-Workflow (Agentensicht, lokal/stdio)
 
 > „Nimm `/docs/a.pdf` und `/docs/b.pdf`, häng sie zusammen, dreh Seite 1 um 90°
 > und sag mir, was auf der ersten Seite steht."
 
-1. `pdf_merge({ inputs: ["/docs/a.pdf","/docs/b.pdf"], output: "/docs/ab.pdf" })`
-2. `pdf_rotate_pages({ input: "/docs/ab.pdf", pages: "1", degrees: 90, output: "/docs/ab.pdf" })`
-3. `pdf_extract_text({ input: "/docs/ab.pdf", pages: "1" })`
+1. `pdf_merge({ paths: ["/docs/a.pdf","/docs/b.pdf"], outputPath: "/docs/ab.pdf" })`
+2. `pdf_rotate_pages({ path: "/docs/ab.pdf", pages: "1", degrees: 90, outputPath: "/docs/ab.pdf" })`
+3. `pdf_extract_text({ path: "/docs/ab.pdf", pages: "1" })`
+
+Remote dasselbe mit `dataBase64`/`dataBase64List` statt `path`/`paths` und ohne
+`outputPath` (Ergebnis kommt als `dataBase64` zurück).
 
 ## Grenzen (bewusst)
 
@@ -94,6 +141,10 @@ printf '%s\n' \
 
 ## Sicherheit
 
-Der Server liest/schreibt **lokale Dateien**, auf die der Agent ihn zeigt — er
-läuft mit dessen Rechten. Kein Netzwerkzugriff, keine Telemetrie. PDF-Parsing
-ohne Code-Ausführung (pdf-lib strukturell, pdfjs mit `isEvalSupported:false`).
+- **stdio:** liest/schreibt **lokale Dateien**, auf die der Agent ihn zeigt — läuft
+  mit dessen Rechten. Kein Netzwerk, keine Telemetrie.
+- **HTTP (gehostet):** **kein Dateisystem** (nur base64-I/O), **tokenlos + Limits**
+  (Größe/Seiten/Body). Container läuft als non-root mit read-only Rootfs und
+  `no-new-privileges`. Stateless JSON — pro Request ein frischer Server.
+- PDF-Parsing ohne Code-Ausführung (pdf-lib strukturell, pdfjs mit
+  `isEvalSupported:false`).

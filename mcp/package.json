@@ -1,7 +1,7 @@
 {
   "name": "pagebound-pdf-mcp-server",
   "version": "1.0.0",
-  "description": "Tokenless stdio MCP server exposing Pagebound's PDF operations (merge, split, rotate, delete, reorder, text extraction, images→PDF) to LLM agents. Reuses the same engines as the Pagebound web app: pdf-lib + pdfjs-dist.",
+  "description": "Tokenless MCP server exposing Pagebound's PDF operations (merge, split, rotate, delete, reorder, text extraction, images→PDF) to LLM agents over stdio (local) or Streamable HTTP (hosted). Reuses the same engines as the Pagebound web app: pdf-lib + pdfjs-dist.",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
@@ -21,11 +21,13 @@
   "license": "Apache-2.0",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",
+    "express": "^5.1.0",
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^4.10.38",
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@types/express": "^5.0.0",
     "@types/node": "^22.10.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"

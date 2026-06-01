@@ -14,5 +14,15 @@ pagebound.app.lupusmalus.dev {
         -Server
     }
 
-    reverse_proxy pagebound:80
+    # Tokenloser MCP-Endpunkt (Streamable HTTP) für LLM-Agenten. Pfad bleibt /mcp
+    # (kein handle_path-Strip), da der Node-Server genau dort lauscht. Limits
+    # (Größe/Seiten) erzwingt der MCP-Container selbst — siehe docker-compose.
+    handle /mcp* {
+        reverse_proxy pagebound-mcp:3000
+    }
+
+    # Alles andere: die statische Blazor-WASM-App (nginx mit Blazor-CSP).
+    handle {
+        reverse_proxy pagebound:80
+    }
 }
