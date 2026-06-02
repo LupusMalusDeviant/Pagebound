@@ -332,10 +332,43 @@ Eingabe: 'path'/'dataBase64', 'values'. Ausgabe: 'outputPath' oder 'dataBase64'.
     const note = r.skipped.length ? ` (${r.skipped.length} übersprungen: ${r.skipped.join(", ")})` : "";
     return ok({ filled: r.filled, skipped: r.skipped, ...(await emitPdf(r.bytes, a.outputPath)) }, `${r.filled} Feld(er) ausgefüllt${a.flatten ? " + eingebrannt" : ""}${note}.`);
   }));
+
+  server.registerTool("pdf_diff", {
+    title: "PDFs vergleichen (Text-Diff)",
+    description: `Vergleicht den Text-Layer zweier PDFs seitenweise (zeilenbasierter Diff) — um Versionsänderungen zu finden ("was hat sich von A zu B geändert?"). Read-only, kein OCR (nutzt den vorhandenen Text-Layer).
+Eingabe: A als 'pathA'/'dataBase64A', B als 'pathB'/'dataBase64B'.
+Returns: { changed, pageCountA, pageCountB, addedLines, removedLines, pages: [{ page, added[], removed[] }] }. Ausgabe wird bei ~25k Zeichen gekürzt.`,
+    inputSchema: {
+      pathA: z.string().optional().describe("Lokaler Pfad zur PDF A (stdio)."),
+      dataBase64A: z.string().optional().describe("PDF A als base64 (remote)."),
+      pathB: z.string().optional().describe("Lokaler Pfad zur PDF B (stdio)."),
+      dataBase64B: z.string().optional().describe("PDF B als base64 (remote)."),
+    },
+    annotations: readAnn,
+  }, guard(async (a: { pathA?: string; dataBase64A?: string; pathB?: string; dataBase64B?: string }) => {
+    const [bytesA, bytesB] = await Promise.all([
+      loadPdf({ path: a.pathA, dataBase64: a.dataBase64A }),
+      loadPdf({ path: a.pathB, dataBase64: a.dataBase64B }),
+    ]);
+    const r = await pdf.diffText(bytesA, bytesB);
+    const summary = r.changed
+      ? `${r.pages.length} Seite(n) geändert: +${r.addedLines} / −${r.removedLines} Zeile(n).`
+      : "Kein Text-Unterschied gefunden.";
+    const detail = r.pages
+      .map((pg) => {
+        const rem = pg.removed.map((l) => `- ${l}`).join("\n");
+        const add = pg.added.map((l) => `+ ${l}`).join("\n");
+        return `--- Seite ${pg.page} ---\n${[rem, add].filter(Boolean).join("\n")}`;
+      })
+      .join("\n\n");
+    let text = detail ? `${summary}\n\n${detail}` : summary;
+    if (text.length > CHARACTER_LIMIT) text = text.slice(0, CHARACTER_LIMIT) + "\n\n[gekürzt]";
+    return ok(r as unknown as Record<string, unknown>, text);
+  }));
 }
 
 function buildServer(): McpServer {
-  const server = new McpServer({ name: "pagebound-pdf-mcp-server", version: "1.1.0" });
+  const server = new McpServer({ name: "pagebound-pdf-mcp-server", version: "1.2.0" });
   registerTools(server);
   return server;
 }

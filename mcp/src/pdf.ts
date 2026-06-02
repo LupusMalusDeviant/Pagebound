@@ -467,3 +467,84 @@ export async function extractText(bytes: Uint8Array, pages?: string): Promise<{ 
 function round(n: number): number {
   return Math.round(n * 100) / 100;
 }
+
+// --- Text diff between two PDFs ----------------------------------------------
+
+export interface PdfPageDiff {
+  page: number;
+  added: string[];
+  removed: string[];
+}
+
+export interface PdfDiffResult {
+  pageCountA: number;
+  pageCountB: number;
+  changed: boolean;
+  addedLines: number;
+  removedLines: number;
+  /** Nur Seiten mit Unterschieden. */
+  pages: PdfPageDiff[];
+}
+
+// Schutz gegen O(n·m)-Blowup der LCS-Matrix bei pathologisch langen Seiten.
+const MAX_DIFF_LINES = 4000;
+
+/**
+ * Zeilenbasierter Diff via LCS. Liefert die in B hinzugekommenen und die aus A
+ * entfernten Zeilen (gemeinsame Zeilen zählen als unverändert).
+ */
+function lineDiff(a: string[], b: string[]): { added: string[]; removed: string[] } {
+  const n = Math.min(a.length, MAX_DIFF_LINES);
+  const m = Math.min(b.length, MAX_DIFF_LINES);
+  const dp: number[][] = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    }
+  }
+  const added: string[] = [];
+  const removed: string[] = [];
+  let i = 0;
+  let j = 0;
+  while (i < n && j < m) {
+    if (a[i] === b[j]) { i++; j++; }
+    else if (dp[i + 1][j] >= dp[i][j + 1]) { removed.push(a[i]); i++; }
+    else { added.push(b[j]); j++; }
+  }
+  while (i < n) { removed.push(a[i]); i++; }
+  while (j < m) { added.push(b[j]); j++; }
+  return { added, removed };
+}
+
+const splitLines = (text: string): string[] => text.split("\n").map((s) => s.trim()).filter(Boolean);
+
+/**
+ * Vergleicht den Text-Layer zweier PDFs seitenweise (kein OCR). Gut, um
+ * Versionsunterschiede zu finden ("was hat sich von A zu B geändert?").
+ */
+export async function diffText(a: Uint8Array, b: Uint8Array): Promise<PdfDiffResult> {
+  const ta = await extractText(a);
+  const tb = await extractText(b);
+  const maxPages = Math.max(ta.pageCount, tb.pageCount);
+  const pages: PdfPageDiff[] = [];
+  let addedLines = 0;
+  let removedLines = 0;
+  for (let p = 1; p <= maxPages; p++) {
+    const linesA = splitLines(ta.pages.find((x) => x.page === p)?.text ?? "");
+    const linesB = splitLines(tb.pages.find((x) => x.page === p)?.text ?? "");
+    const { added, removed } = lineDiff(linesA, linesB);
+    if (added.length || removed.length) {
+      pages.push({ page: p, added, removed });
+      addedLines += added.length;
+      removedLines += removed.length;
+    }
+  }
+  return {
+    pageCountA: ta.pageCount,
+    pageCountB: tb.pageCount,
+    changed: pages.length > 0,
+    addedLines,
+    removedLines,
+    pages,
+  };
+}

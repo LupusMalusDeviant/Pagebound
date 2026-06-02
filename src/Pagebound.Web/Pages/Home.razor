@@ -120,6 +120,13 @@
         yield return ("1.0", L.T("home.road.v1"), "ok", done);
         yield return ("1.0+", L.T("home.road.beta.suite"), "ok", done);
         yield return ("1.0+", L.T("home.road.beta.mcp"), "ok", done);
-        yield return ("next", L.T("home.road.next"), "warn", pending);
+
+        // Ausblick (geplant) — priorisiert aus der Wettbewerbsanalyse.
+        yield return ("1.1", L.T("home.road.next.diff"), "muted", pending);
+        yield return ("1.1", L.T("home.road.next.tables"), "muted", pending);
+        yield return ("1.2", L.T("home.road.next.forms"), "muted", pending);
+        yield return ("1.2", L.T("home.road.next.sign"), "muted", pending);
+        yield return ("1.3", L.T("home.road.next.mobile"), "muted", pending);
+        yield return ("next", L.T("home.road.next"), "muted", pending);
     }
 }

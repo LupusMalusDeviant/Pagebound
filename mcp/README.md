@@ -38,6 +38,7 @@ Eingaben bleiben stets unangetastet (neue Datei/neue Bytes).
 |---|---|
 | `pdf_info` | Seitenzahl, Titel/Autor, Seitengrößen (read-only) |
 | `pdf_extract_text` | Text-Layer extrahieren, optional pro Seitenauswahl (read-only) |
+| `pdf_diff` | Text zweier PDFs seitenweise vergleichen — Versionsänderungen finden (read-only) |
 | `pdf_merge` | mehrere PDFs zusammenführen (`paths` / `dataBase64List`) |
 | `pdf_extract_pages` | Seiten (in Reihenfolge) in eine neue PDF kopieren |
 | `pdf_split` | PDF an Schnittpunkten (`afterPages`) in **mehrere** Teil-PDFs aufteilen |

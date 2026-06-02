@@ -137,6 +137,15 @@ async function main() {
     check("pdf_encrypt verification ran", false, String(err));
   }
 
+  // diff (text comparison between two PDFs)
+  const diffA = await makeSample(2, "Alpha");
+  const diffB = await makeSample(2, "Beta");
+  const diff = await pdf.diffText(diffA, diffB);
+  check("pdf_diff detects changes on both pages", diff.changed && diff.pages.length === 2, JSON.stringify({ changed: diff.changed, pages: diff.pages.length }));
+  check("pdf_diff counts added+removed lines", diff.addedLines === 2 && diff.removedLines === 2, JSON.stringify({ a: diff.addedLines, r: diff.removedLines }));
+  const same = await pdf.diffText(await makeSample(2, "Same"), await makeSample(2, "Same"));
+  check("pdf_diff reports no change for identical text", same.changed === false && same.pages.length === 0, JSON.stringify(same.changed));
+
   process.stdout.write(failures === 0 ? "\nALL PASS\n" : `\n${failures} FAILURE(S)\n`);
   process.exit(failures === 0 ? 0 : 1);
 }

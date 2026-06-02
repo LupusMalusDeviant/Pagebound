@@ -40,7 +40,7 @@ Pagebound ist ein quelloffenes PDF-Werkzeug, das den Adobe Acrobat Reader im All
 - **Library** — automatisch erfasst, Tags, Suche, drei Ansichten (Liste/Tabelle/Raster), optionaler zentraler Sidecar-Workspace-Ordner, JSON-Sidecar-Export/Import
 - **Markdown-Export** — Highlights + Notizen, Obsidian-kompatibel (YAML-Frontmatter, Wikilinks)
 - **WYSIWYG-Designer** (`/editor`) — Flyer, Briefe, Rechnungen (mit §-19-Vorlage), Geschäftsbriefe (DIN 5008) und 16:9-Folien direkt im Browser entwerfen: Block-Editor (Überschrift/Text/Bild/Form/Tabelle), Text- & Hintergrundfarben, Schnittmarken; Export als **pixelgenaues PDF** (Print-CSS), HTML oder JSON; Entwürfe lokal in IndexedDB
-- **MCP-Server für LLM-Agenten** — Pagebounds PDF-Operationen **tokenlos**, lokal über **stdio** oder **gehostet** über **Streamable HTTP** (`…/mcp`); **13 Tools** (Seiten-Werkzeuge, Split, Stempeln, AES-256-Verschlüsselung, AcroForm-Formulare, Text, Bilder→PDF), base64-I/O mit Größen-/Seiten-Limits
+- **MCP-Server für LLM-Agenten** — Pagebounds PDF-Operationen **tokenlos**, lokal über **stdio** oder **gehostet** über **Streamable HTTP** (`…/mcp`); **14 Tools** (Seiten-Werkzeuge, Split, Stempeln, AES-256-Verschlüsselung, AcroForm-Formulare, Text, **Text-Diff/Vergleich**, Bilder→PDF), base64-I/O mit Größen-/Seiten-Limits
 - **Darstellung** — „Warm Ink"-Design, Settings-Panel mit Theme (Hell/Dunkel), **8 Akzentfarben**, Schriftgröße, Dichte & Bewegung; DE/EN, Offline-PWA, keine Telemetrie
 
 ## Quick-Start
@@ -84,7 +84,24 @@ Pagebound wird in **10 nutzbaren Releases** (0.1 → 1.0) entwickelt. Jeder Rele
 
 **Zusatz** (außerhalb Pflichtenheft): „Warm Ink"-Redesign mit Settings/Tweaks (Dark/Light, 8 Akzentfarben, Schriftgröße, Dichte, Bewegung), DE/EN-Sprachumschaltung, Sidecar Export/Import, pixel-genauer Text-Layer via PDF.js nativem `TextLayer`.
 
-**Beta-Erweiterungen** (nach 1.0-Inhalt): Stempeln (Wasserzeichen/Seitenzahlen), **Annotationen einbrennen**, **Schwärzen/Redaktion**, **Reader-Komfort** (Nachtmodus + fortlaufende Ansicht), **WYSIWYG-Designer** (`/editor`), ein **gehosteter MCP-Server** (auf **13 Tools** ausgebaut — Split, Stempeln, AES-256-Verschlüsselung und AcroForm-Formulare ergänzt, sodass Agenten alle Canvas-freien Web-App-Operationen nutzen können) und ein **Live-Deployment** unter [pagebound.app.lupusmalus.dev](https://pagebound.app.lupusmalus.dev).
+**Beta-Erweiterungen** (nach 1.0-Inhalt): Stempeln (Wasserzeichen/Seitenzahlen), **Annotationen einbrennen**, **Schwärzen/Redaktion**, **Reader-Komfort** (Nachtmodus + fortlaufende Ansicht), **WYSIWYG-Designer** (`/editor`, mehrseitig — Flyer Vorder-/Rückseite, Folien-Decks, Seiten-Hintergrundbilder), **100 % self-hosted OCR** (kein CDN, keine externen Requests), ein **gehosteter MCP-Server** (auf **14 Tools** ausgebaut — Split, Stempeln, AES-256-Verschlüsselung, AcroForm-Formulare und **Text-Diff/Vergleich** ergänzt) und ein **Live-Deployment** unter [pagebound.app.lupusmalus.dev](https://pagebound.app.lupusmalus.dev).
+
+### Ausblick / Geplant
+
+Aus der Wettbewerbsanalyse priorisiert (Nutzen ↔ Aufwand). ✅ = bereits umgesetzt.
+
+| Vorhaben | Nutzen | Aufwand | Status |
+|---|---|---|---|
+| **PDF-Vergleich (Text-Diff)** — als MCP-Tool ✅, im Reader (Split-View-Diff) geplant | hoch | M | MCP ✅ / Reader geplant |
+| **Redaktions-Audit** (Report: keine Resttext-Layer, Hash vorher/nachher) | hoch (Kanzlei-Vertrauen) | S–M | geplant |
+| **Tabellen-Extraktion** (PDF→CSV/strukturiert), auch als MCP-Tool | hoch | M–L | geplant |
+| **Weitere MCP-Tools** (Konvertierung, Tabellen, Metadaten) | hoch | M | geplant |
+| **Formular-*Erstellung*** (Felder anlegen, nicht nur ausfüllen) | mittel-hoch | L | geplant |
+| **PDF/A-Export** (Archivierung) + **A11y-Tagging** (PDF/UA) | hoch (Behörden/Recht) | M–L | geplant |
+| **Digitale Signaturen (PAdES/eIDAS)** — zertifikatsbasiert statt Bild+Hash | sehr hoch | XL | geplant |
+| **Mobile-/Touch-UX-Politur** (Tablet-Annotation, Stift) | mittel-hoch | M | geplant |
+| **Große Dateien** (Streaming-/Lazy-Rendering jenseits der WASM-RAM-Grenze) | mittel | L | geplant |
+| **Öffentlicher Release** (Tag) + gespeicherte Batch-Regeln (FA-052) | — | S | geplant |
 
 Details: [docs/02-lastenheft.md](docs/02-lastenheft.md) Abschnitt 6.
 
