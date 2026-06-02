@@ -14,18 +14,18 @@ Liste fasst den aktuellen Funktionsumfang zusammen.
 ### Reader & Annotation
 - Viewer mit Seitennavigation, Zoom, Volltext-Suche, Outline, Thumbnails
 - Nachtmodus + fortlaufende Leseansicht
-- Split-View für zwei PDFs (eigene Navigation/Suche je Pane, optionales Sync-Scrollen)
+- Split-View für zwei PDFs (eigene Navigation/Suche je Pane, optionales Sync-Scrollen, Text-Vergleich beider PDFs)
 - Annotationen: Highlights (5 Farben), Sticky Notes mit Markdown, Stift, Formen (Rechteck/Pfeil/Linie)
-- Annotationen einbrennen (Flatten) und echte Schwärzung/Redaktion (Inhalt wird physisch entfernt)
+- Annotationen einbrennen (Flatten) und echte Schwärzung/Redaktion (Inhalt wird physisch entfernt) — mit optionalem Audit-Report (SHA-256 vorher/nachher + Resttext-Prüfung)
 - PNG-Signatur mit Hash-Integritäts-Badge
 
 ### Werkzeuge
 - Seiten-Operationen: Merge, Split, Reorder, Delete, Rotate, JPEG-Komprimierung
 - AcroForms ausfüllen (alle Standard-Feldtypen), Stempeln (Wasserzeichen / Bates-Seitenzahlen)
-- Bilder → PDF, Konvertierung PDF → PNG/JPG/Text/HTML, Stapelverarbeitung (ZIP)
+- Bilder → PDF, Konvertierung PDF → PNG/JPG/Text/HTML/CSV (Best-Effort-Tabellen-Extraktion), Stapelverarbeitung (ZIP) mit gespeicherten Regeln
 - AES-256-Verschlüsselung (WebCrypto, gegen PDF.js verifiziert)
 - OCR (Tesseract.js, 100 % self-hosted — kein CDN)
-- PDF-Vergleich / Text-Diff unter `/compare`
+- PDF-Vergleich / Text-Diff unter `/compare` und direkt in der Split-View
 
 ### Library & Export
 - Automatisch erfasste Library mit Tags, Suche, drei Ansichten (Liste/Tabelle/Raster), zentralem Sidecar-Workspace
@@ -35,9 +35,9 @@ Liste fasst den aktuellen Funktionsumfang zusammen.
 - WYSIWYG-Block-Editor unter `/editor`: mehrseitig, Vorlagen (Rechnung § 19, DIN-5008-Brief, Flyer, 16:9-Folie), Text-/Hintergrundfarben, Seiten-Hintergrundbilder, Export als PDF/HTML/JSON
 
 ### MCP-Server
-- Tokenloser MCP-Server für LLM-Agenten (stdio + Streamable HTTP), 16 Tools, gehostet unter `…/mcp` mit Größen-/Seiten-Limits
+- Tokenloser MCP-Server für LLM-Agenten (stdio + Streamable HTTP), 17 Tools (inkl. `pdf_extract_tables`), gehostet unter `…/mcp` mit Größen-/Seiten-Limits
 
 ### Plattform
 - Blazor WebAssembly (.NET 10), „Warm Ink"-Design (8 Akzentfarben, Hell/Dunkel, Dichte/Schriftgröße/Bewegung), DE/EN
-- Offline-PWA, keine Telemetrie, keine externen Requests (CSP `connect-src 'self'`), self-hosted Fonts
+- Offline-PWA mit sanftem Update-Hinweis (neuer Service-Worker → „Neu laden"-Banner statt stillem Stale-Cache), keine Telemetrie, keine externen Requests (CSP `connect-src 'self'`), self-hosted Fonts
 - Docker + nginx Deployment, CI: Build, Unit-Tests, E2E (Playwright), Lighthouse-A11y

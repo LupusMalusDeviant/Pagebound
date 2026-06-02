@@ -27,21 +27,21 @@ Pagebound ist ein quelloffenes PDF-Werkzeug, das den Adobe Acrobat Reader im All
 - **Split-View** — zwei PDFs nebeneinander (eigene Navigation/Annotation/Suche je Pane), ziehbare Trennlinie + optionales Synchron-Scrollen
 - **Annotieren** — Text-Highlights (5 Farben), Sticky Notes mit Markdown-Vorschau, Stift, Rechteck/Pfeil/Linie
 - **Annotationen einbrennen (Flatten)** — Highlights, Notizen, Stift, Formen und Signaturen fest in die PDF brennen → eigenständige „flache" Datei
-- **Schwärzen / Redaktion** — Bereiche dauerhaft schwärzen; der Inhalt darunter wird **entfernt** (echte Redaktion, nicht nur überdeckt)
+- **Schwärzen / Redaktion** — Bereiche dauerhaft schwärzen; der Inhalt darunter wird **entfernt** (echte Redaktion, nicht nur überdeckt), optional mit **Audit-Report** (SHA-256 vorher/nachher + Resttext-Prüfung)
 - **Signieren** — PNG-Signatur platzieren (Drag/Resize) + Signer-Daten + Hash-Integritäts-Badge
 - **Formulare** — AcroForms ausfüllen (Text/Checkbox/Radio/Dropdown/Listbox), editierbar oder geflattet speichern
 - **Seiten-Werkzeuge** — Merge, Split, Neu-Sortieren, Löschen, Drehen, JPEG-Komprimierung
 - **Stempeln** — diagonales Text-Wasserzeichen und/oder Seitenzahlen (Bates) auf jede Seite
 - **Bilder → PDF** — PNG/JPG zu PDF (Seitengröße wählbar, Reihenfolge per Drag & Drop)
-- **Konvertieren** — PDF → PNG/JPG (ZIP, je Seite ein Bild), reiner Text (.txt) oder eigenständiges HTML
-- **Stapelverarbeitung** — mehrere PDFs auf einmal komprimieren / verschlüsseln / → Text, Ergebnis als eine ZIP
+- **Konvertieren** — PDF → PNG/JPG (ZIP, je Seite ein Bild), reiner Text (.txt), eigenständiges HTML oder **CSV** (Best-Effort-Tabellen-Extraktion)
+- **Stapelverarbeitung** — mehrere PDFs auf einmal komprimieren / verschlüsseln / → Text, Ergebnis als eine ZIP; **gespeicherte Regeln** (benannte Presets)
 - **Verschlüsseln** — Passwortschutz mit AES-256 (WebCrypto, gegen PDF.js verifiziert)
 - **OCR** — Tesseract.js für nicht-durchsuchbare PDFs (Scans, Designer-Layouts), **100 % self-hosted** (kein CDN)
 - **Library** — automatisch erfasst, Tags, Suche, drei Ansichten (Liste/Tabelle/Raster), optionaler zentraler Sidecar-Workspace-Ordner, JSON-Sidecar-Export/Import
 - **Markdown-Export** — Highlights + Notizen, Obsidian-kompatibel (YAML-Frontmatter, Wikilinks)
 - **WYSIWYG-Designer** (`/editor`) — Flyer, Briefe, Rechnungen (mit §-19-Vorlage), Geschäftsbriefe (DIN 5008) und 16:9-Folien direkt im Browser entwerfen: mehrseitiger Block-Editor (Überschrift/Text/Bild/Form/Tabelle), Text- & Hintergrundfarben, Seiten-Hintergrundbilder, Schnittmarken; Export als **pixelgenaues PDF** (Print-CSS), HTML oder JSON; Entwürfe lokal in IndexedDB
-- **PDF-Vergleich** (`/compare`) — zwei PDFs auf Text-Ebene vergleichen, wortgenau und seitenweise, komplett lokal
-- **MCP-Server für LLM-Agenten** — Pagebounds PDF-Operationen **tokenlos**, lokal über **stdio** oder **gehostet** über **Streamable HTTP** (`…/mcp`); **16 Tools** (Seiten-Werkzeuge, Split, Stempeln, AES-256-Verschlüsselung, AcroForm-Formulare lesen/ausfüllen/anlegen, Metadaten, Text, Text-Diff/Vergleich, Bilder→PDF), base64-I/O mit Größen-/Seiten-Limits
+- **PDF-Vergleich** — zwei PDFs auf Text-Ebene vergleichen (wortgenau, seitenweise), unter `/compare` **oder direkt in der Split-View**, komplett lokal
+- **MCP-Server für LLM-Agenten** — Pagebounds PDF-Operationen **tokenlos**, lokal über **stdio** oder **gehostet** über **Streamable HTTP** (`…/mcp`); **17 Tools** (Seiten-Werkzeuge, Split, Stempeln, AES-256-Verschlüsselung, AcroForm-Formulare lesen/ausfüllen/anlegen, Metadaten, Text, Text-Diff/Vergleich, Tabellen→CSV, Bilder→PDF), base64-I/O mit Größen-/Seiten-Limits
 - **Darstellung** — „Warm Ink"-Design, Settings-Panel mit Theme (Hell/Dunkel), **8 Akzentfarben**, Schriftgröße, Dichte & Bewegung; DE/EN, Offline-PWA, keine Telemetrie
 
 ## Quick-Start
@@ -72,14 +72,11 @@ Erfordert .NET 10 SDK und Node 20+.
 
 ### Geplant
 
-- **PDF-Vergleich im Reader** — Text-Diff als Split-View (als MCP-Tool `pdf_diff` bereits vorhanden)
-- **Redaktions-Audit** — Report, der bestätigt, dass kein Resttext-Layer zurückbleibt (Hash vorher/nachher)
-- **Tabellen-Extraktion** — PDF → CSV/strukturiert, auch als MCP-Tool
 - **Formular-Builder** im Designer (Feld-Anlegen via MCP `pdf_create_field` ist bereits da)
 - **PDF/A-Export** + **A11y-Tagging** (PDF/UA) für Archivierung & Barrierefreiheit
 - **Digitale Signaturen** (PAdES/eIDAS, zertifikatsbasiert) als Ergänzung zur Bild-+-Hash-Signatur
 - **Mobile-/Touch-Politur** und **Streaming-Rendering** für sehr große Dateien
-- **Gespeicherte Batch-Regeln** + öffentlicher Release-Tag
+- **Öffentlicher Release-Tag** (`v1.0`)
 
 ## Dokumentation
 
