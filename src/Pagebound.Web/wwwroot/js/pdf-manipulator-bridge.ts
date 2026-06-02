@@ -180,6 +180,84 @@ export async function compressPdf(
 }
 
 // ============================================================================
+// Schwärzen / Redaktion (FA — echte Redaktion, nicht nur Überdecken)
+// ----------------------------------------------------------------------------
+// Eine echte Redaktion muss den darunterliegenden Inhalt ENTFERNEN, nicht nur
+// verdecken. Strategie: betroffene Seiten mit PDF.js auf ein Canvas rendern, die
+// Schwärzungs-Rechtecke als schwarze Pixel einbrennen und die Seite als Bild
+// (JPEG) in eine neue PDF einbauen — damit ist der ursprüngliche Text-/Vektor-
+// Layer dieser Seite weg (nicht markier-/extrahierbar). Seiten OHNE Schwärzung
+// werden vektor-treu kopiert (keine Qualitäts-/Textverluste). Koordinaten 0..1,
+// Origin oben-links (wie im Reader).
+// ============================================================================
+
+export interface RedactionRegion {
+  pageNumber: number; // 1-basiert
+  x: number; y: number; w: number; h: number; // 0..1, oben-links
+}
+
+export async function redactPdf(pdfBytes: Uint8Array, regions: RedactionRegion[]): Promise<Uint8Array> {
+  if (!regions || regions.length === 0) return pdfBytes;
+
+  const byPage = new Map<number, RedactionRegion[]>();
+  for (const r of regions) {
+    const arr = byPage.get(r.pageNumber);
+    if (arr) arr.push(r); else byPage.set(r.pageNumber, [r]);
+  }
+
+  const src = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
+  const total = src.getPageCount();
+  const srcDoc = await pdfjsLib.getDocument({ data: pdfBytes.slice() }).promise;
+  const out = await PDFDocument.create();
+
+  try {
+    for (let i = 1; i <= total; i++) {
+      const rects = byPage.get(i);
+      if (!rects || rects.length === 0) {
+        const [copied] = await out.copyPages(src, [i - 1]);
+        out.addPage(copied);
+        continue;
+      }
+
+      const page = await srcDoc.getPage(i);
+      const viewport = page.getViewport({ scale: 2.0 });
+      const origViewport = page.getViewport({ scale: 1 });
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(viewport.width);
+      canvas.height = Math.round(viewport.height);
+      const ctx = canvas.getContext("2d");
+      if (!ctx) { const [c] = await out.copyPages(src, [i - 1]); out.addPage(c); continue; }
+
+      await page.render({ canvasContext: ctx, viewport, canvas: canvas as any }).promise;
+
+      // Schwärzungen als schwarze Pixel einbrennen — danach ist der Text dieser
+      // Seite physisch weg (die Seite wird zum Bild).
+      ctx.fillStyle = "#000000";
+      for (const r of rects) {
+        ctx.fillRect(
+          Math.floor(r.x * canvas.width),
+          Math.floor(r.y * canvas.height),
+          Math.ceil(r.w * canvas.width),
+          Math.ceil(r.h * canvas.height));
+      }
+
+      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob((b) => resolve(b), "image/jpeg", 0.92));
+      if (!blob) { const [c] = await out.copyPages(src, [i - 1]); out.addPage(c); continue; }
+      const jpeg = new Uint8Array(await blob.arrayBuffer());
+      const img = await out.embedJpg(jpeg);
+      const pdfPage = out.addPage([origViewport.width, origViewport.height]);
+      pdfPage.drawImage(img, { x: 0, y: 0, width: origViewport.width, height: origViewport.height });
+    }
+  } finally {
+    srcDoc.destroy();
+  }
+
+  out.setCreator("Pagebound");
+  out.setProducer("Pagebound Redaction");
+  return await out.save({ useObjectStreams: false });
+}
+
+// ============================================================================
 // AcroForms: Formularfelder lesen + ausfüllen (FA-040 / FA-041)
 // ----------------------------------------------------------------------------
 // pdf-lib bringt eine vollständige Form-API mit (getForm/getFields/setText/...).

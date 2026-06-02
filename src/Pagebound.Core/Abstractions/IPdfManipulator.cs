@@ -80,7 +80,30 @@ public interface IPdfManipulator
         Stream pdf,
         IReadOnlyList<Annotation> annotations,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Echte Redaktion (Schwärzen): die betroffenen Seiten werden rasterisiert
+    /// und die angegebenen Bereiche als schwarze Pixel eingebrannt — der
+    /// darunterliegende Text/Vektor-Inhalt wird dabei ENTFERNT (nicht nur
+    /// verdeckt), also weder markier- noch extrahierbar. Seiten ohne Bereiche
+    /// bleiben vektor-treu. Leere Liste → PDF unverändert.
+    /// </summary>
+    Task<byte[]> RedactAsync(
+        Stream pdf,
+        IReadOnlyList<RedactionRegion> regions,
+        CancellationToken cancellationToken);
 }
+
+/// <summary>
+/// Ein zu schwärzender Bereich auf einer Seite, in 0..1-Page-Fractions
+/// (Origin oben-links, wie im Reader-UI).
+/// </summary>
+public sealed record RedactionRegion(
+    int PageNumber,
+    double X,
+    double Y,
+    double Width,
+    double Height);
 
 /// <summary>
 /// Eine Signatur, wie sie der <see cref="IPdfManipulator"/> in eine PDF einbetten soll.

@@ -293,7 +293,30 @@
                         title="@L.T("reader.draw.line.title")">
                     @L.T("reader.draw.line")
                 </button>
+                <span class="mx-1 h-4 w-px bg-pb-border"></span>
+                <button type="button"
+                        class="@($"rounded border px-2 py-0.5 {(_annotationMode == AnnotationMode.Redaction ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted")}")"
+                        @onclick="@(() => SetAnnotationMode(AnnotationMode.Redaction))"
+                        title="@L.T("reader.redact.title")">
+                    @L.T("reader.redact.tool")
+                </button>
             </div>
+            @if (_annotationMode == AnnotationMode.Redaction || _redactions.Count > 0)
+            {
+                <div class="max-w-4xl mx-auto mt-1 flex flex-wrap items-center gap-2 text-xs">
+                    <span class="text-pb-fg-muted">@L.T("reader.redact.hint")</span>
+                    <span class="text-pb-fg-muted">·&nbsp;@L.T("reader.redact.count", new Dictionary<string, object> { ["count"] = _redactions.Count })</span>
+                    <button type="button" class="btn primary"
+                            disabled="@(_isRedacting || _redactions.Count == 0 || _originalPdfBytes is null)"
+                            @onclick="ApplyRedactionsAsync">
+                        @(_isRedacting ? L.T("reader.redact.running") : L.T("reader.redact.apply"))
+                    </button>
+                    <button type="button" class="rounded border border-pb-border px-2 py-0.5 text-pb-fg-muted hover:text-pb-fg disabled:opacity-40"
+                            disabled="@(_redactions.Count == 0)" @onclick="ClearRedactions">
+                        @L.T("reader.redact.clear")
+                    </button>
+                </div>
+            }
             @if (IsDrawingMode(_annotationMode))
             {
                 <div class="max-w-4xl mx-auto mt-1 flex flex-wrap items-center gap-3 text-xs text-pb-fg-muted">
@@ -326,6 +349,22 @@
                 </div>
             }
             <div class="flex items-center gap-2">
+                <button type="button"
+                        class="@($"rounded border px-2 py-0.5 {(_continuous ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted")}")"
+                        title="@L.T("reader.view.continuousTitle")"
+                        @onclick="ToggleContinuousAsync">
+                    @L.T("reader.view.continuous")
+                    @if (_continuous && _handle is not null && _continuousRenderedCount < _handle.PageCount)
+                    {
+                        <span class="ml-1 text-xs text-pb-fg-muted">@_continuousRenderedCount/@_handle.PageCount</span>
+                    }
+                </button>
+                <button type="button"
+                        class="@($"rounded border px-2 py-0.5 {(_nightMode ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted")}")"
+                        title="@L.T("reader.view.nightTitle")"
+                        @onclick="@(() => _nightMode = !_nightMode)">
+                    @L.T("reader.view.night")
+                </button>
                 <button type="button"
                         class="@($"rounded border px-2 py-0.5 {(_outlineOpen ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted")}")"
                         title="@L.T("reader.outline.toggleTitle")"
@@ -699,6 +738,36 @@
             </aside>
         }
 
+        @if (_continuous && _handle is not null)
+        {
+            @* Fortlaufende Leseansicht (FA Reader-Komfort): alle Seiten gestapelt,
+               scrollbar. Read-only (Annotieren/Schwärzen im Einzelseiten-Modus). *@
+            <div class="flex-1 min-w-0 overflow-auto rounded-lg border border-pb-border bg-pb-bg p-4"
+                 style="max-height: calc(100vh - 230px)">
+                <div class="mx-auto flex w-full max-w-3xl flex-col items-center gap-4">
+                    @for (var p = 1; p <= _handle.PageCount; p++)
+                    {
+                        var pg = p;
+                        @if (_continuousPages.TryGetValue(pg, out var url))
+                        {
+                            <img src="@url" draggable="false"
+                                 alt="@L.T("reader.thumbs.pageLabel", new Dictionary<string, object> { ["page"] = pg })"
+                                 class="block w-full select-none shadow-sm"
+                                 style="@(_nightMode ? NightFilterStyle : null)" />
+                        }
+                        else
+                        {
+                            <div class="flex w-full items-center justify-center text-xs text-pb-fg-muted"
+                                 style="aspect-ratio: 1 / 1.414; background: var(--bg-sunken, #1118270d)">
+                                @L.T("reader.thumbs.pageLabel", new Dictionary<string, object> { ["page"] = pg })
+                            </div>
+                        }
+                    }
+                </div>
+            </div>
+        }
+        else
+        {
         <figure class="flex-1 min-w-0 flex justify-center rounded-lg border border-pb-border bg-pb-bg p-4 overflow-visible">
             @if (_rasterDataUrl is not null && _renderedPage is not null)
             {
@@ -710,7 +779,7 @@
                     "container-type:size; aspect-ratio:{0}/{1}; width:min(100%, {2}px)",
                     pageW, pageH, maxWidthPx);
                 <div data-pb-page-canvas
-                     class="relative @(_annotationMode == AnnotationMode.StickyNote || IsDrawingMode(_annotationMode) ? "cursor-crosshair" : "cursor-text")"
+                     class="relative @(_annotationMode == AnnotationMode.StickyNote || IsDrawCaptureMode(_annotationMode) ? "cursor-crosshair" : "cursor-text")"
                      style="@canvasStyle"
                      @onclick="HandlePdfClickAsync"
                      @onmouseup="HandleCanvasMouseUpAsync">
@@ -718,6 +787,7 @@
                          data-pb-pdf-image
                          alt="@L.T("reader.imageAlt", new Dictionary<string, object> { ["current"] = _currentPage, ["total"] = _handle.PageCount })"
                          class="block w-full h-full shadow-sm select-none pointer-events-none"
+                         style="@(_nightMode ? NightFilterStyle : null)"
                          draggable="false" />
 
                     @* Text-Layer für FA-005 (Suche-Highlighting) und FA-010 (Highlight-Selection).
@@ -733,7 +803,7 @@
                        b) OCR-Output (FA-050): kommt mit Pixel-Bounding-Boxes statt
                           font-stream — die rendern wir als Razor-Spans mit scaleX-Helper. *@
                     @{
-                        var textLayerInteractiveCss = (_annotationMode == AnnotationMode.StickyNote || IsDrawingMode(_annotationMode))
+                        var textLayerInteractiveCss = (_annotationMode == AnnotationMode.StickyNote || IsDrawCaptureMode(_annotationMode))
                             ? "select-none pointer-events-none"
                             : "select-text";
                     }
@@ -784,6 +854,16 @@
                                     @onclick="@(() => OpenHighlightEditor(highlight))"
                                     @onclick:stopPropagation></button>
                         }
+                    }
+
+                    @* Schwärzungs-Vorschau: solide schwarze Kästen (echte Redaktion
+                       passiert erst beim Anwenden via redactPdf — Rasterung). *@
+                    @foreach (var rb in RedactionsOnCurrentPage)
+                    {
+                        var r = rb;
+                        <div class="absolute"
+                             style="@($"left:{(r.X * 100).ToString("F3", CultureInfo.InvariantCulture)}%; top:{(r.Y * 100).ToString("F3", CultureInfo.InvariantCulture)}%; width:{(r.Width * 100).ToString("F3", CultureInfo.InvariantCulture)}%; height:{(r.Height * 100).ToString("F3", CultureInfo.InvariantCulture)}%; background:#000; pointer-events:none; z-index:20")"
+                             aria-hidden="true"></div>
                     }
 
                     @* Ink + Shape Overlay (FA-013 Stift, FA-014 Formen).
@@ -1158,6 +1238,7 @@
                 <div class="text-sm text-pb-fg-muted py-12">@L.T("common.renderingProgress")</div>
             }
         </figure>
+        }
 
         </div> @* /flex-Wrapper Outline+PDF *@
 
@@ -1316,12 +1397,37 @@
         Pen,
         RectShape,
         ArrowShape,
-        LineShape
+        LineShape,
+        Redaction
     }
 
     private static bool IsDrawingMode(AnnotationMode mode) => mode is
         AnnotationMode.Pen or AnnotationMode.RectShape or
         AnnotationMode.ArrowShape or AnnotationMode.LineShape;
+
+    // Modi, die den Rechteck/Strich-Capture im JS brauchen (Zeichnen + Schwärzen).
+    private static bool IsDrawCaptureMode(AnnotationMode mode) =>
+        IsDrawingMode(mode) || mode == AnnotationMode.Redaction;
+
+    // Schwärzungs-Bereiche (FA — echte Redaktion). Transient (NICHT in der Sidecar
+    // — Redaktion ist destruktiv und gehört nicht in die wiederherstellbaren
+    // Annotationen). 0..1-Koordinaten, oben-links, je Seite.
+    private sealed record RedactionBox(int Page, double X, double Y, double Width, double Height);
+    private readonly List<RedactionBox> _redactions = new();
+    private bool _isRedacting;
+
+    private IEnumerable<RedactionBox> RedactionsOnCurrentPage =>
+        _redactions.Where(r => r.Page == _currentPage);
+
+    // Reader-Komfort (FA): Nachtmodus (invertierte Anzeige) + fortlaufende Lese-
+    // ansicht (alle Seiten gestapelt). Beide nur Anzeige — die Quell-PDF bleibt
+    // unangetastet. Fortlaufend ist read-only (Annotieren/Schwärzen im Einzelmodus).
+    private const string NightFilterStyle = "filter: invert(0.92) hue-rotate(180deg)";
+    private bool _nightMode;
+    private bool _continuous;
+    private bool _continuousRendering;
+    private int _continuousRenderedCount;
+    private readonly Dictionary<int, string> _continuousPages = new();
 
     // Zeichenwerkzeug-State (FA-013 Stift, FA-014 Formen).
     // Persistente Listener-Verwaltung liegt im JS (shortcuts-bridge), pro
@@ -1462,6 +1568,10 @@
 
         _handle = await Renderer.LoadAsync(buffer, new LoadOptions(), CancellationToken.None).ConfigureAwait(false);
         _currentPage = 1;
+        _redactions.Clear();
+        _continuous = false;
+        _continuousPages.Clear();
+        _continuousRenderedCount = 0;
 
         _annotations = await Annotations.GetForDocumentAsync(_currentPdfId.Value, CancellationToken.None).ConfigureAwait(false);
 
@@ -1683,6 +1793,10 @@
         _currentFilename = null;
         _isExporting = false;
         _annotationMode = AnnotationMode.Select;
+        _redactions.Clear();
+        _continuous = false;
+        _continuousPages.Clear();
+        _continuousRenderedCount = 0;
         _editingAnnotation = null;
         _editingContent = string.Empty;
         _pageTextItems = Array.Empty<TextItem>();
@@ -2164,7 +2278,7 @@
         if (_dotNetRef is null) return;
         try
         {
-            if (IsDrawingMode(_annotationMode))
+            if (IsDrawCaptureMode(_annotationMode))
             {
                 await JS.InvokeVoidAsync(
                     "pageboundShortcuts.startDrawingCapture",
@@ -2193,6 +2307,7 @@
         AnnotationMode.RectShape => "rect",
         AnnotationMode.ArrowShape => "arrow",
         AnnotationMode.LineShape => "line",
+        AnnotationMode.Redaction => "rect",
         _ => "ink"
     };
 
@@ -2201,6 +2316,24 @@
     {
         if (_currentPdfId is null) return;
         if (result.Strokes is null || result.Strokes.Count == 0) return;
+
+        // Schwärzen: transienter Redaktions-Bereich (rechteckig), keine Annotation.
+        if (_annotationMode == AnnotationMode.Redaction)
+        {
+            if (result.Strokes[0].Count >= 2)
+            {
+                var s = result.Strokes[0][0];
+                var e = result.Strokes[0][^1];
+                var w = Math.Abs(e.X - s.X);
+                var h = Math.Abs(e.Y - s.Y);
+                if (w > 0.003 && h > 0.003)
+                {
+                    _redactions.Add(new RedactionBox(_currentPage, Math.Min(s.X, e.X), Math.Min(s.Y, e.Y), w, h));
+                    await InvokeAsync(StateHasChanged);
+                }
+            }
+            return;
+        }
 
         NewAnnotation? toCreate = null;
         if (string.Equals(result.Mode, "ink", StringComparison.OrdinalIgnoreCase))
@@ -2251,6 +2384,77 @@
         List<List<DrawPoint>> Strokes);
 
     public sealed record DrawPoint(double X, double Y);
+
+    private void ClearRedactions() => _redactions.Clear();
+
+    // Fortlaufende Leseansicht: beim Einschalten alle Seiten progressiv rendern.
+    private async Task ToggleContinuousAsync()
+    {
+        _continuous = !_continuous;
+        if (_continuous && _handle is not null && _continuousRenderedCount < _handle.PageCount)
+        {
+            await RenderContinuousAsync();
+        }
+    }
+
+    private async Task RenderContinuousAsync()
+    {
+        if (_handle is null || _continuousRendering) return;
+        _continuousRendering = true;
+        try
+        {
+            for (var p = 1; p <= _handle.PageCount; p++)
+            {
+                if (_continuousPages.ContainsKey(p)) continue;
+                var rendered = await Renderer.RenderPageAsync(
+                    _handle, p, new RenderOptions(Scale: 1.5), CancellationToken.None).ConfigureAwait(false);
+                _continuousPages[p] = $"data:{rendered.RasterFormat};base64,{Convert.ToBase64String(rendered.RasterBytes)}";
+                _continuousRenderedCount = _continuousPages.Count;
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        finally
+        {
+            _continuousRendering = false;
+        }
+    }
+
+    // Echte Redaktion anwenden: rasterisiert die betroffenen Seiten und brennt die
+    // schwarzen Bereiche ein (entfernt den darunterliegenden Text), Download als
+    // <name>.redacted.pdf. Die Originaldatei/Sidecar bleibt unangetastet.
+    private async Task ApplyRedactionsAsync()
+    {
+        if (_originalPdfBytes is null || _redactions.Count == 0 || _isRedacting) return;
+        _isRedacting = true;
+        _errorMessage = null;
+        try
+        {
+            var regions = _redactions
+                .Select(r => new RedactionRegion(r.Page, r.X, r.Y, r.Width, r.Height))
+                .ToList();
+            using var ms = new MemoryStream(_originalPdfBytes);
+            var redacted = await Manipulator.RedactAsync(ms, regions, CancellationToken.None);
+
+            var baseName = !string.IsNullOrWhiteSpace(_currentFilename)
+                ? System.IO.Path.GetFileNameWithoutExtension(_currentFilename)
+                : (_handle?.Title ?? "pagebound");
+            var safeBase = string.Concat(baseName.Select(c =>
+                char.IsLetterOrDigit(c) || c is '_' or '-' or '.' or ' ' ? c : '_'));
+            await JS.InvokeVoidAsync(
+                "pageboundShortcuts.downloadBytes",
+                $"{safeBase}.redacted.pdf",
+                Convert.ToBase64String(redacted),
+                "application/pdf");
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Schwärzung fehlgeschlagen:\n{ex.Message}";
+        }
+        finally
+        {
+            _isRedacting = false;
+        }
+    }
 
     // Selektierte Ink/Shape für die Lösch-Mini-Toolbar.
     private Annotation? _editingDrawing;

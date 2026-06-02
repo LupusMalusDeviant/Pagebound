@@ -327,6 +327,29 @@ public sealed class JsPdfLibManipulator : IPdfManipulator
         return marker >= 0 ? dataUrl[(marker + "base64,".Length)..] : dataUrl;
     }
 
+    public async Task<byte[]> RedactAsync(Stream pdf, IReadOnlyList<RedactionRegion> regions, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(pdf);
+        ArgumentNullException.ThrowIfNull(regions);
+        var bytes = await ReadAllAsync(pdf, cancellationToken).ConfigureAwait(false);
+        if (regions.Count == 0) return bytes;
+
+        // camelCase-Payload exakt wie RedactionRegion in der Bridge.
+        var payload = regions
+            .Select(r => new { pageNumber = r.PageNumber, x = r.X, y = r.Y, w = r.Width, h = r.Height })
+            .ToArray();
+        try
+        {
+            var result = await _js.InvokeAsync<byte[]>(
+                "pageboundPdfManipulator.redactPdf", cancellationToken, bytes, payload).ConfigureAwait(false);
+            return result ?? bytes;
+        }
+        catch (JSException jsex)
+        {
+            throw new InvalidOperationException($"[stage:redact] pdf-lib redactPdf fehlgeschlagen: {jsex.Message}", jsex);
+        }
+    }
+
     private static async Task<byte[]> ReadAllAsync(Stream pdf, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(pdf);
