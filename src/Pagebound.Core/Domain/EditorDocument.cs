@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Pagebound.Core.Domain;
 
 /// <summary>Ziel-Papierformat eines WYSIWYG-Dokuments (LF-02).</summary>
@@ -17,11 +19,12 @@ public enum EditorBlockType
     Paragraph,
     Image,
     Shape,
-    Table
+    Table,
+    Spacer
 }
 
 /// <summary>
-/// Ein einzelner Inhalts-Block eines <see cref="EditorDocument"/>. Bewusst eine
+/// Ein einzelner Inhalts-Block eines <see cref="EditorPage"/>. Bewusst eine
 /// veränderliche Klasse (kein Record): der Editor bindet im UI direkt an die
 /// Felder (@bind) und mutiert Blöcke beim Tippen/Formatieren. Nur die je Typ
 /// relevanten Felder sind gesetzt — entspricht dem JSON-Block-Modell aus PF-04.
@@ -41,7 +44,7 @@ public sealed class EditorBlock
     public int WidthPercent { get; set; } = 100;
     public string? Alt { get; set; }
 
-    // Shape (rectangle | line | divider)
+    // Shape (rectangle | line | divider) — HeightPx dient auch dem Spacer-Block.
     public string? Shape { get; set; }
     public string Color { get; set; } = "#1f2937";
     public int HeightPx { get; set; } = 48;
@@ -75,25 +78,88 @@ public sealed class EditorBlock
 }
 
 /// <summary>
-/// Lokales WYSIWYG-Dokument (Flyer/Brief/Rechnung/Folie). Wird als JSON im
+/// Eine einzelne Seite eines <see cref="EditorDocument"/> (Flyer-Vorder-/Rückseite,
+/// Folien eines Decks …). Jede Seite trägt ihre eigenen Blöcke und ihren eigenen
+/// Hintergrund (Farbe und/oder eingebettetes Bild als Data-URL). Das Papierformat
+/// (<see cref="PageLayout"/>) ist dokumentweit, damit alle Blätter gleich groß sind.
+/// </summary>
+public sealed class EditorPage
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+
+    /// <summary>Optionale Hintergrundfarbe (null = weiß).</summary>
+    public string? Background { get; set; }
+
+    /// <summary>Optionales Hintergrundbild als Data-URL (null = keins).</summary>
+    public string? BackgroundImage { get; set; }
+
+    /// <summary>Einpassung des Hintergrundbilds: <c>cover</c> | <c>contain</c>.</summary>
+    public string BackgroundSize { get; set; } = "cover";
+
+    public List<EditorBlock> Blocks { get; set; } = new();
+
+    public EditorPage Clone() => new()
+    {
+        Background = Background,
+        BackgroundImage = BackgroundImage,
+        BackgroundSize = BackgroundSize,
+        Blocks = Blocks.Select(b => b.Clone()).ToList()
+    };
+}
+
+/// <summary>
+/// Lokales WYSIWYG-Dokument (Flyer/Brief/Rechnung/Folien-Deck). Wird als JSON im
 /// Browser (IndexedDB) gespeichert — 100 % lokal, kein Server (PF-04, AK-04/05).
+/// Mehrseitig: <see cref="Pages"/> hält ein oder mehrere <see cref="EditorPage"/>.
 /// </summary>
 public sealed class EditorDocument
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
     public string Title { get; set; } = string.Empty;
     public PageLayout Layout { get; set; } = PageLayout.A4Portrait;
-    /// <summary>Optionale Seiten-Hintergrundfarbe (null = weiß).</summary>
-    public string? Background { get; set; }
-    public List<EditorBlock> Blocks { get; set; } = new();
+
+    public List<EditorPage> Pages { get; set; } = new();
+
+    // --- Legacy (vor Multi-Page) — nur fürs Migrieren alter Entwürfe -----------
+    // Frühere Dokumente hatten Blöcke und einen Hintergrund direkt am Dokument.
+    // Beim Laden hebt Migrate() sie in eine erste Seite. Beim Speichern werden sie
+    // auf null gesetzt und (WhenWritingNull) nicht mehr geschrieben.
+    [JsonPropertyName("blocks"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<EditorBlock>? LegacyBlocks { get; set; }
+
+    [JsonPropertyName("background"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? LegacyBackground { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 
     public static EditorDocument NewEmpty(string title, PageLayout layout = PageLayout.A4Portrait) => new()
     {
         Title = title,
-        Layout = layout
+        Layout = layout,
+        Pages = { new EditorPage() }
     };
+
+    /// <summary>
+    /// Hebt ein altes (einseitiges) Dokument auf das Multi-Page-Modell: hatte es
+    /// keine <see cref="Pages"/>, aber Legacy-Blöcke/-Hintergrund, werden diese in
+    /// eine erste Seite überführt. Stellt außerdem sicher, dass mindestens eine
+    /// Seite existiert. Idempotent.
+    /// </summary>
+    public EditorDocument Migrate()
+    {
+        if (Pages.Count == 0)
+        {
+            Pages.Add(new EditorPage
+            {
+                Background = LegacyBackground,
+                Blocks = LegacyBlocks ?? new List<EditorBlock>()
+            });
+        }
+        LegacyBlocks = null;
+        LegacyBackground = null;
+        return this;
+    }
 }
 
 /// <summary>Kurzinfo eines gespeicherten Entwurfs für Listen (ohne Block-Inhalt).</summary>

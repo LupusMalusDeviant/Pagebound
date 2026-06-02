@@ -9,22 +9,64 @@
 // 100 % lokal, kein Netzwerk, keine Fremd-Bibliothek.
 // =============================================================================
 
+// Zuletzt bekannte Auswahl innerhalb eines `.pb-edit`-Blocks. Wird laufend per
+// `selectionchange` gemerkt, damit Bedien­elemente, die den Fokus stehlen (z. B.
+// der native Farbwähler `<input type="color">`), die Auswahl wiederherstellen
+// und darauf ein Rich-Text-Kommando ausführen können.
+let savedRange: Range | null = null;
+
+function editableOf(range: Range | null): HTMLElement | null {
+  if (!range) return null;
+  const node = range.commonAncestorContainer;
+  const el = node.nodeType === Node.TEXT_NODE ? node.parentElement : (node as HTMLElement);
+  return (el?.closest(".pb-edit") as HTMLElement | null) ?? null;
+}
+
 /**
- * Initialisiert eine contentEditable-Wurzel: erzwingt Einfügen als REINEN Text
- * (kein Fremd-HTML aus der Zwischenablage → konsistentes, sauberes Dokument).
- * Mehrfachaufruf ist idempotent (Flag am Element).
+ * Initialisiert den Editor (einmal pro App-Lauf, idempotent): erzwingt Einfügen
+ * als REINEN Text (kein Fremd-HTML aus der Zwischenablage → konsistentes,
+ * sauberes Dokument) und merkt sich laufend die Auswahl in `.pb-edit`-Blöcken.
+ * Delegiert auf Dokumentebene, damit auch dynamisch hinzugefügte Seiten/Blöcke
+ * abgedeckt sind (Multi-Page).
  */
-export function initializeEditor(elementId: string): void {
-  const root = document.getElementById(elementId);
-  if (!root || (root as any).__pbWired) return;
-  (root as any).__pbWired = true;
-  root.addEventListener("paste", (e: ClipboardEvent) => {
+export function initializeEditor(_elementId?: string): void {
+  if ((document as any).__pbEditorWired) return;
+  (document as any).__pbEditorWired = true;
+
+  document.addEventListener("paste", (e: ClipboardEvent) => {
     const target = e.target as HTMLElement | null;
     if (!target || !target.isContentEditable) return;
     e.preventDefault();
     const text = e.clipboardData?.getData("text/plain") ?? "";
     document.execCommand("insertText", false, text);
   });
+
+  document.addEventListener("selectionchange", () => {
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return;
+    const range = sel.getRangeAt(0);
+    if (editableOf(range)) savedRange = range.cloneRange();
+  });
+}
+
+/**
+ * Wendet ein Farb-Kommando (`foreColor` / `hiliteColor`) auf die zuletzt im
+ * Editor gemerkte Auswahl an. Nötig, weil der native Farbwähler beim Öffnen den
+ * Fokus aus dem contentEditable nimmt — wir stellen die Auswahl zuvor wieder her.
+ */
+export function applyColor(command: string, value: string): void {
+  const editable = editableOf(savedRange);
+  const sel = window.getSelection();
+  if (editable && sel && savedRange) {
+    editable.focus();
+    sel.removeAllRanges();
+    sel.addRange(savedRange);
+  }
+  try {
+    document.execCommand(command, false, value);
+  } catch {
+    /* Kommando nicht unterstützt — Editor bleibt nutzbar */
+  }
 }
 
 /**
@@ -66,6 +108,19 @@ export function setPageSize(size: string): void {
 /** Innen-HTML eines Elements (für den „sauberer HTML-Quellcode"-Export, LF-05). */
 export function getHtmlContent(elementId: string): string {
   return document.getElementById(elementId)?.innerHTML ?? "";
+}
+
+/**
+ * Wie getHtmlContent, aber ohne Editier-Affordances: klont das Element und
+ * entfernt alle `.no-print`-Knoten (Seiten-/Block-Werkzeugleisten), damit der
+ * HTML-Export pro Seite sauberer Inhalt ist (Multi-Page).
+ */
+export function getCleanHtml(elementId: string): string {
+  const el = document.getElementById(elementId);
+  if (!el) return "";
+  const clone = el.cloneNode(true) as HTMLElement;
+  clone.querySelectorAll(".no-print").forEach((n) => n.remove());
+  return clone.innerHTML;
 }
 
 /**

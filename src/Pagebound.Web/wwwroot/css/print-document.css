@@ -12,8 +12,8 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 24px;
-  padding: 24px;
+  gap: 40px;                      /* Platz für die Seiten-Kopfleiste über jedem Blatt */
+  padding: 40px 24px 24px;
   background: #4b5563;            /* neutraler Viewer-Hintergrund */
   overflow: auto;
   min-height: 100%;
@@ -30,6 +30,12 @@
   font-family: "Source Serif 4", Georgia, "Times New Roman", serif;
   font-size: 11pt;
   line-height: 1.5;
+}
+
+/* Aktuell gewählte Seite (Hintergrund-/Seiten-Werkzeuge wirken auf sie). */
+.pb-page.pb-page-selected {
+  outline: 3px solid rgba(37, 99, 235, 0.55);
+  outline-offset: 6px;
 }
 
 /* Sichtbarer Randrahmen (Satzspiegel) — nur am Bildschirm, dezent. */
@@ -82,6 +88,11 @@
 .pb-img { display: block; max-width: 100%; height: auto; }
 .pb-img-wrap.align-center { text-align: center; }
 .pb-img-wrap.align-right { text-align: right; }
+
+/* Abstands-Block: leerer Weißraum. Am Bildschirm dezent gestrichelt, damit er
+   auffindbar bleibt; im Druck/Export unsichtbar (nur Höhe). */
+.pb-spacer { width: 100%; }
+.pb-block.pb-selected .pb-spacer { outline: 1px dashed rgba(37, 99, 235, 0.4); }
 
 .pb-shape-rect { width: 100%; border: 1.5px solid currentColor; }
 .pb-shape-line { width: 100%; border: none; border-top: 1.5px solid currentColor; }
