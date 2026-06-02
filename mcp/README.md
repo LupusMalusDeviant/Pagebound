@@ -39,11 +39,23 @@ Eingaben bleiben stets unangetastet (neue Datei/neue Bytes).
 | `pdf_info` | Seitenzahl, Titel/Autor, Seitengrößen (read-only) |
 | `pdf_extract_text` | Text-Layer extrahieren, optional pro Seitenauswahl (read-only) |
 | `pdf_merge` | mehrere PDFs zusammenführen (`paths` / `dataBase64List`) |
-| `pdf_extract_pages` | Seiten (in Reihenfolge) in eine neue PDF kopieren — auch zum Splitten |
+| `pdf_extract_pages` | Seiten (in Reihenfolge) in eine neue PDF kopieren |
+| `pdf_split` | PDF an Schnittpunkten (`afterPages`) in **mehrere** Teil-PDFs aufteilen |
 | `pdf_delete_pages` | Seiten entfernen |
 | `pdf_rotate_pages` | Seiten um ±90/180/270° drehen |
 | `pdf_reorder_pages` | Seiten neu anordnen |
+| `pdf_stamp` | Wasserzeichen (diagonal) und/oder Seitenzahlen/Bates aufstempeln |
+| `pdf_encrypt` | PDF mit **Passwort** schützen (AES-256, ISO 32000-2 R6) |
+| `pdf_form_fields` | AcroForm-Felder auflisten (Werte, Optionen, Seitenzahl; read-only) |
+| `pdf_fill_form` | Formularfelder ausfüllen, optional **flatten** (einbrennen) |
 | `images_to_pdf` | PNG/JPG-Bilder zu einer PDF (`imagePaths` / `imagesBase64`) |
+
+Damit deckt der Server die PDF-Operationen der Web-App ab, die ohne Browser-
+Canvas auskommen — Seiten-Werkzeuge (Merge/Split/Extract/Delete/Rotate/Reorder),
+Stempeln, Verschlüsseln, Bilder→PDF, Formulare und Text-Extraktion.
+
+`pdf_split` schreibt mit `outputDir` die Teile als `<baseName>-partN.pdf` (stdio)
+oder liefert sie als `parts[].dataBase64` (remote).
 
 Seitenauswahl überall als 1-basierte Angabe: `"1-3,5,8-10"` (Bereiche dürfen
 rückwärts laufen, z. B. `"3-1"`).
@@ -130,14 +142,18 @@ Remote dasselbe mit `dataBase64`/`dataBase64List` statt `path`/`paths` und ohne
 
 ## Grenzen (bewusst)
 
+Was die Web-App per **Browser-Canvas** macht, bleibt ausgelassen, um den Server
+schlank & **nativ-frei** zu halten (keine native Canvas-/Tesseract-Abhängigkeit):
+
 - **Kein OCR** — `pdf_extract_text` liest den vorhandenen Text-Layer (gut für
-  „echte" Text-PDFs, nicht für reine Scans). OCR (Tesseract) liefe nur mit
-  zusätzlichem Modell-Download und ist hier nicht enthalten.
-- **Keine Verschlüsselung / kein Rendern zu PNG** — beides braucht in der Web-App
-  WebCrypto bzw. eine Canvas; im Server wären das größere Zusatz­abhängigkeiten.
-  Mögliche Erweiterungen, aktuell ausgelassen, um den Server schlank & nativ-frei
-  zu halten.
-- Passwortgeschützte PDFs werden mit klarer Meldung abgelehnt (zuerst entschlüsseln).
+  „echte" Text-PDFs, nicht für reine Scans). OCR (Tesseract) bräuchte ein
+  zusätzliches Modell und eine Rasterung.
+- **Kein Rendern zu PNG/JPG, kein Komprimieren, keine Redaktion** — diese
+  Operationen rasterisieren Seiten (in der Web-App via Canvas); das ist hier
+  nicht enthalten.
+- **Verschlüsselung ist jetzt dabei** (`pdf_encrypt`, AES-256 über Node-WebCrypto).
+  Passwortgeschützte **Eingabe**-PDFs werden weiterhin mit klarer Meldung
+  abgelehnt (zuerst entschlüsseln).
 
 ## Sicherheit
 

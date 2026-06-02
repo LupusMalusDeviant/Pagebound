@@ -7,7 +7,19 @@
 // =============================================================================
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
-import { PDFDocument, degrees } from "pdf-lib";
+import {
+  PDFDocument,
+  PDFName,
+  PDFRef,
+  PDFTextField,
+  PDFCheckBox,
+  PDFRadioGroup,
+  PDFDropdown,
+  PDFOptionList,
+  StandardFonts,
+  rgb,
+  degrees,
+} from "pdf-lib";
 
 /** Erwartbare, dem Agenten erklärbare Fehler (vs. unerwartete Exceptions). */
 export class ToolError extends Error {}
@@ -176,6 +188,224 @@ export async function imagesToPdf(images: Uint8Array[], pageSize: PageSizeMode):
     }
   }
   return { bytes: await save(doc), pageCount: doc.getPageCount() };
+}
+
+// --- Split (multiple parts) --------------------------------------------------
+
+/**
+ * Teilt eine PDF in mehrere Teil-PDFs. `afterPages` ist eine 1-basierte
+ * Seitenangabe der Schnittpunkte: nach jeder genannten Seite beginnt ein neuer
+ * Teil. Beispiel total=8, afterPages="3,5" → [1-3] [4-5] [6-8]. Entspricht der
+ * Split-Funktion der Web-App (`splitPdf`).
+ */
+export async function split(input: Uint8Array, afterPages: string): Promise<{ parts: Uint8Array[]; pageCounts: number[] }> {
+  const src = await loadDoc(input);
+  const total = src.getPageCount();
+  const points = [...new Set(parsePageSpec(afterPages, total))].filter((p) => p >= 1 && p < total).sort((a, b) => a - b);
+  if (points.length === 0) throw new ToolError(`Keine gültigen Schnittpunkte in "${afterPages}" (erlaubt: 1 .. ${total - 1}).`);
+
+  const ranges: Array<[number, number]> = [];
+  let cursor = 0;
+  for (const sp of points) { ranges.push([cursor, sp]); cursor = sp; }
+  ranges.push([cursor, total]);
+
+  const parts: Uint8Array[] = [];
+  const pageCounts: number[] = [];
+  for (const [start, end] of ranges) {
+    const out = await PDFDocument.create();
+    const idx: number[] = [];
+    for (let i = start; i < end; i++) idx.push(i);
+    const copied = await out.copyPages(src, idx);
+    copied.forEach((p) => out.addPage(p));
+    parts.push(await save(out));
+    pageCounts.push(out.getPageCount());
+  }
+  return { parts, pageCounts };
+}
+
+// --- Stamp: watermark + page numbers / Bates ---------------------------------
+
+export type PageNumberPosition = "bottom-center" | "bottom-right" | "bottom-left";
+
+export interface StampOptions {
+  watermarkText?: string | null;
+  pageNumbers?: boolean;
+  pageNumberFormat?: string;
+  pageNumberPosition?: PageNumberPosition;
+  pageNumberStartAt?: number;
+}
+
+const clampNum = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+
+/**
+ * Stempelt ein diagonales Text-Wasserzeichen (45°, halbtransparent) und/oder
+ * Seitenzahlen/Bates auf jede Seite. Port der Web-App-Funktion `stampPdf`.
+ */
+export async function stamp(input: Uint8Array, opts: StampOptions): Promise<{ bytes: Uint8Array; pageCount: number }> {
+  const wmText = (opts.watermarkText ?? "").trim();
+  const pnOn = !!opts.pageNumbers;
+  if (!wmText && !pnOn) throw new ToolError("Nichts zu stempeln: 'watermarkText' und/oder 'pageNumbers' angeben.");
+
+  const doc = await loadDoc(input);
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const pages = doc.getPages();
+  const total = pages.length;
+
+  const pnFmt = opts.pageNumberFormat || "{n} / {total}";
+  const pnPos = opts.pageNumberPosition || "bottom-center";
+  const startAt = Number.isFinite(opts.pageNumberStartAt) ? (opts.pageNumberStartAt as number) : 1;
+  const wmSize = 48;
+  const pnSize = 10;
+  const margin = 24;
+
+  pages.forEach((page, i) => {
+    const { width, height } = page.getSize();
+    if (wmText) {
+      const tw = font.widthOfTextAtSize(wmText, wmSize);
+      const angle = Math.PI / 4; // 45° — rotierte Baseline mittig durch die Seite
+      page.drawText(wmText, {
+        x: width / 2 - (tw / 2) * Math.cos(angle),
+        y: height / 2 - (tw / 2) * Math.sin(angle),
+        size: wmSize,
+        font,
+        color: rgb(0.5, 0.5, 0.5),
+        opacity: 0.12,
+        rotate: degrees(45),
+      });
+    }
+    if (pnOn) {
+      const label = pnFmt.replace("{n}", String(i + startAt)).replace("{total}", String(total));
+      const tw = font.widthOfTextAtSize(label, pnSize);
+      let x = (width - tw) / 2;
+      if (pnPos === "bottom-right") x = width - tw - margin;
+      else if (pnPos === "bottom-left") x = margin;
+      page.drawText(label, { x, y: margin, size: pnSize, font, color: rgb(0.3, 0.3, 0.3) });
+    }
+  });
+
+  void clampNum; // (reserviert für künftige konfigurierbare Größen/Opazität)
+  return { bytes: await save(doc), pageCount: total };
+}
+
+// --- AcroForms: read + fill --------------------------------------------------
+
+export interface FormFieldDto {
+  name: string;
+  type: "Text" | "Checkbox" | "Radio" | "Dropdown" | "ListBox";
+  /** Aktuelle Werte: Text/Radio/Dropdown 0..1, Checkbox ["true"]|[], ListBox 0..n. */
+  value: string[];
+  /** Wählbare Optionen bei Radio/Dropdown/ListBox; leer bei Text/Checkbox. */
+  options: string[];
+  readOnly: boolean;
+  required: boolean;
+  /** 1-basierte Seitenzahl, 0 = nicht ermittelbar. */
+  pageNumber: number;
+}
+
+export interface FormFieldValue {
+  name: string;
+  value: string[];
+}
+
+function classifyFormField(field: unknown): FormFieldDto["type"] | null {
+  if (field instanceof PDFTextField) return "Text";
+  if (field instanceof PDFCheckBox) return "Checkbox";
+  if (field instanceof PDFRadioGroup) return "Radio";
+  if (field instanceof PDFDropdown) return "Dropdown";
+  if (field instanceof PDFOptionList) return "ListBox";
+  return null; // Buttons / Signaturfelder bewusst ignorieren
+}
+
+const safeBool = (fn: () => boolean): boolean => { try { return fn(); } catch { return false; } };
+
+/** Map Widget-Dict → 1-basierte Seitenzahl (über die Annots-Arrays der Seiten). */
+function buildWidgetPageMap(doc: PDFDocument): Map<unknown, number> {
+  const map = new Map<unknown, number>();
+  doc.getPages().forEach((page, idx) => {
+    const annots = page.node.Annots();
+    if (!annots) return;
+    for (const ref of annots.asArray()) {
+      try {
+        const obj = ref instanceof PDFRef ? doc.context.lookup(ref) : ref;
+        if (obj) map.set(obj, idx + 1);
+      } catch { /* defekte Referenz überspringen */ }
+    }
+  });
+  return map;
+}
+
+function formFieldPageNumber(field: any, widgetPageMap: Map<unknown, number>): number {
+  try {
+    for (const widget of field.acroField.getWidgets()) {
+      const page = widgetPageMap.get(widget.dict);
+      if (page) return page;
+    }
+  } catch { /* Feld ohne auflösbare Widgets */ }
+  return 0;
+}
+
+export async function getFormFields(input: Uint8Array): Promise<FormFieldDto[]> {
+  const doc = await PDFDocument.load(input, { ignoreEncryption: true });
+  const fields = doc.getForm().getFields();
+  if (!fields || fields.length === 0) return [];
+
+  const widgetPageMap = buildWidgetPageMap(doc);
+  const result: FormFieldDto[] = [];
+  for (const field of fields) {
+    const type = classifyFormField(field);
+    if (!type) continue;
+
+    let value: string[] = [];
+    let options: string[] = [];
+    switch (type) {
+      case "Text": { const t = (field as PDFTextField).getText(); value = t ? [t] : []; break; }
+      case "Checkbox": value = (field as PDFCheckBox).isChecked() ? ["true"] : []; break;
+      case "Radio": { const rg = field as PDFRadioGroup; options = rg.getOptions(); const sel = rg.getSelected(); value = sel ? [sel] : []; break; }
+      case "Dropdown": { const dd = field as PDFDropdown; options = dd.getOptions(); value = dd.getSelected() ?? []; break; }
+      case "ListBox": { const ol = field as PDFOptionList; options = ol.getOptions(); value = ol.getSelected() ?? []; break; }
+    }
+    result.push({
+      name: field.getName(),
+      type,
+      value,
+      options,
+      readOnly: safeBool(() => field.isReadOnly()),
+      required: safeBool(() => field.isRequired()),
+      pageNumber: formFieldPageNumber(field, widgetPageMap),
+    });
+  }
+  return result;
+}
+
+export async function fillForm(
+  input: Uint8Array,
+  values: FormFieldValue[],
+  flatten: boolean
+): Promise<{ bytes: Uint8Array; filled: number; skipped: string[] }> {
+  const doc = await PDFDocument.load(input, { ignoreEncryption: true });
+  const form = doc.getForm();
+  const skipped: string[] = [];
+  let filled = 0;
+
+  for (const entry of values ?? []) {
+    let field: any;
+    try { field = form.getField(entry.name); } catch { skipped.push(entry.name); continue; }
+    const vals = entry.value ?? [];
+    try {
+      if (field instanceof PDFTextField) field.setText(vals.length > 0 ? vals[0] : undefined);
+      else if (field instanceof PDFCheckBox) { if (vals.includes("true")) field.check(); else field.uncheck(); }
+      else if (field instanceof PDFRadioGroup) { if (vals.length > 0) field.select(vals[0]); else field.clear(); }
+      else if (field instanceof PDFDropdown) { field.clear(); if (vals.length > 0) field.select(vals); }
+      else if (field instanceof PDFOptionList) { field.clear(); if (vals.length > 0) field.select(vals); }
+      else { skipped.push(entry.name); continue; }
+      filled++;
+    } catch { skipped.push(entry.name); }
+  }
+
+  if (flatten) form.flatten();
+  else { try { form.updateFieldAppearances(); } catch { /* best effort */ } }
+
+  return { bytes: await doc.save(), filled, skipped };
 }
 
 // --- Text extraction (pdfjs-dist) --------------------------------------------

@@ -2,6 +2,7 @@
 // Bytes-in/bytes-out — no temp files; exercises every operation end-to-end.
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import * as pdf from "./pdf.js";
+import { encryptPdf } from "./encrypt.js";
 
 let failures = 0;
 function check(name: string, cond: boolean, detail = "") {
@@ -20,6 +21,17 @@ async function makeSample(pageCount: number, label: string): Promise<Uint8Array>
     const p = doc.addPage([400, 600]);
     p.drawText(`${label} Seite ${i} Pagebound Test`, { x: 40, y: 540, size: 18, font, color: rgb(0, 0, 0) });
   }
+  return doc.save();
+}
+
+async function makeFormSample(): Promise<Uint8Array> {
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([400, 600]);
+  const form = doc.getForm();
+  const name = form.createTextField("applicant.name");
+  name.addToPage(page, { x: 40, y: 520, width: 200, height: 20 });
+  const agree = form.createCheckBox("applicant.agree");
+  agree.addToPage(page, { x: 40, y: 480, width: 14, height: 14 });
   return doc.save();
 }
 
@@ -73,6 +85,56 @@ async function main() {
     check("pdf_extract_text finds drawn text", has, JSON.stringify(t.pages[0]?.text?.slice(0, 60)));
   } catch (err) {
     check("pdf_extract_text runs without throwing", false, String(err));
+  }
+
+  // NB: pdfjs (extractText above) detaches its input buffer, so reuse a fresh sample.
+  const s3 = await makeSample(3, "S");
+
+  // split
+  const sp = await pdf.split(s3, "1");
+  check("pdf_split '1' → 2 parts [1,2]", sp.parts.length === 2 && sp.pageCounts[0] === 1 && sp.pageCounts[1] === 2, JSON.stringify(sp.pageCounts));
+  check("pdf_split parts re-parse", (await pdf.getInfo(sp.parts[0])).pageCount === 1);
+
+  // stamp
+  const st = await pdf.stamp(s3, { watermarkText: "ENTWURF", pageNumbers: true });
+  check("pdf_stamp → 3 pages, bytes grow", st.pageCount === 3 && st.bytes.length > s3.length);
+  check("pdf_stamp output re-parses", (await pdf.getInfo(st.bytes)).pageCount === 3);
+
+  // forms
+  const fp = await makeFormSample();
+  const fields = await pdf.getFormFields(fp);
+  const nameField = fields.find((f) => f.name === "applicant.name");
+  const agreeField = fields.find((f) => f.name === "applicant.agree");
+  check("pdf_form_fields finds 2 fields", fields.length === 2 && !!nameField && !!agreeField, JSON.stringify(fields.map((f) => f.name)));
+  check("pdf_form_fields types Text/Checkbox", nameField?.type === "Text" && agreeField?.type === "Checkbox");
+  const filled = await pdf.fillForm(fp, [
+    { name: "applicant.name", value: ["Ada Lovelace"] },
+    { name: "applicant.agree", value: ["true"] },
+    { name: "does.not.exist", value: ["x"] },
+  ], false);
+  check("pdf_fill_form filled 2, skipped 1", filled.filled === 2 && filled.skipped.length === 1 && filled.skipped[0] === "does.not.exist");
+  const reread = await pdf.getFormFields(filled.bytes);
+  const rn = reread.find((f) => f.name === "applicant.name");
+  const ra = reread.find((f) => f.name === "applicant.agree");
+  check("pdf_fill_form values persisted", rn?.value[0] === "Ada Lovelace" && ra?.value[0] === "true", JSON.stringify({ n: rn?.value, a: ra?.value }));
+  const flat = await pdf.fillForm(fp, [{ name: "applicant.name", value: ["Flat"] }], true);
+  check("pdf_fill_form flatten removes fields", (await pdf.getFormFields(flat.bytes)).length === 0);
+
+  // encrypt (AES-256 R6) — verify it opens with the password via pdfjs
+  const enc = await encryptPdf(s3, "open-me");
+  const encText = Buffer.from(enc).toString("latin1");
+  check("pdf_encrypt writes /Filter /Standard /AESV3", encText.includes("/Filter /Standard") && encText.includes("/AESV3"));
+  try {
+    const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+    const okDoc = await pdfjs.getDocument({ data: enc.slice(), password: "open-me", verbosity: 0 }).promise;
+    check("pdf_encrypt opens with correct password → 3 pages", okDoc.numPages === 3, JSON.stringify(okDoc.numPages));
+    await okDoc.destroy();
+    let wrongRejected = false;
+    try { await pdfjs.getDocument({ data: enc.slice(), password: "wrong", verbosity: 0 }).promise; }
+    catch (e: any) { wrongRejected = e?.name === "PasswordException"; }
+    check("pdf_encrypt rejects wrong password", wrongRejected);
+  } catch (err) {
+    check("pdf_encrypt verification ran", false, String(err));
   }
 
   process.stdout.write(failures === 0 ? "\nALL PASS\n" : `\n${failures} FAILURE(S)\n`);

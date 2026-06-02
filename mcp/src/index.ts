@@ -19,11 +19,13 @@ for (const k of ["log", "info", "debug", "warn"] as const) {
 }
 
 import { readFile, writeFile } from "node:fs/promises";
+import * as path from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
 import * as pdf from "./pdf.js";
+import { encryptPdf } from "./encrypt.js";
 
 const CHARACTER_LIMIT = 25_000;
 const MAX_PDF_BYTES = Number(process.env.MCP_MAX_PDF_BYTES) || 25 * 1024 * 1024; // 25 MB
@@ -75,6 +77,30 @@ async function emitPdf(bytes: Uint8Array, outputPath?: string): Promise<Record<s
     return { outputPath, bytes: bytes.length };
   }
   return { dataBase64: bytesToB64(bytes), bytes: bytes.length };
+}
+
+// Emittiert mehrere Ergebnis-PDFs (Split). Mit `outputDir` werden Dateien
+// `<baseName>-part1.pdf` … geschrieben (stdio); sonst kommen sie als base64 zurück.
+async function emitParts(
+  parts: Uint8Array[],
+  pageCounts: number[],
+  outputDir?: string,
+  baseName = "part"
+): Promise<Record<string, unknown>> {
+  if (outputDir) {
+    const outputPaths: string[] = [];
+    for (let i = 0; i < parts.length; i++) {
+      const file = path.join(outputDir, `${baseName}-part${i + 1}.pdf`);
+      try { await writeFile(file, parts[i]); }
+      catch (e) { throw new pdf.ToolError(`Teil ${i + 1} nicht schreibbar: '${file}' (${e instanceof Error ? e.message : String(e)}).`); }
+      outputPaths.push(file);
+    }
+    return { partCount: parts.length, pageCounts, outputPaths };
+  }
+  return {
+    partCount: parts.length,
+    parts: parts.map((b, i) => ({ pageCount: pageCounts[i], bytes: b.length, dataBase64: bytesToB64(b) })),
+  };
 }
 
 const b64ToBytes = (s: string): Uint8Array => new Uint8Array(Buffer.from(s, "base64"));
@@ -214,10 +240,102 @@ Ausgabe: 'outputPath' oder 'dataBase64'.`,
     const r = await pdf.imagesToPdf(await loadImages(a.imagePaths, a.imagesBase64), a.pageSize);
     return ok({ pageCount: r.pageCount, ...(await emitPdf(r.bytes, a.outputPath)) }, `${r.pageCount} Bild-Seite(n) erzeugt.`);
   }));
+
+  server.registerTool("pdf_split", {
+    title: "PDF aufteilen",
+    description: `Teilt eine PDF in mehrere Teil-PDFs an Seiten-Schnittpunkten — nach jeder genannten Seite beginnt ein neuer Teil.
+Eingabe: 'path'/'dataBase64', 'afterPages' (z. B. "3,5" bei 8 Seiten → 1-3, 4-5, 6-8).
+Ausgabe: 'outputDir' (schreibt '<baseName>-part1.pdf' …) ODER (Default) ein Array 'parts' mit je 'dataBase64'.`,
+    inputSchema: {
+      ...srcIn,
+      afterPages: z.string().min(1).describe('Schnittpunkte als 1-basierte Seitenangabe, z. B. "3,5" oder "2-4".'),
+      outputDir: z.string().optional().describe("Wenn gesetzt: Teile dorthin schreiben (stdio); sonst als 'parts[].dataBase64' zurückgeben."),
+      baseName: z.string().optional().describe("Dateinamen-Stamm für die Teile (Default: 'part')."),
+    },
+    annotations: writeAnn,
+  }, guard(async (a: { path?: string; dataBase64?: string; afterPages: string; outputDir?: string; baseName?: string }) => {
+    const r = await pdf.split(await loadPdf(a), a.afterPages);
+    return ok(await emitParts(r.parts, r.pageCounts, a.outputDir, a.baseName), `In ${r.parts.length} Teile aufgeteilt (${r.pageCounts.join("+")} Seiten).`);
+  }));
+
+  server.registerTool("pdf_stamp", {
+    title: "Stempeln (Wasserzeichen / Seitenzahlen)",
+    description: `Stempelt ein diagonales Text-Wasserzeichen (45°, halbtransparent) und/oder Seitenzahlen/Bates auf jede Seite.
+Eingabe: 'path'/'dataBase64', mindestens 'watermarkText' ODER 'pageNumbers:true'.
+Seitenzahl-Format z. B. "{n} / {total}" oder "Bates {n}"; Position unten links/mitte/rechts. Ausgabe: 'outputPath' oder 'dataBase64'.`,
+    inputSchema: {
+      ...srcIn,
+      watermarkText: z.string().optional().describe("Diagonales Wasserzeichen (optional)."),
+      pageNumbers: z.boolean().optional().describe("Seitenzahlen/Bates aufstempeln (Default: false)."),
+      pageNumberFormat: z.string().optional().describe('Format, z. B. "{n} / {total}" (Default) oder "Bates {n}".'),
+      pageNumberPosition: z.enum(["bottom-center", "bottom-right", "bottom-left"]).optional().describe("Position der Seitenzahl (Default: bottom-center)."),
+      pageNumberStartAt: z.number().int().optional().describe("Startnummer für die erste Seite (Default: 1)."),
+      ...outOpt,
+    },
+    annotations: writeAnn,
+  }, guard(async (a: { path?: string; dataBase64?: string; watermarkText?: string; pageNumbers?: boolean; pageNumberFormat?: string; pageNumberPosition?: pdf.PageNumberPosition; pageNumberStartAt?: number; outputPath?: string }) => {
+    const r = await pdf.stamp(await loadPdf(a), {
+      watermarkText: a.watermarkText,
+      pageNumbers: a.pageNumbers,
+      pageNumberFormat: a.pageNumberFormat,
+      pageNumberPosition: a.pageNumberPosition,
+      pageNumberStartAt: a.pageNumberStartAt,
+    });
+    return ok({ pageCount: r.pageCount, ...(await emitPdf(r.bytes, a.outputPath)) }, `${r.pageCount} Seite(n) gestempelt.`);
+  }));
+
+  server.registerTool("pdf_encrypt", {
+    title: "PDF verschlüsseln (Passwort)",
+    description: `Schützt eine PDF mit AES-256 (ISO 32000-2, R6) — das Dokument lässt sich danach nur mit Passwort öffnen.
+Eingabe: 'path'/'dataBase64', 'password' (zum Öffnen). Optional 'ownerPassword' (Rechte-Passwort; Default = 'password').
+Ausgabe: 'outputPath' oder 'dataBase64'. Hinweis: bereits verschlüsselte PDFs zuerst entschlüsseln.`,
+    inputSchema: {
+      ...srcIn,
+      password: z.string().min(1).describe("Benutzer-/Öffnen-Passwort."),
+      ownerPassword: z.string().optional().describe("Optionales Owner-/Rechte-Passwort (Default = 'password')."),
+      ...outOpt,
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  }, guard(async (a: { path?: string; dataBase64?: string; password: string; ownerPassword?: string; outputPath?: string }) => {
+    const bytes = await encryptPdf(await loadPdf(a), a.password, a.ownerPassword);
+    return ok({ ...(await emitPdf(bytes, a.outputPath)) }, "PDF verschlüsselt (AES-256). Öffnen nur mit Passwort.");
+  }));
+
+  server.registerTool("pdf_form_fields", {
+    title: "Formularfelder lesen",
+    description: `Listet die AcroForm-Felder einer PDF (Text/Checkbox/Radio/Dropdown/ListBox) mit aktuellen Werten, Optionen, read-only/required und Seitenzahl. Read-only.
+Eingabe: 'path'/'dataBase64'. Returns: { fieldCount, fields: [{ name, type, value, options, readOnly, required, pageNumber }] }.`,
+    inputSchema: { ...srcIn },
+    annotations: readAnn,
+  }, guard(async (a: { path?: string; dataBase64?: string }) => {
+    const fields = await pdf.getFormFields(await loadPdf(a));
+    return ok({ fieldCount: fields.length, fields }, fields.length ? `${fields.length} Formularfeld(er).` : "Keine AcroForm-Felder gefunden.");
+  }));
+
+  server.registerTool("pdf_fill_form", {
+    title: "Formular ausfüllen",
+    description: `Setzt Werte in AcroForm-Felder und speichert. Optional 'flatten' (Werte fixieren, Felder nicht mehr editierbar).
+Werte je Feld als String-Array: Text/Radio/Dropdown 1 Wert, Checkbox ["true"] zum Ankreuzen / [] zum Leeren, ListBox 0..n.
+Eingabe: 'path'/'dataBase64', 'values'. Ausgabe: 'outputPath' oder 'dataBase64'. Unbekannte Felder werden in 'skipped' gemeldet.`,
+    inputSchema: {
+      ...srcIn,
+      values: z.array(z.object({
+        name: z.string().describe("Feldname (siehe pdf_form_fields)."),
+        value: z.array(z.string()).describe('Werte; Checkbox ["true"]/[] , Text/Radio/Dropdown 1 Wert, ListBox 0..n.'),
+      })).min(1).describe("Zu setzende Feldwerte."),
+      flatten: z.boolean().optional().describe("Felder nach dem Ausfüllen einbrennen (nicht mehr editierbar). Default: false."),
+      ...outOpt,
+    },
+    annotations: writeAnn,
+  }, guard(async (a: { path?: string; dataBase64?: string; values: pdf.FormFieldValue[]; flatten?: boolean; outputPath?: string }) => {
+    const r = await pdf.fillForm(await loadPdf(a), a.values, !!a.flatten);
+    const note = r.skipped.length ? ` (${r.skipped.length} übersprungen: ${r.skipped.join(", ")})` : "";
+    return ok({ filled: r.filled, skipped: r.skipped, ...(await emitPdf(r.bytes, a.outputPath)) }, `${r.filled} Feld(er) ausgefüllt${a.flatten ? " + eingebrannt" : ""}${note}.`);
+  }));
 }
 
 function buildServer(): McpServer {
-  const server = new McpServer({ name: "pagebound-pdf-mcp-server", version: "1.0.0" });
+  const server = new McpServer({ name: "pagebound-pdf-mcp-server", version: "1.1.0" });
   registerTools(server);
   return server;
 }

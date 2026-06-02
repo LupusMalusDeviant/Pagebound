@@ -101,11 +101,11 @@
     };
 
     // Roadmap als Ledger — Status semantisch (ok/warn/muted). Aktueller Stand:
-    // 0.1–0.9 erledigt, 1.0 in Arbeit (Konvertierungen ✅, Politur/Security/Tests offen).
+    // 0.1–1.0 inhaltlich erledigt; danach Beta-Erweiterungen (Designer/MCP/Deploy),
+    // offen nur noch die Release-Mechanik (öffentlicher Tag) + gespeicherte Batch-Regeln.
     private IEnumerable<(string Release, string Label, string Kind, string StatusText)> RoadmapRows()
     {
         var done = L.T("home.status.done");
-        var partial = L.T("home.status.partial");
         var pending = L.T("home.status.pending");
 
         yield return ("0.1", L.T("home.builtin.viewer"), "ok", done);
@@ -117,6 +117,9 @@
         yield return ("0.7", L.T("home.usp.markdown.title"), "ok", done);
         yield return ("0.8", "AcroForms / Encrypt / Bild→PDF / Compress", "ok", done);
         yield return ("0.9", $"{L.T("home.builtin.ocr")} + Batch", "ok", done);
-        yield return ("1.0", L.T("home.road.v1"), "warn", partial);
+        yield return ("1.0", L.T("home.road.v1"), "ok", done);
+        yield return ("1.0+", L.T("home.road.beta.suite"), "ok", done);
+        yield return ("1.0+", L.T("home.road.beta.mcp"), "ok", done);
+        yield return ("next", L.T("home.road.next"), "warn", pending);
     }
 }
