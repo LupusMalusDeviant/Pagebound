@@ -20,16 +20,44 @@
         </div>
 
         <div class="nav">
-            @foreach (var n in Navs)
+            @* 1. Start *@
+            <button type="button" class="nav-item"
+                    aria-current="@(_route == "" ? "page" : null)"
+                    @onclick="@(() => Go(""))">
+                <span class="ix" aria-hidden="true">01</span>
+                <span class="lbl">@L.T("nav.start")</span>
+            </button>
+
+            @* 2. PDF — aufklappbare Gruppe mit den PDF-Werkzeugen *@
+            <button type="button" class="nav-item nav-group-toggle"
+                    aria-expanded="@(_pdfOpen ? "true" : "false")" aria-controls="nav-pdf-group"
+                    @onclick="@(() => _pdfOpen = !_pdfOpen)">
+                <span class="ix" aria-hidden="true">02</span>
+                <span class="lbl">@L.T("nav.pdf")</span>
+                <span class="chev" aria-hidden="true">›</span>
+            </button>
+            @if (_pdfOpen)
             {
-                var item = n;
-                <button type="button" class="nav-item"
-                        aria-current="@(_route == item.Route ? "page" : null)"
-                        @onclick="@(() => Go(item.Route))">
-                    <span class="ix" aria-hidden="true">@item.Ix</span>
-                    <span class="lbl">@L.T(item.LabelKey)</span>
-                </button>
+                <div id="nav-pdf-group" class="nav-sub">
+                    @foreach (var s in PdfGroup)
+                    {
+                        var item = s;
+                        <button type="button" class="nav-item"
+                                aria-current="@(_route == item.Route ? "page" : null)"
+                                @onclick="@(() => Go(item.Route))">
+                            <span class="lbl">@L.T(item.LabelKey)</span>
+                        </button>
+                    }
+                </div>
             }
+
+            @* 3. Designer *@
+            <button type="button" class="nav-item"
+                    aria-current="@(_route == "editor" ? "page" : null)"
+                    @onclick="@(() => Go("editor"))">
+                <span class="ix" aria-hidden="true">03</span>
+                <span class="lbl">@L.T("nav.editor")</span>
+            </button>
         </div>
 
         <div class="rail-lib">
@@ -108,18 +136,22 @@
 
 @code {
     private sealed record NavDef(string Ix, string Route, string LabelKey);
-    private static readonly NavDef[] Navs =
+
+    // Subtabs der „PDF"-Gruppe. Start + Designer stehen separat als Top-Level.
+    private static readonly NavDef[] PdfGroup =
     {
-        new("01", "",      "nav.start"),
-        new("02", "reader","nav.reader"),
-        new("03", "tools", "nav.tools"),
-        new("04", "split", "nav.split"),
-        new("05", "batch", "nav.batch"),
-        new("06", "editor", "nav.editor"),
+        new("", "reader", "nav.reader"),
+        new("", "tools",  "nav.tools"),
+        new("", "split",  "nav.split"),
+        new("", "batch",  "nav.batch"),
     };
+
+    private static bool IsPdfRoute(string route) =>
+        route is "reader" or "tools" or "split" or "batch";
 
     private string _route = "";
     private bool _railOpen;
+    private bool _pdfOpen;
     private bool _settingsOpen;
     private string _theme = "dark";
     private List<LibraryEntry> _recent = new();
@@ -137,6 +169,7 @@
         "split" => L.T("nav.split"),
         "batch" => L.T("nav.batch"),
         "library" => L.T("nav.library"),
+        "editor" => L.T("nav.editor"),
         _ => L.T("nav.start"),
     };
 
@@ -167,6 +200,7 @@
     private void UpdateRoute()
     {
         _route = Nav.ToBaseRelativePath(Nav.Uri).Split('?', '#')[0].Trim('/').ToLowerInvariant();
+        if (IsPdfRoute(_route)) _pdfOpen = true; // PDF-Gruppe auto-aufklappen, wenn ein Subtab aktiv ist
         InvokeAsync(StateHasChanged);
     }
 

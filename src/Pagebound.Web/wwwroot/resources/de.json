@@ -441,6 +441,7 @@
   "tools.img2pdf.clear": "Leeren",
   "tools.img2pdf.remove": "Bild entfernen",
   "tools.img2pdf.result": "PDF erzeugt: {name} ({count} Seiten)",
+  "nav.pdf": "PDF",
   "nav.editor": "Designer",
   "editor.pageTitle": "WYSIWYG-Designer — Pagebound",
   "editor.heading": "Designer",

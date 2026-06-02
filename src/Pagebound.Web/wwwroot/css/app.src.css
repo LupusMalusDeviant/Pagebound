@@ -383,6 +383,16 @@ body.pb-app-bg { background: var(--bg-base); }
 .nav-item[aria-current="page"] .ix { color: var(--accent); }
 .nav-item[aria-current="page"]::before { content: ""; position: absolute; left: calc(-1 * var(--sp-5) + 1px); top: 50%; transform: translateY(-50%); width: 3px; height: 1.1em; border-radius: 0 2px 2px 0; background: var(--accent); }
 
+/* Aufklappbare Nav-Gruppe (PDF) + eingerückte Subtabs. */
+.nav-group-toggle .chev { justify-self: end; font-size: 1.05rem; color: var(--ink-4); transition: transform var(--speed), color var(--speed); }
+.nav-group-toggle[aria-expanded="true"] .chev { transform: rotate(90deg); color: var(--ink-3); }
+.nav-group-toggle:hover .chev { color: var(--ink-2); }
+.nav-sub { display: flex; flex-direction: column; margin: 0 0 var(--sp-1) 0.85rem; padding-left: var(--sp-3); border-left: 1px solid var(--line); }
+.nav-sub .nav-item { grid-template-columns: 1fr auto; min-height: 38px; padding: calc(0.4em * var(--d)) 0; }
+.nav-sub .nav-item .lbl { font-size: 0.94rem; font-weight: 450; }
+.nav-sub .nav-item[aria-current="page"]::before { display: none; }
+.nav-sub .nav-item[aria-current="page"] .lbl { color: var(--accent); font-weight: 600; }
+
 .rail-lib { padding: var(--sp-2) var(--sp-5) 0; overflow-y: auto; flex: 1; min-height: 0; }
 .coll-label { font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.18em; text-transform: uppercase; color: var(--ink-4); padding: var(--sp-4) 0 var(--sp-3); display: flex; align-items: baseline; justify-content: space-between; border-top: 1px solid var(--line); margin-top: var(--sp-2); }
 .coll-label a, .coll-label button { color: var(--accent); }
