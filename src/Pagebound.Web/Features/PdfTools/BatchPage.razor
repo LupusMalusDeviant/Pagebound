@@ -2,6 +2,7 @@
 @using Microsoft.AspNetCore.Components.Forms
 @inject IPdfManipulator Manipulator
 @inject IPdfConverter Converter
+@inject IBatchRuleStore Rules
 @inject ILocalizationService L
 @inject IJSRuntime JS
 
@@ -71,6 +72,35 @@
                         : L.T("batch.run"))
                 </button>
             </div>
+            <div class="flex flex-wrap items-center gap-2 text-sm">
+                <span class="text-pb-fg-muted">@L.T("batch.rules.label")</span>
+                @if (_rules.Count > 0)
+                {
+                    <select value="@_selectedRuleId" @onchange="OnRuleSelected"
+                            class="rounded border border-pb-border bg-pb-bg px-2 py-1 text-sm"
+                            aria-label="@L.T("batch.rules.label")">
+                        <option value="">@L.T("batch.rules.choose")</option>
+                        @foreach (var r in _rules)
+                        {
+                            <option value="@r.Id">@r.Name</option>
+                        }
+                    </select>
+                    <button type="button"
+                            class="rounded border border-pb-border px-2 py-0.5 text-pb-fg-muted hover:text-pb-fg disabled:opacity-40"
+                            disabled="@string.IsNullOrEmpty(_selectedRuleId)" @onclick="DeleteSelectedRuleAsync">
+                        @L.T("batch.rules.delete")
+                    </button>
+                }
+                <input @bind="_ruleName" @bind:event="oninput"
+                       class="rounded border border-pb-border bg-pb-bg px-2 py-1 text-sm"
+                       placeholder="@L.T("batch.rules.namePlaceholder")"
+                       aria-label="@L.T("batch.rules.namePlaceholder")" />
+                <button type="button"
+                        class="rounded border border-pb-border px-2 py-0.5 text-pb-fg-muted hover:text-pb-fg disabled:opacity-40"
+                        disabled="@string.IsNullOrWhiteSpace(_ruleName)" @onclick="SaveRuleAsync">
+                    @L.T("batch.rules.save")
+                </button>
+            </div>
             <p class="text-xs text-pb-fg-muted">@L.T("batch.note")</p>
         }
 
@@ -102,6 +132,54 @@
     private int _progress;
     private string? _status;
     private bool _statusError;
+
+    // --- Gespeicherte Regeln (FA-052) ---------------------------------------
+    private readonly List<BatchRule> _rules = new();
+    private string _selectedRuleId = string.Empty;
+    private string _ruleName = string.Empty;
+
+    protected override async Task OnInitializedAsync() => await LoadRulesAsync();
+
+    private async Task LoadRulesAsync()
+    {
+        try
+        {
+            var rules = await Rules.ListAsync(CancellationToken.None).ConfigureAwait(false);
+            _rules.Clear();
+            _rules.AddRange(rules);
+        }
+        catch { /* lokaler Speicher evtl. nicht verfügbar */ }
+        await InvokeAsync(StateHasChanged);
+    }
+
+    // Regel auswählen → ihre Operation sofort übernehmen (Passwort bleibt manuell).
+    private void OnRuleSelected(ChangeEventArgs e)
+    {
+        _selectedRuleId = e.Value?.ToString() ?? string.Empty;
+        var rule = _rules.FirstOrDefault(r => r.Id == _selectedRuleId);
+        if (rule is not null && Enum.TryParse<BatchOp>(rule.Operation, out var op))
+        {
+            _operation = op;
+        }
+    }
+
+    private async Task SaveRuleAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_ruleName)) return;
+        var rule = new BatchRule { Name = _ruleName.Trim(), Operation = _operation.ToString() };
+        await Rules.SaveAsync(rule, CancellationToken.None).ConfigureAwait(false);
+        _ruleName = string.Empty;
+        await LoadRulesAsync();
+        _selectedRuleId = rule.Id;
+    }
+
+    private async Task DeleteSelectedRuleAsync()
+    {
+        if (string.IsNullOrEmpty(_selectedRuleId)) return;
+        await Rules.DeleteAsync(_selectedRuleId, CancellationToken.None).ConfigureAwait(false);
+        _selectedRuleId = string.Empty;
+        await LoadRulesAsync();
+    }
 
     private async Task HandleFilesSelectedAsync(InputFileChangeEventArgs e)
     {
