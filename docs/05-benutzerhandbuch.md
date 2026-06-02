@@ -3,7 +3,9 @@
 Pagebound ist ein schlanker, datenschutzfreundlicher PDF-Reader und -Editor, der
 **vollständig in deinem Browser** läuft. Es gibt keinen Server, keine Konten und
 keine Telemetrie: Deine Dokumente verlassen dein Gerät nicht. Dieses Handbuch
-beschreibt alle Funktionen von Version 1.0.
+beschreibt alle Funktionen — Stand Version 0.8 Beta (kompletter 1.0-Funktions­umfang
+plus Erweiterungen wie **Dokument-Designer**, **Schwärzen/Redaktion**,
+**Stempeln** und Lese-Komfort).
 
 > **Kurzfassung:** PDF öffnen → lesen, suchen, annotieren → Seiten bearbeiten,
 > konvertieren, verschlüsseln → alles bleibt lokal. Annotationen werden
@@ -28,6 +30,8 @@ beschreibt alle Funktionen von Version 1.0.
 15. [Tastaturkürzel](#15-tastaturkürzel)
 16. [Datenschutz & Sicherheit](#16-datenschutz--sicherheit)
 17. [Browser-Unterstützung & Grenzen](#17-browser-unterstützung--grenzen)
+18. [Dokument-Designer (WYSIWYG)](#18-dokument-designer-wysiwyg)
+19. [Für Agenten: MCP-Server](#19-für-agenten-mcp-server)
 
 ---
 
@@ -39,8 +43,8 @@ ablegen — sie funktioniert danach auch offline.
 
 **Ein PDF öffnen:**
 
-- Auf der Startseite **„Reader öffnen"** wählen oder oben in der Schiene den
-  Eintrag **02 · Reader**.
+- Auf der Startseite **„Reader öffnen"** wählen oder in der Schiene links unter
+  **PDF** den Eintrag **Reader**.
 - Im Reader auf **„PDF öffnen"** klicken und eine Datei wählen.
 
 In Chromium-Browsern (Chrome, Edge, Brave, …) merkt sich Pagebound die Datei-
@@ -48,18 +52,18 @@ Referenz, sodass sie später aus der **Bibliothek** mit höchstens einer kurzen
 Rückfrage wieder geöffnet werden kann — ohne erneuten Datei-Dialog. In Firefox
 und Safari wird die Datei klassisch geladen.
 
-Alle weiteren Funktionen erreichst du über die nummerierte Schiene links:
+Alle weiteren Funktionen erreichst du über die Schiene links — sie ist in drei
+Bereiche gegliedert:
 
-| Nr. | Bereich   | Inhalt |
-|-----|-----------|--------|
-| 01  | Start     | Übersicht & Einstieg |
-| 02  | Reader    | Lesen, Suchen, Annotieren |
-| 03  | Werkzeuge | Seiten bearbeiten, Konvertieren, Verschlüsseln, Bilder→PDF |
-| 04  | Split     | Zwei PDFs nebeneinander |
-| 05  | Stapel    | Mehrere PDFs auf einmal verarbeiten |
+| Nr. | Bereich | Inhalt |
+|-----|---------|--------|
+| 1 | **Start** | Übersicht & Einstieg |
+| 2 | **PDF** *(aufklappbar)* | **Reader** (Lesen/Suchen/Annotieren), **PDF-Werkzeuge** (Seiten bearbeiten, Stempeln, Konvertieren, Verschlüsseln, Bilder→PDF), **Split-View** (zwei PDFs), **Stapel** (mehrere auf einmal) |
+| 3 | **Designer** | WYSIWYG-Editor für Flyer/Briefe/Folien (siehe [Abschnitt 18](#18-dokument-designer-wysiwyg)) |
 
-Im Lesemodus klappt die Schiene automatisch ein, damit du mehr Platz hast; der
-**☰**-Knopf oben links blendet sie jederzeit wieder ein.
+Die **PDF**-Gruppe klappt per Klick auf den Pfeil auf bzw. zu und öffnet sich
+automatisch, sobald du einen ihrer Unterpunkte aufrufst. Auf schmalen Bildschirmen
+wandert die ganze Schiene hinter den **☰**-Knopf oben links.
 
 ---
 
@@ -72,6 +76,10 @@ Der Reader zeigt das PDF seitenweise. Über der Seite findest du die Steuerung:
 - **Gliederung (Outline):** zeigt das PDF-Inhaltsverzeichnis, sofern vorhanden —
   Klick auf einen Eintrag springt zur Seite.
 - **Miniaturen (Thumbnails):** Seitenübersicht zum schnellen Springen.
+- **Nachtmodus:** invertiert die Seitendarstellung für angenehmes Lesen im
+  Dunkeln — reine Anzeige, das PDF selbst bleibt unverändert.
+- **Fortlaufend:** zeigt alle Seiten gestapelt zum durchgängigen Scrollen
+  (Leseansicht; zum Annotieren/Schwärzen zurück in die Einzelseiten-Ansicht).
 
 Der Text liegt als unsichtbarer, exakt positionierter **Text-Layer** über dem
 Seitenbild. Dadurch kannst du Text mit der Maus markieren, kopieren und der
@@ -112,6 +120,27 @@ Für Stift und Formen lassen sich **Farbe** und **Strichstärke** wählen. Ausge
 Annotationen kannst du bearbeiten oder löschen. Notizen sind über die Notizliste
 auffindbar und lassen sich per [Markdown-Export](#13-workspace--sidecar-dateien)
 zusammen exportieren (Obsidian-freundlich).
+
+### Annotationen einbrennen (Flatten)
+
+Mit **„Einbrennen"** in der Reader-Leiste schreibst du **alle** Annotationen
+(Markierungen, Notizen, Stift, Formen, Signaturen) **fest in eine neue PDF**. Das
+Ergebnis (`<name>.flach.pdf`) ist eine eigenständige Datei, in der die Markierungen
+dauerhaft eingezeichnet sind — unabhängig von der Sidecar. Das Original bleibt
+unangetastet.
+
+### Schwärzen (Redaktion)
+
+Im Modus **„Schwärzen"** ziehst du Bereiche auf der Seite auf; **„Schwärzung
+anwenden"** erzeugt eine PDF (`<name>.redacted.pdf`), in der diese Bereiche schwarz
+sind **und der darunterliegende Inhalt entfernt wurde** — der Text ist danach nicht
+mehr markier- oder extrahierbar (echte Redaktion, kein bloßes Überdecken).
+Betroffene Seiten werden dafür in ein Bild umgewandelt; Seiten ohne Schwärzung
+bleiben unverändert.
+
+> **Hinweis:** Die Schwärzung wirkt auf den sichtbaren Seiteninhalt; eingebettete
+> Dokument-Metadaten (z. B. Titel) bleiben unberührt — prüfe das Ergebnis vor der
+> Weitergabe.
 
 ---
 
@@ -171,6 +200,13 @@ kannst du:
 
 Alle Operationen laufen lokal über pdf-lib im Browser; das Original wird nicht
 verändert, du erhältst eine neue Datei.
+
+### Stempeln (Wasserzeichen & Seitenzahlen)
+
+Die Karte **„Stempeln"** legt in einem Durchgang ein diagonales, halbtransparentes
+**Text-Wasserzeichen** und/oder **Seitenzahlen** (Format „{n} / {total}", Position
+unten links/mitte/rechts) auf jede Seite. Ergebnis: `<name>.stamped.pdf` — das
+Original bleibt unverändert.
 
 ---
 
@@ -261,7 +297,8 @@ ausgeblendet; dort nutzt du den Export/Import-Weg.
 Über das **Zahnrad** oben rechts öffnest du die Einstellungen („Tweaks"):
 
 - **Darstellung:** Theme **Hell** / **Dunkel**.
-- **Akzentfarbe:** teal, jade, aqua oder coral.
+- **Akzentfarbe:** acht Töne (Teal, Jade, Aqua, Koralle, Violett, Blau, Rosé,
+  Bernstein) — alle in Hell und Dunkel kontraststark (WCAG AA).
 - **Lesbarkeit:** **Schriftgröße** (Schieberegler) und **Dichte** (kompakt /
   normal / luftig).
 - **Bewegung:** Animationen ein-/ausschalten.
@@ -336,6 +373,57 @@ Details: siehe [`SECURITY.md`](../SECURITY.md).
 - Volltextsuche arbeitet auf dem Text-Layer bzw. OCR-Ergebnis, nicht über die
   gesamte Bibliothek hinweg.
 - Gespeicherte Stapel-Regeln (Presets) sind noch nicht enthalten.
+
+---
+
+## 18. Dokument-Designer (WYSIWYG)
+
+Unter **3 · Designer** entwirfst du Dokumente direkt im Browser — Flyer, Briefe,
+Rechnungen, Folien — und exportierst sie als **pixelgenaues PDF**. Alles bleibt
+lokal; es ist eine eigene, von der PDF-Anzeige unabhängige Ansicht.
+
+**So funktioniert's:**
+
+- **Format wählen:** DIN A4 (hoch/quer), A5, Letter oder 16:9-Folie. Optional
+  **Schnittmarken** und eine **Seiten-Hintergrundfarbe**.
+- **Blöcke hinzufügen:** **Überschrift**, **Text** (Rich-Text:
+  fett/kursiv/unterstrichen, Listen, Ausrichtung, **Text- und Hervorhebungsfarbe**),
+  **Bild** (lokale PNG/JPG), **Form** (Rechteck/Linie/Trenner) und **Tabelle**.
+- **Block bearbeiten:** Block anklicken — direkt darauf erscheinen
+  **Verschieben (↑/↓)**, **Duplizieren** und **Löschen**; im Panel links stellst du
+  Ebene/Ausrichtung, Größe und **Block-Hintergrund** ein.
+- **Vorlagen:** fertige Startpunkte — **Rechnung** (mit Kleinunternehmer-Klausel
+  nach § 19 UStG), **Geschäftsbrief** nach DIN 5008, **Flyer** und **Präsentationsfolie**.
+- **Entwürfe:** liegen lokal (IndexedDB) und lassen sich jederzeit wieder laden.
+- **Export:** **PDF** (öffnet den Druckdialog → „Als PDF speichern"; das Dokument
+  wird seitenbündig, ohne Menüs gedruckt), **HTML** (eigenständige Datei) oder
+  **JSON** (der Entwurf zum Sichern/Weitergeben).
+
+> **Tipp:** Aktiviere im Druckdialog „Hintergrundgrafiken", wenn Block-/Seiten-
+> hintergründe mitgedruckt werden sollen.
+
+---
+
+## 19. Für Agenten: MCP-Server
+
+Für Entwickler und KI-Agenten stellt Pagebound seine PDF-Operationen zusätzlich
+über einen **MCP-Server** (Model Context Protocol) bereit — **tokenlos**. Ein Agent
+nutzt damit dieselben Engines (Zusammenführen, Splitten, Drehen, Löschen,
+Neu-Anordnen, Seiten extrahieren, Text-Extraktion, Bilder→PDF).
+
+- **Gehostet (Streamable HTTP):** `https://pagebound.app.lupusmalus.dev/mcp` — ohne
+  lokale Installation; PDFs gehen als base64 rein/raus, mit Limits (25 MB,
+  1000 Seiten).
+- **Lokal (stdio):** als Unterprozess starten — bequemes Datei-Pfad-I/O.
+
+Einbinden (Beispiel Claude Code):
+
+```bash
+claude mcp add --transport http pagebound-pdf https://pagebound.app.lupusmalus.dev/mcp
+```
+
+Details, JSON-Konfiguration und die vollständige Tool-Liste:
+[`mcp/README.md`](../mcp/README.md).
 
 ---
 

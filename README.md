@@ -5,9 +5,11 @@
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![.NET](https://img.shields.io/badge/.NET-10-512BD4.svg)](https://dotnet.microsoft.com/)
-[![Status](https://img.shields.io/badge/Status-Pre--Alpha-orange.svg)](#status--roadmap)
+[![Status](https://img.shields.io/badge/Status-0.8_Beta-brightgreen.svg)](#status--roadmap)
 
-> ⚠️ **Pre-Alpha**: Spielbar, viele Features drin, aber noch nicht release-fest. Läuft heute schon im Docker-Container oder per `dotnet run`.
+> **Beta (0.8)** — voll nutzbar, alle 1.0-Inhalte sind drin (plus Extras: WYSIWYG-Designer, Redaktion, MCP-Server …).
+>
+> 🌐 **Live ausprobieren:** **[pagebound.app.lupusmalus.dev](https://pagebound.app.lupusmalus.dev)** — läuft zu 100 % im Browser, nichts wird hochgeladen. Lokal via Docker oder `dotnet run` (s. u.).
 
 ---
 
@@ -21,12 +23,15 @@ Pagebound ist ein quelloffenes PDF-Werkzeug, das den Adobe Acrobat Reader im All
 
 ## Funktionen (bereits drin)
 
-- **Viewer** — PDFs öffnen, Seitennavigation, Zoom, Volltext-Suche, Inhaltsverzeichnis-Sidebar, Thumbnails
+- **Viewer** — PDFs öffnen, Seitennavigation, Zoom, Volltext-Suche, Inhaltsverzeichnis-Sidebar, Thumbnails; **Nachtmodus** (invertierte Anzeige) und **fortlaufende Leseansicht**
 - **Split-View** — zwei PDFs nebeneinander (eigene Navigation/Annotation/Suche je Pane), ziehbare Trennlinie + optionales Synchron-Scrollen
 - **Annotieren** — Text-Highlights (5 Farben), Sticky Notes mit Markdown-Vorschau, Stift, Rechteck/Pfeil/Linie
+- **Annotationen einbrennen (Flatten)** — Highlights, Notizen, Stift, Formen und Signaturen fest in die PDF brennen → eigenständige „flache" Datei
+- **Schwärzen / Redaktion** — Bereiche dauerhaft schwärzen; der Inhalt darunter wird **entfernt** (echte Redaktion, nicht nur überdeckt)
 - **Signieren** — PNG-Signatur platzieren (Drag/Resize) + Signer-Daten + Hash-Integritäts-Badge
 - **Formulare** — AcroForms ausfüllen (Text/Checkbox/Radio/Dropdown/Listbox), editierbar oder geflattet speichern
 - **Seiten-Werkzeuge** — Merge, Split, Neu-Sortieren, Löschen, Drehen, JPEG-Komprimierung
+- **Stempeln** — diagonales Text-Wasserzeichen und/oder Seitenzahlen (Bates) auf jede Seite
 - **Bilder → PDF** — PNG/JPG zu PDF (Seitengröße wählbar, Reihenfolge per Drag & Drop)
 - **Konvertieren** — PDF → PNG/JPG (ZIP, je Seite ein Bild), reiner Text (.txt) oder eigenständiges HTML
 - **Stapelverarbeitung** — mehrere PDFs auf einmal komprimieren / verschlüsseln / → Text, Ergebnis als eine ZIP
@@ -34,7 +39,9 @@ Pagebound ist ein quelloffenes PDF-Werkzeug, das den Adobe Acrobat Reader im All
 - **OCR** — Tesseract.js für nicht-durchsuchbare PDFs (Scans, Designer-Layouts)
 - **Library** — automatisch erfasst, Tags, Suche, drei Ansichten (Liste/Tabelle/Raster), optionaler zentraler Sidecar-Workspace-Ordner, JSON-Sidecar-Export/Import
 - **Markdown-Export** — Highlights + Notizen, Obsidian-kompatibel (YAML-Frontmatter, Wikilinks)
-- **Darstellung** — „Warm Ink"-Design, Settings-Panel mit Theme (Hell/Dunkel), Akzentfarbe, Schriftgröße, Dichte & Bewegung; DE/EN, Offline-PWA, keine Telemetrie
+- **WYSIWYG-Designer** (`/editor`) — Flyer, Briefe, Rechnungen (mit §-19-Vorlage), Geschäftsbriefe (DIN 5008) und 16:9-Folien direkt im Browser entwerfen: Block-Editor (Überschrift/Text/Bild/Form/Tabelle), Text- & Hintergrundfarben, Schnittmarken; Export als **pixelgenaues PDF** (Print-CSS), HTML oder JSON; Entwürfe lokal in IndexedDB
+- **MCP-Server für LLM-Agenten** — Pagebounds PDF-Operationen **tokenlos**, lokal über **stdio** oder **gehostet** über **Streamable HTTP** (`…/mcp`); 8 Tools, base64-I/O mit Größen-/Seiten-Limits
+- **Darstellung** — „Warm Ink"-Design, Settings-Panel mit Theme (Hell/Dunkel), **8 Akzentfarben**, Schriftgröße, Dichte & Bewegung; DE/EN, Offline-PWA, keine Telemetrie
 
 ## Quick-Start
 
@@ -75,7 +82,9 @@ Pagebound wird in **10 nutzbaren Releases** (0.1 → 1.0) entwickelt. Jeder Rele
 | 0.9 | + OCR (Tesseract.js) + Stapelverarbeitung | ✅ (gespeicherte Batch-Regeln FA-052 folgen) |
 | 1.0 | + Konvertierungen + Redesign + Security-Check + A11y (WCAG AA) + Doku + Tests | ✅ Inhalt komplett (Konvertierungen, „Warm Ink"-Redesign, Security-Check, A11y WCAG AA, E2E-Harness, Coverage 75 %, Benutzerhandbuch) — Release (Tag + public) ausstehend |
 
-**Zusatz** (außerhalb Pflichtenheft): „Warm Ink"-Redesign mit Settings/Tweaks (Dark/Light, Akzentfarben, Schriftgröße, Dichte, Bewegung), DE/EN-Sprachumschaltung, Sidecar Export/Import, pixel-genauer Text-Layer via PDF.js nativem `TextLayer`.
+**Zusatz** (außerhalb Pflichtenheft): „Warm Ink"-Redesign mit Settings/Tweaks (Dark/Light, 8 Akzentfarben, Schriftgröße, Dichte, Bewegung), DE/EN-Sprachumschaltung, Sidecar Export/Import, pixel-genauer Text-Layer via PDF.js nativem `TextLayer`.
+
+**Beta-Erweiterungen** (nach 1.0-Inhalt): Stempeln (Wasserzeichen/Seitenzahlen), **Annotationen einbrennen**, **Schwärzen/Redaktion**, **Reader-Komfort** (Nachtmodus + fortlaufende Ansicht), **WYSIWYG-Designer** (`/editor`), ein **gehosteter MCP-Server** und ein **Live-Deployment** unter [pagebound.app.lupusmalus.dev](https://pagebound.app.lupusmalus.dev).
 
 Details: [docs/02-lastenheft.md](docs/02-lastenheft.md) Abschnitt 6.
 
@@ -88,7 +97,7 @@ Details: [docs/02-lastenheft.md](docs/02-lastenheft.md) Abschnitt 6.
 | [docs/02-lastenheft.md](docs/02-lastenheft.md) | Lastenheft (Auftraggeber-Sicht, MoSCoW-Priorisierung, Releases) |
 | [docs/03-pflichtenheft.md](docs/03-pflichtenheft.md) | Pflichtenheft (Architektur, 17 Service-Interfaces, Test-Konzept, ADRs) |
 | [docs/04-deployment-guide.md](docs/04-deployment-guide.md) | Deployment-Guide (Docker, dotnet run, static hosting, CI/CD, TLS, Troubleshooting) |
-| [mcp/README.md](mcp/README.md) | **MCP-Server** — Pagebounds PDF-Operationen für LLM-Agenten (tokenlos, stdio) |
+| [mcp/README.md](mcp/README.md) | **MCP-Server** — Pagebounds PDF-Operationen für LLM-Agenten, tokenlos: lokal (stdio) **oder gehostet** (Streamable HTTP, `https://pagebound.app.lupusmalus.dev/mcp`) |
 | [docs/adrs/](docs/adrs/) | Architecture Decision Records — einzelne Entscheidungen im Detail |
 | [CHANGELOG.md](CHANGELOG.md) | Was sich von Commit zu Commit ändert |
 
@@ -100,6 +109,9 @@ Details: [docs/02-lastenheft.md](docs/02-lastenheft.md) Abschnitt 6.
 - **Verschlüsselung:** AES-256 (ISO 32000-2 V5/R6) via WebCrypto — hardware-beschleunigt, kein MD5, im Browser gegen PDF.js verifiziert
 - **Formulare:** AcroForms lesen + ausfüllen über die pdf-lib-Form-API (alle Standard-Feldtypen)
 - **OCR:** Tesseract.js im Web-Worker mit lazy-loaded Sprach-Modellen
+- **WYSIWYG-Designer:** nativer Block-Editor (contentEditable, **kein** Fremd-Editor/CDN), PDF-Export über den Browser-Druck (Print-CSS + dynamische `@page`-Größe), Entwürfe als JSON in IndexedDB
+- **Redaktion (Schwärzen):** betroffene Seiten werden via PDF.js rasterisiert und die Bereiche schwarz eingebrannt → Text/Vektor darunter wird **physisch entfernt** (echte Redaktion); unberührte Seiten bleiben vektor-treu
+- **MCP-Server:** TypeScript (`@modelcontextprotocol/sdk`), Dual-Transport (stdio **und** Streamable HTTP), dieselben Engines wie die App (pdf-lib + pdfjs-dist); gehostet als eigener Node-Container hinter Caddy, tokenlos mit Größen-/Seiten-Limits
 - **Styling:** „Warm Ink"-Design-System (warm-dunkle oklch-Tokens, editorial) auf Tailwind v4; self-gehostete Fonts (Newsreader/Hanken Grotesk/JetBrains Mono, kein Google-Fonts-Request); Theme/Akzent/Dichte/Schriftgröße/Bewegung im Settings-Panel (`pageboundTweaks` → CSS-Variablen + localStorage)
 - **State:** Service-basiert via DI, Interface-First (ADR-001)
 - **Persistenz:** IndexedDB für Annotations + Library, JSON-Sidecar für Export/Import
