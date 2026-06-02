@@ -102,18 +102,36 @@ public sealed class LocalizationService : ILocalizationService
     private async Task LoadBundleAsync(string lang, CancellationToken cancellationToken)
     {
         if (_bundles.ContainsKey(lang)) return;
+
+        // Netz-zuerst mit Cache-Bust: Pagebound ist eine PWA — der Service-Worker
+        // (und ggf. der Browser-HTTP-Cache) liefert sonst eine veraltete
+        // {lang}.json, eine Deploy-Version hinterher. Folge: neu hinzugekommene
+        // i18n-Schlüssel erscheinen als rohe Keys im UI (z. B. „nav.pdf"). Der
+        // eindeutige Query-Param matcht KEINEN SW-/HTTP-Cache-Eintrag und erzwingt
+        // damit ein frisches Laden. Schlägt das fehl (offline), greift der Fallback
+        // ohne Query — den bedient der Service-Worker aus seinem Cache.
+        var bust = DateTime.UtcNow.Ticks.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var json = await TryLoadBundleAsync($"resources/{lang}.json?v={bust}", cancellationToken).ConfigureAwait(false)
+                   ?? await TryLoadBundleAsync($"resources/{lang}.json", cancellationToken).ConfigureAwait(false);
+        if (json is not null)
+        {
+            _bundles[lang] = json;
+        }
+    }
+
+    private async Task<Dictionary<string, string>?> TryLoadBundleAsync(string url, CancellationToken cancellationToken)
+    {
         try
         {
-            var json = await _http.GetFromJsonAsync<Dictionary<string, string>>(
-                $"resources/{lang}.json", cancellationToken).ConfigureAwait(false);
-            if (json is not null)
-            {
-                _bundles[lang] = json;
-            }
+            // Der Query-Param in url (Cache-Bust) matcht keinen Service-Worker-/
+            // HTTP-Cache-Eintrag → es wird frisch über das Netz geladen.
+            return await _http.GetFromJsonAsync<Dictionary<string, string>>(url, cancellationToken).ConfigureAwait(false);
         }
         catch
         {
-            // Bundle nicht erreichbar — T() liefert dann die Keys 1:1.
+            // Netzfehler / kein Bundle — Aufrufer versucht den Fallback bzw. fällt
+            // am Ende auf rohe Keys zurück.
+            return null;
         }
     }
 }
