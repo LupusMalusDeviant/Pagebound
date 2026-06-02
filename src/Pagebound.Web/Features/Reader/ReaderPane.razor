@@ -1463,6 +1463,11 @@
     private const int MaxSignatureBytes = 2 * 1024 * 1024; // 2 MB
     private Dictionary<string, SignatureIntegrityStatus> _signatureStatuses = new();
     private byte[]? _originalPdfBytes;
+
+    /// <summary>Bytes der aktuell geladenen PDF — für den Split-View-Vergleich (B1). Null, wenn keine geladen.</summary>
+    public byte[]? LoadedPdfBytes => _originalPdfBytes;
+    /// <summary>Anzeigename der geladenen PDF (Dateiname oder Library-Titel).</summary>
+    public string? LoadedTitle => _currentFilename ?? _handle?.Title;
     private SignerInfo _signer = SignerInfo.Empty;
     private bool _signerPanelOpen;
     private bool _isSavingSignedPdf;

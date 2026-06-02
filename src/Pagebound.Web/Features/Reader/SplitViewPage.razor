@@ -10,11 +10,10 @@
     Annotation-Service per PdfId trennt und Library/Renderer ohnehin
     document-spezifisch arbeiten.
 
-    Resize + Sync-Scroll (FA-092) laufen über die `pageboundSplit`-Bridge:
-      - initResize: zieht die Trennlinie, setzt flex-basis der linken Pane.
-      - setSyncScroll: spiegelt proportional die Scroll-Position zwischen beiden
-        Panes (nur wenn der Schalter an ist). Die scrollbaren Elemente sind die
-        beiden overflow-auto-Wrapper hier — ReaderPane selbst fließt frei.
+    Resize + Sync-Scroll (FA-092) laufen über die `pageboundSplit`-Bridge.
+    Vergleich (B1): Button diff't die beiden geladenen PDFs auf Text-Ebene über
+    `pageboundPdf.diffPdfText` (dieselbe Engine wie /compare) und zeigt das
+    Ergebnis in einem Overlay — 100 % lokal, kein OCR.
 *@
 
 <PageTitle>@L.T("split.pageTitle")</PageTitle>
@@ -25,25 +24,75 @@
             <div class="font-medium text-sm">@L.T("split.heading")</div>
             <div class="text-xs text-pb-fg-muted truncate">@L.T("split.hint")</div>
         </div>
-        <label class="flex items-center gap-1.5 text-xs text-pb-fg-muted cursor-pointer select-none whitespace-nowrap"
-               title="@L.T("split.sync.title")">
-            <input type="checkbox" class="accent-pb-accent" @bind="_syncScroll" @bind:after="ApplySyncScrollAsync" />
-            @L.T("split.sync.label")
-        </label>
+        <div class="flex items-center gap-3 shrink-0">
+            <button type="button"
+                    class="rounded border border-pb-border px-2.5 py-1 text-xs text-pb-fg-muted hover:text-pb-fg disabled:opacity-40"
+                    disabled="@_diffBusy" @onclick="CompareAsync" title="@L.T("split.compare.title")">
+                @(_diffBusy ? L.T("compare.running") : L.T("split.compare.button"))
+            </button>
+            <label class="flex items-center gap-1.5 text-xs text-pb-fg-muted cursor-pointer select-none whitespace-nowrap"
+                   title="@L.T("split.sync.title")">
+                <input type="checkbox" class="accent-pb-accent" @bind="_syncScroll" @bind:after="ApplySyncScrollAsync" />
+                @L.T("split.sync.label")
+            </label>
+        </div>
     </header>
     <div @ref="_container" class="flex-1 min-h-0 flex">
         <div @ref="_leftPane" class="overflow-auto min-w-0 basis-1/2" aria-label="@L.T("split.pane.left")">
-            <ReaderPane />
+            <ReaderPane @ref="_leftReader" />
         </div>
         <div @ref="_gutter"
              class="w-1.5 shrink-0 cursor-col-resize bg-pb-border hover:bg-pb-accent/60 active:bg-pb-accent transition-colors touch-none"
              role="separator" aria-orientation="vertical"
              aria-label="@L.T("split.resize.aria")" title="@L.T("split.resize.title")"></div>
         <div @ref="_rightPane" class="flex-1 overflow-auto min-w-0" aria-label="@L.T("split.pane.right")">
-            <ReaderPane />
+            <ReaderPane @ref="_rightReader" />
         </div>
     </div>
 </div>
+
+@if (_diffError is not null || _diff is not null)
+{
+    <div class="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" @onclick="CloseDiff">
+        <div class="max-h-[80vh] w-full max-w-3xl overflow-auto rounded-lg border border-pb-border bg-pb-bg p-4 shadow-xl"
+             @onclick:stopPropagation="true">
+            <div class="mb-2 flex items-center justify-between">
+                <h2 class="text-sm font-medium">@L.T("split.compare.heading")</h2>
+                <button type="button" class="text-pb-fg-muted hover:text-pb-fg" @onclick="CloseDiff" aria-label="@L.T("common.close")">✕</button>
+            </div>
+            @if (_diffError is not null)
+            {
+                <div class="rounded border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">@_diffError</div>
+            }
+            else if (_diff is not null && !_diff.Changed)
+            {
+                <div class="rounded border border-green-300/40 bg-green-50/10 px-3 py-2 text-sm text-pb-fg">@L.T("compare.identical")</div>
+            }
+            else if (_diff is not null)
+            {
+                <p class="mb-1 text-xs text-pb-fg-muted">
+                    @L.T("compare.summary", new Dictionary<string, object> { ["pages"] = _diff.Pages.Count, ["added"] = _diff.Pages.Sum(p => p.Added.Count), ["removed"] = _diff.Pages.Sum(p => p.Removed.Count) })
+                </p>
+                @foreach (var pg in _diff.Pages)
+                {
+                    <div class="mt-3 rounded border border-pb-border p-2">
+                        <div class="mb-1 text-xs font-medium">@L.T("compare.page", new Dictionary<string, object> { ["n"] = pg.Page })</div>
+                        <div class="grid gap-2 sm:grid-cols-2">
+                            <div>
+                                <div class="text-xs text-pb-fg-muted">− @L.T("compare.removed")</div>
+                                <p class="text-sm leading-relaxed" style="color:#dc2626">@(pg.Removed.Count == 0 ? "—" : string.Join(" ", pg.Removed))</p>
+                            </div>
+                            <div>
+                                <div class="text-xs text-pb-fg-muted">+ @L.T("compare.added")</div>
+                                <p class="text-sm leading-relaxed" style="color:#16a34a">@(pg.Added.Count == 0 ? "—" : string.Join(" ", pg.Added))</p>
+                            </div>
+                        </div>
+                    </div>
+                }
+            }
+        </div>
+    </div>
+}
 
 @code {
     private ElementReference _container;
@@ -51,6 +100,12 @@
     private ElementReference _gutter;
     private ElementReference _rightPane;
     private bool _syncScroll;
+
+    private ReaderPane? _leftReader;
+    private ReaderPane? _rightReader;
+    private DiffResult? _diff;
+    private bool _diffBusy;
+    private string? _diffError;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -67,11 +122,44 @@
         await JS.InvokeVoidAsync("pageboundSplit.setSyncScroll", _leftPane, _rightPane, _syncScroll);
     }
 
+    // B1: Text-Vergleich der beiden geladenen PDFs (gleiche Engine wie /compare).
+    private async Task CompareAsync()
+    {
+        if (_diffBusy) return;
+        _diff = null;
+        _diffError = null;
+        var a = _leftReader?.LoadedPdfBytes;
+        var b = _rightReader?.LoadedPdfBytes;
+        if (a is null || b is null)
+        {
+            _diffError = L.T("split.compare.needBoth");
+            return;
+        }
+        _diffBusy = true;
+        try
+        {
+            _diff = await JS.InvokeAsync<DiffResult>(
+                "pageboundPdf.diffPdfText", Convert.ToBase64String(a), Convert.ToBase64String(b));
+        }
+        catch (Exception ex)
+        {
+            _diffError = ex.Message;
+        }
+        finally
+        {
+            _diffBusy = false;
+        }
+    }
+
+    private void CloseDiff()
+    {
+        _diff = null;
+        _diffError = null;
+    }
+
     public async ValueTask DisposeAsync()
     {
-        // Beim Verlassen der Seite die globalen Listener der Bridge abräumen,
-        // damit beim Wieder-Betreten nichts doppelt hängt. Best-effort: bei
-        // bereits abgebauter JS-Verbindung einfach schlucken.
+        // Beim Verlassen der Seite die globalen Listener der Bridge abräumen.
         try
         {
             await JS.InvokeVoidAsync("pageboundSplit.teardownResize");
@@ -81,5 +169,22 @@
         {
             // Navigation/Teardown — ignorieren.
         }
+    }
+
+    // Spiegelt das von pageboundPdf.diffPdfText gelieferte Objekt (camelCase,
+    // case-insensitiv via Blazor-JS-Interop-Serializer).
+    private sealed class DiffResult
+    {
+        public int PageCountA { get; set; }
+        public int PageCountB { get; set; }
+        public bool Changed { get; set; }
+        public List<DiffPage> Pages { get; set; } = new();
+    }
+
+    private sealed class DiffPage
+    {
+        public int Page { get; set; }
+        public List<string> Added { get; set; } = new();
+        public List<string> Removed { get; set; } = new();
     }
 }
