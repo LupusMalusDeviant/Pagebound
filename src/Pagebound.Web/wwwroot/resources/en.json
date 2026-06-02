@@ -423,6 +423,7 @@
   "tools.convert.jpg": "JPG (ZIP)",
   "tools.convert.text": "Text (.txt)",
   "tools.convert.html": "HTML",
+  "tools.convert.csv": "CSV (table, experimental)",
   "tools.convert.button": "Convert",
   "tools.convert.running": "Converting …",
   "tools.convert.title": "Convert the loaded PDF to the selected format and download",

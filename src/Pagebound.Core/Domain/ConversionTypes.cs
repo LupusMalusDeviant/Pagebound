@@ -6,7 +6,8 @@ public enum ConversionFormat
     Png,
     Jpg,
     Text,
-    Html
+    Html,
+    Csv
 }
 
 /// <summary>

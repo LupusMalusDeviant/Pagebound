@@ -465,6 +465,93 @@ export async function textRectsForPages(
   });
 }
 
+// ============================================================================
+// Tabellen-Extraktion (Roadmap B2) — Best-Effort PDF → CSV
+// ----------------------------------------------------------------------------
+// Reine Heuristik auf den Text-Positionen (KEIN ML): Items werden zeilenweise
+// über ihre y-Position geclustert, innerhalb der Zeile über horizontale Lücken
+// in Zellen getrennt. Gut bei tabellarischen Layouts, bei Fließtext erwartungs-
+// gemäß grob. Seiten werden aneinandergehängt. 100 % lokal.
+// ============================================================================
+interface TblItem {
+  str: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+function csvEscapeCell(s: string): string {
+  const v = s.trim();
+  return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+}
+
+function pageItemsToCsv(items: TblItem[]): string[] {
+  if (items.length === 0) return [];
+  const heights = items.map((i) => i.h).filter((h) => h > 0).sort((a, b) => a - b);
+  const medH = heights.length ? heights[Math.floor(heights.length / 2)] : 10;
+  const rowTol = Math.max(2, medH * 0.6); // selbe Zeile, wenn y-Abstand kleiner
+  const colGap = Math.max(4, medH * 1.2); // neue Zelle, wenn x-Lücke größer
+
+  // 1) Zeilen über y clustern
+  const byY = [...items].sort((a, b) => a.y - b.y || a.x - b.x);
+  const rows: TblItem[][] = [];
+  let cur: TblItem[] = [];
+  let curY = byY[0].y;
+  for (const it of byY) {
+    if (cur.length && Math.abs(it.y - curY) > rowTol) {
+      rows.push(cur);
+      cur = [];
+    }
+    if (!cur.length) curY = it.y;
+    cur.push(it);
+  }
+  if (cur.length) rows.push(cur);
+
+  // 2) je Zeile über x-Lücken in Zellen trennen
+  return rows.map((row) => {
+    const sorted = row.sort((a, b) => a.x - b.x);
+    const cells: string[] = [];
+    let cell = sorted[0].str;
+    let prevRight = sorted[0].x + sorted[0].w;
+    for (let i = 1; i < sorted.length; i++) {
+      const it = sorted[i];
+      if (it.x - prevRight > colGap) {
+        cells.push(cell);
+        cell = it.str;
+      } else {
+        cell += (cell.endsWith(" ") || it.str.startsWith(" ") ? "" : " ") + it.str;
+      }
+      prevRight = it.x + it.w;
+    }
+    cells.push(cell);
+    return cells.map(csvEscapeCell).join(",");
+  });
+}
+
+export async function extractTablesCsv(data: Uint8Array): Promise<string> {
+  return withTransientDoc(data, async (doc) => {
+    const pages: string[] = [];
+    for (let p = 1; p <= doc.numPages; p++) {
+      const page = await doc.getPage(p);
+      const content = await page.getTextContent();
+      const vp = page.getViewport({ scale: 1 });
+      const items: TblItem[] = (content.items as unknown as PdfTextItem[])
+        .filter((it) => typeof it.str === "string" && it.str.trim().length > 0)
+        .map((it) => ({
+          str: it.str,
+          x: it.transform[4],
+          y: vp.height - it.transform[5],
+          w: it.width || 0,
+          h: it.height || 0,
+        }));
+      const csvRows = pageItemsToCsv(items);
+      if (csvRows.length) pages.push(csvRows.join("\n"));
+    }
+    return pages.join("\n\n");
+  });
+}
+
 export interface PdfDiffPageDto { page: number; added: string[]; removed: string[]; }
 export interface PdfDiffDto {
   pageCountA: number;

@@ -46,6 +46,14 @@ public sealed class JsPdfConverter : IPdfConverter
                     .ConfigureAwait(false);
                 return new ConversionResult(Encoding.UTF8.GetBytes(html ?? string.Empty), "html", "text/html");
             }
+            case ConversionFormat.Csv:
+            {
+                // Best-Effort-Tabellen-Extraktion (Roadmap B2): Heuristik auf den
+                // Text-Positionen, kein ML. CSV (UTF-8), Seiten aneinandergehängt.
+                var csv = await _js.InvokeAsync<string>($"{Module}.extractTablesCsv", cancellationToken, pdf)
+                    .ConfigureAwait(false);
+                return new ConversionResult(Encoding.UTF8.GetBytes(csv ?? string.Empty), "csv", "text/csv");
+            }
             case ConversionFormat.Png:
             case ConversionFormat.Jpg:
             {
