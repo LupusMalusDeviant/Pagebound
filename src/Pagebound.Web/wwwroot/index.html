@@ -78,8 +78,54 @@
     <script src="js/wysiwyg-editor.js"></script>
     <script src="_framework/blazor.webassembly#[.{fingerprint}].js"></script>
     <script>
+        // Service-Worker + sanftes Update-Handling.
+        // Der SW (service-worker.published.js) macht skipWaiting()+clients.claim(),
+        // d. h. eine neue Version übernimmt nach einem Deploy automatisch. Die bereits
+        // GEÖFFNETE Seite läuft aber noch mit dem alten WASM-Code (+ den i18n-Bundles,
+        // die network-first frisch geladen werden) — Stand-Mismatch. Statt hart neu zu
+        // laden (würde ungespeicherte Annotationen/Designer-Entwürfe verwerfen) zeigen
+        // wir einen dezenten "Neue Version verfügbar"-Hinweis; Neu-Laden entscheidet der Nutzer.
         if ('serviceWorker' in navigator) {
+            // Kontrollierte der SW die Seite schon beim Laden? Nur dann ist ein späterer
+            // controllerchange ein echtes Update — nicht die Erstinstallation.
+            var pbWasControlled = !!navigator.serviceWorker.controller;
+            var pbReloading = false;
+
             navigator.serviceWorker.register('service-worker.js', { updateViaCache: 'none' });
+
+            navigator.serviceWorker.addEventListener('controllerchange', function () {
+                if (!pbWasControlled || pbReloading) return; // Erstinstallation / schon am Neuladen
+                pbShowUpdateBanner();
+            });
+
+            // Lange offene Tabs: stündlich aktiv nach einem Update schauen.
+            setInterval(function () {
+                navigator.serviceWorker.getRegistration().then(function (r) { if (r) r.update(); });
+            }, 60 * 60 * 1000);
+
+            function pbShowUpdateBanner() {
+                if (document.getElementById('pb-update-banner')) return;
+                var de = (document.documentElement.getAttribute('lang') || navigator.language || 'de').toLowerCase().indexOf('de') === 0;
+                var bar = document.createElement('div');
+                bar.id = 'pb-update-banner';
+                bar.setAttribute('role', 'status');
+                bar.style.cssText = 'position:fixed;left:50%;bottom:20px;transform:translateX(-50%);z-index:99999;display:flex;gap:.75rem;align-items:center;max-width:92vw;padding:.7rem .9rem;border-radius:10px;background:#0f172a;color:#f8fafc;box-shadow:0 10px 30px rgba(0,0,0,.35);font:500 14px/1.4 system-ui,-apple-system,sans-serif;border:1px solid rgba(248,250,252,.15)';
+                var txt = document.createElement('span');
+                txt.textContent = de ? 'Neue Version verfügbar.' : 'A new version is available.';
+                var btn = document.createElement('button');
+                btn.type = 'button';
+                btn.textContent = de ? 'Neu laden' : 'Reload';
+                btn.style.cssText = 'cursor:pointer;border:0;border-radius:7px;padding:.45rem .8rem;font:600 14px system-ui,sans-serif;background:#14b8a6;color:#04201c';
+                btn.onclick = function () { pbReloading = true; location.reload(); };
+                var dismiss = document.createElement('button');
+                dismiss.type = 'button';
+                dismiss.setAttribute('aria-label', de ? 'Schließen' : 'Dismiss');
+                dismiss.textContent = '×';
+                dismiss.style.cssText = 'cursor:pointer;border:0;background:transparent;color:#94a3b8;font-size:18px;line-height:1;padding:0 .25rem';
+                dismiss.onclick = function () { bar.remove(); };
+                bar.appendChild(txt); bar.appendChild(btn); bar.appendChild(dismiss);
+                document.body.appendChild(bar);
+            }
         }
     </script>
 </body>
