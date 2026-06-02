@@ -146,6 +146,25 @@ async function main() {
   const same = await pdf.diffText(await makeSample(2, "Same"), await makeSample(2, "Same"));
   check("pdf_diff reports no change for identical text", same.changed === false && same.pages.length === 0, JSON.stringify(same.changed));
 
+  // set_metadata
+  const metaIn = await makeSample(1, "Meta");
+  const meta = await pdf.setMetadata(metaIn, { title: "Vertrag v2", author: "Ada", keywords: ["pdf", "test"] });
+  check("pdf_set_metadata applies title+author+keywords", meta.applied.includes("title") && meta.applied.includes("author") && meta.applied.includes("keywords"));
+  const metaInfo = await pdf.getInfo(meta.bytes);
+  check("pdf_set_metadata persists (info reads title/author)", metaInfo.title === "Vertrag v2" && metaInfo.author === "Ada", JSON.stringify({ t: metaInfo.title, a: metaInfo.author }));
+
+  // create_field
+  const cf = await pdf.createFields(await makeSample(1, "Form"), [
+    { name: "fullName", type: "text", page: 1, x: 40, y: 500, width: 200, height: 18, value: "Ada Lovelace" },
+    { name: "agree", type: "checkbox", page: 1, x: 40, y: 470, width: 14, height: 14, value: "true" },
+  ]);
+  check("pdf_create_field created 2 fields", cf.created === 2);
+  const cfFields = await pdf.getFormFields(cf.bytes);
+  const tf = cfFields.find((f) => f.name === "fullName");
+  const cb = cfFields.find((f) => f.name === "agree");
+  check("pdf_create_field fields readable + typed", tf?.type === "Text" && cb?.type === "Checkbox", JSON.stringify(cfFields.map((f) => `${f.name}:${f.type}`)));
+  check("pdf_create_field text value set", tf?.value[0] === "Ada Lovelace", JSON.stringify(tf?.value));
+
   process.stdout.write(failures === 0 ? "\nALL PASS\n" : `\n${failures} FAILURE(S)\n`);
   process.exit(failures === 0 ? 0 : 1);
 }

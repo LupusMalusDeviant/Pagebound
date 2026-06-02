@@ -49,6 +49,8 @@ Eingaben bleiben stets unangetastet (neue Datei/neue Bytes).
 | `pdf_encrypt` | PDF mit **Passwort** schützen (AES-256, ISO 32000-2 R6) |
 | `pdf_form_fields` | AcroForm-Felder auflisten (Werte, Optionen, Seitenzahl; read-only) |
 | `pdf_fill_form` | Formularfelder ausfüllen, optional **flatten** (einbrennen) |
+| `pdf_create_field` | AcroForm-Felder (Text/Checkbox) **anlegen** — Einstieg Formular-Erstellung |
+| `pdf_set_metadata` | Metadaten setzen (Titel/Autor/Betreff/Schlagwörter/Ersteller/Producer) |
 | `images_to_pdf` | PNG/JPG-Bilder zu einer PDF (`imagePaths` / `imagesBase64`) |
 
 Damit deckt der Server die PDF-Operationen der Web-App ab, die ohne Browser-

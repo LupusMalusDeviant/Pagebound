@@ -464,6 +464,77 @@ export async function extractText(bytes: Uint8Array, pages?: string): Promise<{ 
   }
 }
 
+// --- Metadata ----------------------------------------------------------------
+
+export interface PdfMetadataInput {
+  title?: string;
+  author?: string;
+  subject?: string;
+  keywords?: string[];
+  creator?: string;
+  producer?: string;
+}
+
+/** Setzt Dokument-Metadaten (nur die übergebenen Felder). Returns angewandte Felder. */
+export async function setMetadata(input: Uint8Array, meta: PdfMetadataInput): Promise<{ bytes: Uint8Array; applied: string[] }> {
+  const doc = await loadDoc(input);
+  const applied: string[] = [];
+  if (meta.title !== undefined) { doc.setTitle(meta.title); applied.push("title"); }
+  if (meta.author !== undefined) { doc.setAuthor(meta.author); applied.push("author"); }
+  if (meta.subject !== undefined) { doc.setSubject(meta.subject); applied.push("subject"); }
+  if (meta.keywords !== undefined) { doc.setKeywords(meta.keywords); applied.push("keywords"); }
+  if (meta.creator !== undefined) { doc.setCreator(meta.creator); applied.push("creator"); }
+  if (meta.producer !== undefined) { doc.setProducer(meta.producer); applied.push("producer"); }
+  if (applied.length === 0) throw new ToolError("Keine Metadaten angegeben (title/author/subject/keywords/creator/producer).");
+  return { bytes: await save(doc), applied };
+}
+
+// --- AcroForm field creation -------------------------------------------------
+
+export interface NewField {
+  name: string;
+  type: "text" | "checkbox";
+  /** 1-basierte Seitenzahl. */
+  page: number;
+  /** Position/Größe in PDF-Punkten, Ursprung UNTEN-links (pdf-lib-Konvention). */
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  /** Text: Vorbelegung; Checkbox: "true"/"on" = angehakt. */
+  value?: string;
+}
+
+/** Legt AcroForm-Felder (Text/Checkbox) an. Einstieg in die Formular-Erstellung. */
+export async function createFields(input: Uint8Array, fields: NewField[]): Promise<{ bytes: Uint8Array; created: number }> {
+  if (!fields || fields.length === 0) throw new ToolError("Keine Felder angegeben.");
+  const doc = await loadDoc(input);
+  const form = doc.getForm();
+  const pages = doc.getPages();
+  let created = 0;
+  for (const f of fields) {
+    if (!f.name) throw new ToolError("Feldname fehlt.");
+    const page = pages[f.page - 1];
+    if (!page) throw new ToolError(`Seite ${f.page} existiert nicht (1–${pages.length}).`);
+    const rect = { x: f.x, y: f.y, width: f.width, height: f.height };
+    try {
+      if (f.type === "checkbox") {
+        const cb = form.createCheckBox(f.name);
+        cb.addToPage(page, rect);
+        if (f.value === "true" || f.value === "on") cb.check();
+      } else {
+        const tf = form.createTextField(f.name);
+        if (f.value !== undefined) tf.setText(f.value);
+        tf.addToPage(page, rect);
+      }
+    } catch (e) {
+      throw new ToolError(`Feld '${f.name}' nicht anlegbar (${errMsg(e)}). Name evtl. schon vergeben?`);
+    }
+    created++;
+  }
+  return { bytes: await save(doc), created };
+}
+
 function round(n: number): number {
   return Math.round(n * 100) / 100;
 }

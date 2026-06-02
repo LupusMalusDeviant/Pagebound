@@ -373,6 +373,81 @@ export async function convertToText(data: Uint8Array): Promise<string> {
   });
 }
 
+// ============================================================================
+// PDF-Vergleich (Text-Diff zweier PDFs, seitenweise) — Roadmap "PDF-Diff"
+// ----------------------------------------------------------------------------
+// buildPageText fügt Wörter mit Leerzeichen (keine \n) zusammen, daher
+// vergleichen wir auf WORT-Ebene (LCS). Liefert je geänderter Seite die in B
+// hinzugekommenen und die aus A entfernten Wörter — 100 % lokal, kein OCR.
+// ============================================================================
+
+function b64ToBytesLocal(b64: string): Uint8Array {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+const MAX_DIFF_TOKENS = 6000; // Schutz gegen O(n·m)-LCS-Blowup je Seite
+
+function tokenDiff(a: string[], b: string[]): { added: string[]; removed: string[] } {
+  const n = Math.min(a.length, MAX_DIFF_TOKENS);
+  const m = Math.min(b.length, MAX_DIFF_TOKENS);
+  const dp: number[][] = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    }
+  }
+  const added: string[] = [];
+  const removed: string[] = [];
+  let i = 0;
+  let j = 0;
+  while (i < n && j < m) {
+    if (a[i] === b[j]) { i++; j++; }
+    else if (dp[i + 1][j] >= dp[i][j + 1]) { removed.push(a[i]); i++; }
+    else { added.push(b[j]); j++; }
+  }
+  while (i < n) { removed.push(a[i]); i++; }
+  while (j < m) { added.push(b[j]); j++; }
+  return { added, removed };
+}
+
+async function allPageTexts(data: Uint8Array): Promise<string[]> {
+  return withTransientDoc(data, async (doc) => {
+    const out: string[] = [];
+    for (let p = 1; p <= doc.numPages; p++) {
+      const { pageText } = await readPageText(doc, p);
+      out.push(pageText);
+    }
+    return out;
+  });
+}
+
+export interface PdfDiffPageDto { page: number; added: string[]; removed: string[]; }
+export interface PdfDiffDto {
+  pageCountA: number;
+  pageCountB: number;
+  changed: boolean;
+  pages: PdfDiffPageDto[];
+}
+
+/** Vergleicht zwei PDFs (base64) auf Text-Ebene, seitenweise, wortgenau. */
+export async function diffPdfText(aBase64: string, bBase64: string): Promise<PdfDiffDto> {
+  const [ta, tb] = await Promise.all([
+    allPageTexts(b64ToBytesLocal(aBase64)),
+    allPageTexts(b64ToBytesLocal(bBase64)),
+  ]);
+  const tokens = (t: string): string[] => (t ?? "").split(/\s+/).map((s) => s.trim()).filter(Boolean);
+  const maxPages = Math.max(ta.length, tb.length);
+  const pages: PdfDiffPageDto[] = [];
+  for (let p = 0; p < maxPages; p++) {
+    const { added, removed } = tokenDiff(tokens(ta[p] ?? ""), tokens(tb[p] ?? ""));
+    if (added.length || removed.length) pages.push({ page: p + 1, added, removed });
+  }
+  return { pageCountA: ta.length, pageCountB: tb.length, changed: pages.length > 0, pages };
+}
+
 /**
  * FA-030: jede Seite als PNG/JPG rendern und in ein (store-only) ZIP packen.
  * Bilder sind bereits komprimiert, daher level 0 — schneller, kaum größer.

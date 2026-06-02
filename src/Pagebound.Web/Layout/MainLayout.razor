@@ -140,14 +140,15 @@
     // Subtabs der „PDF"-Gruppe. Start + Designer stehen separat als Top-Level.
     private static readonly NavDef[] PdfGroup =
     {
-        new("", "reader", "nav.reader"),
-        new("", "tools",  "nav.tools"),
-        new("", "split",  "nav.split"),
-        new("", "batch",  "nav.batch"),
+        new("", "reader",  "nav.reader"),
+        new("", "tools",   "nav.tools"),
+        new("", "split",   "nav.split"),
+        new("", "compare", "nav.compare"),
+        new("", "batch",   "nav.batch"),
     };
 
     private static bool IsPdfRoute(string route) =>
-        route is "reader" or "tools" or "split" or "batch";
+        route is "reader" or "tools" or "split" or "compare" or "batch";
 
     private string _route = "";
     private bool _railOpen;
@@ -167,6 +168,7 @@
         "reader" => L.T("nav.reader"),
         "tools" => L.T("nav.tools"),
         "split" => L.T("nav.split"),
+        "compare" => L.T("nav.compare"),
         "batch" => L.T("nav.batch"),
         "library" => L.T("nav.library"),
         "editor" => L.T("nav.editor"),

@@ -365,10 +365,55 @@ Returns: { changed, pageCountA, pageCountB, addedLines, removedLines, pages: [{ 
     if (text.length > CHARACTER_LIMIT) text = text.slice(0, CHARACTER_LIMIT) + "\n\n[gekürzt]";
     return ok(r as unknown as Record<string, unknown>, text);
   }));
+
+  server.registerTool("pdf_set_metadata", {
+    title: "Metadaten setzen",
+    description: `Setzt Dokument-Metadaten (nur die übergebenen Felder): Titel, Autor, Betreff, Schlagwörter, Ersteller, Producer.
+Eingabe: 'path'/'dataBase64' + mindestens ein Feld. Ausgabe: 'outputPath' oder 'dataBase64'.`,
+    inputSchema: {
+      ...srcIn,
+      title: z.string().optional().describe("Dokumenttitel."),
+      author: z.string().optional().describe("Autor."),
+      subject: z.string().optional().describe("Betreff."),
+      keywords: z.array(z.string()).optional().describe("Schlagwörter."),
+      creator: z.string().optional().describe("Erstellende Anwendung."),
+      producer: z.string().optional().describe("Producer."),
+      ...outOpt,
+    },
+    annotations: writeAnn,
+  }, guard(async (a: { path?: string; dataBase64?: string; title?: string; author?: string; subject?: string; keywords?: string[]; creator?: string; producer?: string; outputPath?: string }) => {
+    const r = await pdf.setMetadata(await loadPdf(a), { title: a.title, author: a.author, subject: a.subject, keywords: a.keywords, creator: a.creator, producer: a.producer });
+    return ok({ applied: r.applied, ...(await emitPdf(r.bytes, a.outputPath)) }, `Metadaten gesetzt: ${r.applied.join(", ")}.`);
+  }));
+
+  server.registerTool("pdf_create_field", {
+    title: "Formularfelder anlegen",
+    description: `Legt AcroForm-Felder (Text/Checkbox) an — Einstieg in die Formular-Erstellung.
+Positionen in PDF-Punkten, Ursprung UNTEN-links (pdf-lib-Konvention; 1 Punkt = 1/72 Zoll, A4 = 595×842 pt).
+Eingabe: 'path'/'dataBase64', 'fields'. Ausgabe: 'outputPath' oder 'dataBase64'. Danach via pdf_form_fields prüfbar.`,
+    inputSchema: {
+      ...srcIn,
+      fields: z.array(z.object({
+        name: z.string().describe("Eindeutiger Feldname."),
+        type: z.enum(["text", "checkbox"]).describe("Feldtyp."),
+        page: z.number().int().positive().describe("1-basierte Seitenzahl."),
+        x: z.number().describe("X in Punkten (unten-links)."),
+        y: z.number().describe("Y in Punkten (unten-links)."),
+        width: z.number().positive().describe("Breite in Punkten."),
+        height: z.number().positive().describe("Höhe in Punkten."),
+        value: z.string().optional().describe('Text: Vorbelegung; Checkbox: "true"/"on" = angehakt.'),
+      })).min(1).describe("Anzulegende Felder."),
+      ...outOpt,
+    },
+    annotations: writeAnn,
+  }, guard(async (a: { path?: string; dataBase64?: string; fields: pdf.NewField[]; outputPath?: string }) => {
+    const r = await pdf.createFields(await loadPdf(a), a.fields);
+    return ok({ created: r.created, ...(await emitPdf(r.bytes, a.outputPath)) }, `${r.created} Feld(er) angelegt.`);
+  }));
 }
 
 function buildServer(): McpServer {
-  const server = new McpServer({ name: "pagebound-pdf-mcp-server", version: "1.2.0" });
+  const server = new McpServer({ name: "pagebound-pdf-mcp-server", version: "1.3.0" });
   registerTools(server);
   return server;
 }
