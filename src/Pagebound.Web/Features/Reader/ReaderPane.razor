@@ -315,6 +315,10 @@
                             disabled="@(_redactions.Count == 0)" @onclick="ClearRedactions">
                         @L.T("reader.redact.clear")
                     </button>
+                    <label class="ml-1 inline-flex items-center gap-1 text-pb-fg-muted" title="@L.T("reader.redact.audit.title")">
+                        <input type="checkbox" @bind="_redactAudit" />
+                        @L.T("reader.redact.audit")
+                    </label>
                 </div>
             }
             @if (IsDrawingMode(_annotationMode))
@@ -1414,6 +1418,7 @@
     // Annotationen). 0..1-Koordinaten, oben-links, je Seite.
     private sealed record RedactionBox(int Page, double X, double Y, double Width, double Height);
     private readonly List<RedactionBox> _redactions = new();
+    private bool _redactAudit = true;
     private bool _isRedacting;
 
     private IEnumerable<RedactionBox> RedactionsOnCurrentPage =>
@@ -2445,6 +2450,16 @@
                 $"{safeBase}.redacted.pdf",
                 Convert.ToBase64String(redacted),
                 "application/pdf");
+
+            if (_redactAudit)
+            {
+                var report = await BuildRedactionAuditAsync(_originalPdfBytes, redacted, regions, $"{safeBase}.pdf");
+                await JS.InvokeVoidAsync(
+                    "pageboundShortcuts.downloadBytes",
+                    $"{safeBase}.redaktions-audit.md",
+                    Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(report)),
+                    "text/markdown");
+            }
         }
         catch (Exception ex)
         {
@@ -2454,6 +2469,79 @@
         {
             _isRedacting = false;
         }
+    }
+
+    private sealed record AuditPageDto(int Page, List<AuditRectDto> Rects);
+    private sealed record AuditRectDto(double X, double Y, double W, double H);
+
+    private static bool RectIntersects(AuditRectDto it, RedactionRegion z) =>
+        !(it.X + it.W <= z.X || it.X >= z.X + z.Width
+          || it.Y + it.H <= z.Y || it.Y >= z.Y + z.Height);
+
+    // Erzeugt den Redaktions-Audit-Report (Markdown): SHA-256 vorher/nachher +
+    // je geschwärzter Seite die Zahl der Text-Fragmente in den Zonen (vorher →
+    // nachher). Nachher == 0 belegt, dass der Text-Layer in den Zonen leer ist.
+    private async Task<string> BuildRedactionAuditAsync(
+        byte[] original, byte[] redacted, IReadOnlyList<RedactionRegion> regions, string fileName)
+    {
+        string Loc(string de, string en) => L.CurrentLanguage == "de" ? de : en;
+
+        var pages = regions.Select(r => r.PageNumber).Distinct().OrderBy(p => p).ToArray();
+        var hashBefore = await Hasher.ComputeAsync(original, Pagebound.Core.Domain.HashAlgorithm.Sha256, CancellationToken.None);
+        var hashAfter = await Hasher.ComputeAsync(redacted, Pagebound.Core.Domain.HashAlgorithm.Sha256, CancellationToken.None);
+
+        AuditPageDto[] before, after;
+        try
+        {
+            before = await JS.InvokeAsync<AuditPageDto[]>("pageboundPdf.textRectsForPages", Convert.ToBase64String(original), pages);
+            after = await JS.InvokeAsync<AuditPageDto[]>("pageboundPdf.textRectsForPages", Convert.ToBase64String(redacted), pages);
+        }
+        catch
+        {
+            before = Array.Empty<AuditPageDto>();
+            after = Array.Empty<AuditPageDto>();
+        }
+
+        int CountIn(AuditPageDto[] src, int page) =>
+            (src.FirstOrDefault(p => p.Page == page)?.Rects ?? new List<AuditRectDto>())
+            .Count(it => regions.Any(z => z.PageNumber == page && RectIntersects(it, z)));
+
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("# " + Loc("Pagebound — Redaktions-Audit", "Pagebound — Redaction Audit")).AppendLine();
+        sb.AppendLine($"- {Loc("Datei", "File")}: `{fileName}`");
+        sb.AppendLine($"- {Loc("Zeitpunkt", "Timestamp")}: {DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss zzz}");
+        sb.AppendLine($"- SHA-256 ({Loc("vorher", "before")}): `{hashBefore}`");
+        sb.AppendLine($"- SHA-256 ({Loc("nachher", "after")}): `{hashAfter}`");
+        sb.AppendLine($"- {Loc("Geschwärzte Zonen", "Redacted zones")}: {regions.Count} ({Loc("auf", "on")} {pages.Length} {Loc("Seite(n)", "page(s)")})").AppendLine();
+
+        sb.AppendLine($"| {Loc("Seite", "Page")} | {Loc("Zonen", "Zones")} | {Loc("Textfragmente in Zonen", "Text fragments in zones")} ({Loc("vorher", "before")} → {Loc("nachher", "after")}) | Status |");
+        sb.AppendLine("|---:|---:|:--|:--|");
+        var allClean = true;
+        foreach (var p in pages)
+        {
+            var zones = regions.Count(z => z.PageNumber == p);
+            var b = CountIn(before, p);
+            var a = CountIn(after, p);
+            var ok = a == 0;
+            allClean &= ok;
+            var status = ok
+                ? "✓ " + Loc("kein Resttext", "no residual text")
+                : "⚠ " + Loc("Resttext gefunden", "residual text found");
+            sb.AppendLine($"| {p} | {zones} | {b} → {a} | {status} |");
+        }
+        sb.AppendLine();
+        var verdict = allClean
+            ? "✓ " + Loc(
+                "Alle geschwärzten Seiten wurden rasterisiert; im Text-Layer der Ausgabedatei liegt in den Redaktionszonen kein extrahierbarer Text mehr.",
+                "All redacted pages were rasterized; the output's text layer holds no extractable text in the redaction zones.")
+            : "⚠ " + Loc(
+                "In mindestens einer Zone wurde noch Text gefunden — bitte manuell prüfen.",
+                "Residual text was found in at least one zone — please review manually.");
+        sb.AppendLine("**" + verdict + "**").AppendLine();
+        sb.AppendLine("> " + Loc(
+            "Hinweis: Die eigentliche Garantie ist die Rasterisierung (Text und Vektoren werden zu Pixeln). Dieser Report prüft den Text-Layer der Ausgabe; eingebrannte Pixel sind per Design nicht mehr als Text vorhanden.",
+            "Note: the actual guarantee is rasterization (text and vectors become pixels). This report checks the output's text layer; burned-in pixels are by design no longer present as text."));
+        return sb.ToString();
     }
 
     // Selektierte Ink/Shape für die Lösch-Mini-Toolbar.

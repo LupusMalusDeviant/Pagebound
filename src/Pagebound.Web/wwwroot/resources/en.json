@@ -318,6 +318,8 @@
   "reader.redact.apply": "Apply redaction",
   "reader.redact.running": "Redacting …",
   "reader.redact.clear": "Discard",
+  "reader.redact.audit": "Audit report",
+  "reader.redact.audit.title": "After redacting, proves no extractable text remains in the zones (SHA-256 before/after)",
   "reader.view.continuous": "Continuous",
   "reader.view.continuousTitle": "Scroll through all pages stacked (reading view)",
   "reader.view.night": "Night mode",

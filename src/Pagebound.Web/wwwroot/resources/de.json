@@ -318,6 +318,8 @@
   "reader.redact.apply": "Schwärzung anwenden",
   "reader.redact.running": "Schwärze …",
   "reader.redact.clear": "Verwerfen",
+  "reader.redact.audit": "Audit-Report",
+  "reader.redact.audit.title": "Belegt nach dem Schwärzen, dass in den Zonen kein extrahierbarer Text mehr liegt (SHA-256 vorher/nachher)",
   "reader.view.continuous": "Fortlaufend",
   "reader.view.continuousTitle": "Alle Seiten gestapelt durchscrollen (Leseansicht)",
   "reader.view.night": "Nachtmodus",

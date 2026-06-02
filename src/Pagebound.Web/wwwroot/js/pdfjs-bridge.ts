@@ -424,6 +424,47 @@ async function allPageTexts(data: Uint8Array): Promise<string[]> {
   });
 }
 
+// ============================================================================
+// Redaktions-Audit (Roadmap A4) — Text-Fragment-Boxen je Seite
+// ----------------------------------------------------------------------------
+// Liefert für die angefragten Seiten die Bounding-Boxes aller Text-Fragmente im
+// Text-Layer, als Page-Fractions (0..1, Ursprung oben-links — wie RedactionRegion
+// im Reader). C# prüft damit, ob in den geschwärzten Zonen noch extrahierbarer
+// Text liegt (vorher/nachher). 100 % lokal, kein OCR, kein Netz.
+// ============================================================================
+export async function textRectsForPages(
+  dataB64: string,
+  pages: number[]
+): Promise<{ page: number; rects: { x: number; y: number; w: number; h: number }[] }[]> {
+  const data = b64ToBytesLocal(dataB64);
+  return withTransientDoc(data, async (doc) => {
+    const result: { page: number; rects: { x: number; y: number; w: number; h: number }[] }[] = [];
+    const done = new Set<number>();
+    for (const p of pages ?? []) {
+      if (done.has(p) || p < 1 || p > doc.numPages) continue;
+      done.add(p);
+      const page = await doc.getPage(p);
+      const content = await page.getTextContent();
+      const vp = page.getViewport({ scale: 1 });
+      const items = content.items as unknown as PdfTextItem[];
+      const rects = items
+        .filter((it) => typeof it.str === "string" && it.str.trim().length > 0)
+        .map((it) => {
+          const x = it.transform[4];
+          const yTop = vp.height - it.transform[5] - it.height * 0.8;
+          return {
+            x: x / vp.width,
+            y: yTop / vp.height,
+            w: it.width / vp.width,
+            h: it.height / vp.height,
+          };
+        });
+      result.push({ page: p, rects });
+    }
+    return result;
+  });
+}
+
 export interface PdfDiffPageDto { page: number; added: string[]; removed: string[]; }
 export interface PdfDiffDto {
   pageCountA: number;
