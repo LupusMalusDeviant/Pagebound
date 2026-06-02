@@ -119,3 +119,7 @@ appsettings.Local.json
 # --- Pagebound-spezifisch --------------------------------------------------
 # Lokale Sidecar-Dateien fuer Entwicklungs-PDFs nicht versionieren
 samples/**/*.pagebound.json
+
+# --- Internes / nicht versionieren -----------------------------------------
+# Lokale Planungs-/Roadmap-Notizen — bleiben rein lokal, NICHT im oeffentlichen Repo
+.planning/
