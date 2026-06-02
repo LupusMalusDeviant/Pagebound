@@ -155,12 +155,12 @@ jobs:
       - name: Run Lighthouse CI
         run: |
           npm install -g @lhci/cli@latest
-          # Dieser Job ist das Accessibility-Gate (categories:accessibility >= 0.90).
-          # render-blocking-* ist eine PERFORMANCE-Assertion, die eine Blazor-WASM-
-          # Standalone-App prinzipiell nicht erfüllen kann (gebündeltes CSS + der
-          # Blazor-Bootstrap sind render-blocking → stabil "found 2", erwartet 0).
-          # Daher abgeschaltet, damit CI die Barrierefreiheit prüft statt Dauer-Rot.
-          lhci autorun --collect.staticDistDir=./publish/wwwroot --assert.preset=lighthouse:no-pwa --assert.assertions.categories:accessibility=">=0.90" --assert.assertions.render-blocking-resources=off --assert.assertions.render-blocking-insight=off
+          # Reines ACCESSIBILITY-Gate: nur die Accessibility-Kategorie asserten,
+          # KEIN lighthouse-Preset. Das Preset prüft die komplette Performance-
+          # Kategorie als Fehler (max-potential-fid, render-blocking, TBT …), die
+          # eine Blazor-WASM-Standalone-App prinzipiell nicht erfüllt — der WASM-
+          # Boot blockiert den Main-Thread. Hier zählt Barrierefreiheit, nicht Perf.
+          lhci autorun --collect.staticDistDir=./publish/wwwroot --assert.assertions.categories:accessibility=">=0.9"
 
   mcp-server:
     name: MCP server (build + smoke)

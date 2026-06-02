@@ -36,6 +36,12 @@
             <input type="checkbox" @bind="_showCrops" /> @L.T("editor.crops")
         </label>
 
+        <label class="mb-1 block text-xs font-medium text-pb-fg-muted">@L.T("editor.doc.background")</label>
+        <div class="mb-3 flex items-center gap-2">
+            <input type="color" value="@(_doc.Background ?? "#ffffff")" @onchange="@(e => _doc.Background = e.Value?.ToString())" />
+            <button class="btn-side" @onclick="@(() => _doc.Background = null)">@L.T("editor.doc.backgroundNone")</button>
+        </div>
+
         <div class="mb-1 text-xs font-medium text-pb-fg-muted">@L.T("editor.add.label")</div>
         <div class="mb-3 grid grid-cols-2 gap-1">
             <button class="btn-side" @onclick="@(() => AddBlock(EditorBlockType.Heading))">@L.T("editor.add.heading")</button>
@@ -111,6 +117,12 @@
                     </div>
                 }
 
+                <label class="mb-1 block text-xs">@L.T("editor.props.bg")</label>
+                <div class="mb-2 flex items-center gap-2">
+                    <input type="color" value="@(_selected.Background ?? "#ffffff")" @onchange="@(e => _selected.Background = e.Value?.ToString())" />
+                    <button class="btn-side" @onclick="@(() => _selected.Background = null)">@L.T("editor.props.bgNone")</button>
+                </div>
+
                 <div class="mt-2 flex gap-1">
                     <button class="btn-side flex-1" title="@L.T("editor.block.up")" @onclick="@(() => MoveBlock(_selected, -1))">↑</button>
                     <button class="btn-side flex-1" title="@L.T("editor.block.down")" @onclick="@(() => MoveBlock(_selected, 1))">↓</button>
@@ -170,13 +182,29 @@
             <button class="btn-fmt" @onmousedown:preventDefault="true" @onclick="@(() => Format("justifyCenter"))" title="@L.T("editor.fmt.alignCenter")">≡</button>
             <button class="btn-fmt" @onmousedown:preventDefault="true" @onclick="@(() => Format("justifyRight"))" title="@L.T("editor.fmt.alignRight")">⯈</button>
             <button class="btn-fmt" @onmousedown:preventDefault="true" @onclick="@(() => Format("removeFormat"))" title="@L.T("editor.fmt.clear")">⌫</button>
+            <span class="mx-1 h-4 w-px bg-pb-border"></span>
+            <span class="text-xs text-pb-fg-muted" title="@L.T("editor.fmt.textColor")">A</span>
+            @foreach (var col in TextColors)
+            {
+                var c = col;
+                <button class="h-5 w-5 rounded-full border border-pb-border" style="background:@c" title="@L.T("editor.fmt.textColor")"
+                        @onmousedown:preventDefault="true" @onclick="@(() => Format("foreColor", c))"></button>
+            }
+            <span class="ml-1 text-xs text-pb-fg-muted" title="@L.T("editor.fmt.highlight")">▩</span>
+            @foreach (var col in HiliteColors)
+            {
+                var c = col;
+                <button class="h-5 w-5 rounded border border-pb-border" style="background:@c" title="@L.T("editor.fmt.highlight")"
+                        @onmousedown:preventDefault="true" @onclick="@(() => Format("hiliteColor", c))"></button>
+            }
+            <button class="btn-fmt" title="@L.T("editor.fmt.highlightNone")" @onmousedown:preventDefault="true" @onclick="@(() => Format("hiliteColor", "transparent"))">▢</button>
             <span class="ml-auto text-xs text-pb-fg-muted">@L.T("editor.fmt.hint")</span>
         </div>
 
         <div class="pb-doc-stage flex-1" @onclick="DeselectIfBackground">
             @{ var dim = EditorLayouts.For(_doc.Layout); }
             <div class="pb-page" id="pb-page-0"
-                 style="width:@dim.CssWidth; height:@dim.CssHeight; padding:@dim.CssMargin;">
+                 style="width:@dim.CssWidth; height:@dim.CssHeight; padding:@dim.CssMargin;@(string.IsNullOrEmpty(_doc.Background) ? "" : $" background:{_doc.Background};")">
                 @if (_showCrops)
                 {
                     <span class="pb-crop pb-crop-tl"></span><span class="pb-crop pb-crop-tr"></span>
@@ -188,7 +216,18 @@
                 }
                 @foreach (var b in _doc.Blocks)
                 {
-                    <div class="pb-block @(_selected==b ? "pb-selected" : "")" @key="b.Id" @onclick:stopPropagation="true" @onclick="@(() => SelectBlock(b))">
+                    <div class="pb-block @(_selected==b ? "pb-selected" : "")" @key="b.Id"
+                         style="@(string.IsNullOrEmpty(b.Background) ? null : $"background:{b.Background}")"
+                         @onclick:stopPropagation="true" @onclick="@(() => SelectBlock(b))">
+                        @if (_selected == b)
+                        {
+                            <div class="no-print absolute -top-3 right-1 z-30 flex gap-0.5 rounded border border-pb-border bg-pb-bg px-1 py-0.5 shadow-sm" contenteditable="false">
+                                <button class="btn-fmt" title="@L.T("editor.block.up")" @onmousedown:preventDefault="true" @onclick:stopPropagation="true" @onclick="@(() => MoveBlock(b, -1))">↑</button>
+                                <button class="btn-fmt" title="@L.T("editor.block.down")" @onmousedown:preventDefault="true" @onclick:stopPropagation="true" @onclick="@(() => MoveBlock(b, 1))">↓</button>
+                                <button class="btn-fmt" title="@L.T("editor.block.duplicate")" @onmousedown:preventDefault="true" @onclick:stopPropagation="true" @onclick="@(() => DuplicateBlock(b))">⧉</button>
+                                <button class="btn-fmt text-[#dc2626]" title="@L.T("editor.block.delete")" @onmousedown:preventDefault="true" @onclick:stopPropagation="true" @onclick="@(() => DeleteBlock(b))">🗑</button>
+                            </div>
+                        }
                         @switch (b.Type)
                         {
                             case EditorBlockType.Heading:
@@ -509,7 +548,11 @@
     }
 
     // --- Formatierung + Export ------------------------------------------------
-    private Task Format(string command) => JS.InvokeVoidAsync("pageboundWysiwyg.execFormat", command).AsTask();
+    private static readonly string[] TextColors = { "#111827", "#dc2626", "#2563eb", "#16a34a" };
+    private static readonly string[] HiliteColors = { "#fde047", "#86efac", "#f9a8d4" };
+
+    private Task Format(string command, string? value = null) =>
+        JS.InvokeVoidAsync("pageboundWysiwyg.execFormat", command, value).AsTask();
 
     private async Task ExportPdf()
     {
@@ -524,7 +567,7 @@
         await JS.InvokeVoidAsync("pageboundWysiwyg.blurActive");
         var inner = await JS.InvokeAsync<string>("pageboundWysiwyg.getHtmlContent", "pb-page-0");
         var dim = EditorLayouts.For(_doc.Layout);
-        var html = BuildStandaloneHtml(_doc.Title, dim, inner);
+        var html = BuildStandaloneHtml(_doc.Title, dim, inner, _doc.Background);
         await DownloadTextAsync(SafeName(_doc.Title) + ".html", html, "text/html");
     }
 
@@ -548,7 +591,7 @@
         return string.Concat(baseName.Select(c => char.IsLetterOrDigit(c) || c is '_' or '-' or ' ' ? c : '_')).Trim();
     }
 
-    private static string BuildStandaloneHtml(string title, PageDimensions dim, string inner)
+    private static string BuildStandaloneHtml(string title, PageDimensions dim, string inner, string? pageBg)
     {
         var safeTitle = System.Net.WebUtility.HtmlEncode(string.IsNullOrWhiteSpace(title) ? "Dokument" : title);
         var sb = new StringBuilder();
@@ -556,7 +599,7 @@
         sb.Append("<title>").Append(safeTitle).Append("</title><style>");
         sb.Append("@page{size:").Append(dim.CssPageSize).Append(";margin:0}");
         sb.Append("body{margin:0;background:#fff;color:#111827;font-family:Georgia,'Times New Roman',serif}");
-        sb.Append(".pb-page{box-sizing:border-box;background:#fff;width:").Append(dim.CssWidth)
+        sb.Append(".pb-page{box-sizing:border-box;background:").Append(string.IsNullOrEmpty(pageBg) ? "#fff" : pageBg).Append(";width:").Append(dim.CssWidth)
           .Append(";min-height:").Append(dim.CssHeight).Append(";padding:").Append(dim.CssMargin).Append(";margin:0 auto}");
         sb.Append(".pb-h1{font-size:22pt;font-weight:700}.pb-h2{font-size:16pt;font-weight:700}.pb-h3{font-size:13pt;font-weight:700}");
         sb.Append(".pb-para{font-size:11pt;line-height:1.5}");

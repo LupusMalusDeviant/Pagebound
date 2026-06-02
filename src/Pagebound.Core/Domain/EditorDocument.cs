@@ -47,6 +47,9 @@ public sealed class EditorBlock
     public int HeightPx { get; set; } = 48;
     public bool Fill { get; set; }
 
+    // Optionale Hintergrundfarbe des Blocks (null = transparent).
+    public string? Background { get; set; }
+
     // Table (Zeilen × Zellen; erste Zeile optional als Kopf)
     public List<List<string>>? Rows { get; set; }
     public bool HeaderRow { get; set; } = true;
@@ -65,6 +68,7 @@ public sealed class EditorBlock
         Color = Color,
         HeightPx = HeightPx,
         Fill = Fill,
+        Background = Background,
         Rows = Rows?.Select(r => new List<string>(r)).ToList(),
         HeaderRow = HeaderRow
     };
@@ -79,6 +83,8 @@ public sealed class EditorDocument
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
     public string Title { get; set; } = string.Empty;
     public PageLayout Layout { get; set; } = PageLayout.A4Portrait;
+    /// <summary>Optionale Seiten-Hintergrundfarbe (null = weiß).</summary>
+    public string? Background { get; set; }
     public List<EditorBlock> Blocks { get; set; } = new();
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
