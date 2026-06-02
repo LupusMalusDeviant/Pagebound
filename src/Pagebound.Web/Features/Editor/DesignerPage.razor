@@ -1,0 +1,836 @@
+@page "/editor"
+@page "/editor/{Id}"
+@using Microsoft.AspNetCore.Components.Forms
+@using System.Text
+@using System.Text.Json
+@using System.Text.Json.Serialization
+@using Pagebound.Core.Abstractions
+@using Pagebound.Core.Domain
+@inject IEditorDraftService Drafts
+@inject ILocalizationService L
+@inject IJSRuntime JS
+
+<PageTitle>@L.T("editor.pageTitle")</PageTitle>
+
+<div class="flex h-full min-h-0">
+    @* ---- Seitenleiste (Werkzeuge) ------------------------------------- *@
+    <aside class="pb-editor-sidebar no-print w-72 shrink-0 overflow-y-auto border-r border-pb-border bg-pb-bg p-3 text-sm text-pb-fg">
+        <h1 class="mb-1 text-base font-semibold">@L.T("editor.heading")</h1>
+        <p class="mb-3 text-xs text-pb-fg-muted">@L.T("editor.subtitle")</p>
+
+        <label class="mb-1 block text-xs font-medium text-pb-fg-muted">@L.T("editor.doc.title")</label>
+        <input class="mb-3 w-full rounded border border-pb-border bg-pb-bg px-2 py-1"
+               placeholder="@L.T("editor.doc.titlePlaceholder")" @bind="_doc.Title" @bind:event="oninput" />
+
+        <label class="mb-1 block text-xs font-medium text-pb-fg-muted">@L.T("editor.layout.label")</label>
+        <select class="mb-3 w-full rounded border border-pb-border bg-pb-bg px-2 py-1"
+                @bind="LayoutBinding">
+            <option value="@PageLayout.A4Portrait">@L.T("editor.layout.a4p")</option>
+            <option value="@PageLayout.A4Landscape">@L.T("editor.layout.a4l")</option>
+            <option value="@PageLayout.A5Portrait">@L.T("editor.layout.a5")</option>
+            <option value="@PageLayout.Letter">@L.T("editor.layout.letter")</option>
+            <option value="@PageLayout.Slide16x9">@L.T("editor.layout.slide")</option>
+        </select>
+
+        <label class="mb-3 flex items-center gap-2 text-xs">
+            <input type="checkbox" @bind="_showCrops" /> @L.T("editor.crops")
+        </label>
+
+        @* ---- Seiten (Multi-Page) ---- *@
+        <div class="mb-1 text-xs font-medium text-pb-fg-muted">@L.T("editor.page.label")</div>
+        <ul class="mb-2 space-y-1">
+            @for (int pi = 0; pi < _doc.Pages.Count; pi++)
+            {
+                var page = _doc.Pages[pi];
+                var idx = pi;
+                <li class="flex items-center gap-0.5">
+                    <button class="flex-1 truncate rounded px-1 py-0.5 text-left hover:bg-pb-surface @(_selectedPage == page ? "text-pb-accent" : "")"
+                            @onclick="@(() => SelectPage(page))">@PageLabel(idx)</button>
+                    <button class="btn-side px-1" title="@L.T("editor.page.up")" @onclick="@(() => MovePage(page, -1))">↑</button>
+                    <button class="btn-side px-1" title="@L.T("editor.page.down")" @onclick="@(() => MovePage(page, 1))">↓</button>
+                    <button class="btn-side px-1" title="@L.T("editor.page.duplicate")" @onclick="@(() => DuplicatePage(page))">⧉</button>
+                    <button class="btn-side px-1 text-[#dc2626]" title="@L.T("editor.page.delete")"
+                            disabled="@(_doc.Pages.Count <= 1)" @onclick="@(() => DeletePage(page))">✕</button>
+                </li>
+            }
+        </ul>
+        <button class="btn-side mb-3 w-full is-primary" @onclick="AddPage">@AddPageLabel()</button>
+
+        @* ---- Hintergrund der gewählten Seite (Farbe + Bild) ---- *@
+        @if (_selectedPage is not null)
+        {
+            <div class="mb-3 rounded border border-pb-border p-2">
+                <div class="mb-2 text-xs font-semibold text-pb-fg-muted">@L.T("editor.doc.background")</div>
+                <div class="mb-2 flex items-center gap-2">
+                    <input type="color" value="@(_selectedPage.Background ?? "#ffffff")"
+                           @onchange="@(e => { if (_selectedPage is not null) _selectedPage.Background = e.Value?.ToString(); })" />
+                    <button class="btn-side" @onclick="@(() => { if (_selectedPage is not null) _selectedPage.Background = null; })">@L.T("editor.doc.backgroundNone")</button>
+                </div>
+
+                <label class="mb-1 block text-xs">@L.T("editor.doc.bgImage")</label>
+                <InputFile class="mb-2 w-full text-xs" OnChange="OnPageBgSelected" accept="image/png,image/jpeg" />
+                @if (!string.IsNullOrEmpty(_selectedPage.BackgroundImage))
+                {
+                    <div class="mb-2 flex items-center gap-2">
+                        <select class="flex-1 rounded border border-pb-border bg-pb-bg px-2 py-1 text-xs"
+                                @onchange="@(e => { if (_selectedPage is not null) _selectedPage.BackgroundSize = e.Value?.ToString() ?? "cover"; })">
+                            <option value="cover" selected="@(_selectedPage.BackgroundSize == "cover")">@L.T("editor.doc.bgCover")</option>
+                            <option value="contain" selected="@(_selectedPage.BackgroundSize == "contain")">@L.T("editor.doc.bgContain")</option>
+                        </select>
+                        <button class="btn-side text-[#dc2626]" @onclick="@(() => { if (_selectedPage is not null) _selectedPage.BackgroundImage = null; })">@L.T("editor.doc.bgImageNone")</button>
+                    </div>
+                }
+            </div>
+        }
+
+        <div class="mb-1 text-xs font-medium text-pb-fg-muted">@L.T("editor.add.label")</div>
+        <div class="mb-3 grid grid-cols-2 gap-1">
+            <button class="btn-side" @onclick="@(() => AddBlock(EditorBlockType.Heading))">@L.T("editor.add.heading")</button>
+            <button class="btn-side" @onclick="@(() => AddBlock(EditorBlockType.Paragraph))">@L.T("editor.add.paragraph")</button>
+            <button class="btn-side" @onclick="@(() => AddBlock(EditorBlockType.Image))">@L.T("editor.add.image")</button>
+            <button class="btn-side" @onclick="@(() => AddBlock(EditorBlockType.Shape))">@L.T("editor.add.shape")</button>
+            <button class="btn-side" @onclick="@(() => AddBlock(EditorBlockType.Spacer))">@L.T("editor.add.spacer")</button>
+            <button class="btn-side" @onclick="@(() => AddBlock(EditorBlockType.Table))">@L.T("editor.add.table")</button>
+        </div>
+
+        <label class="mb-1 block text-xs font-medium text-pb-fg-muted">@L.T("editor.template.label")</label>
+        <select class="mb-3 w-full rounded border border-pb-border bg-pb-bg px-2 py-1" @onchange="ApplyTemplate">
+            <option value="">@L.T("editor.template.choose")</option>
+            <option value="@EditorTemplates.TemplateKind.Invoice">@L.T("editor.template.invoice")</option>
+            <option value="@EditorTemplates.TemplateKind.Letter">@L.T("editor.template.letter")</option>
+            <option value="@EditorTemplates.TemplateKind.Flyer">@L.T("editor.template.flyer")</option>
+            <option value="@EditorTemplates.TemplateKind.Slide">@L.T("editor.template.slide")</option>
+        </select>
+
+        @* ---- Eigenschaften des gewählten Blocks ---- *@
+        @if (_selected is not null)
+        {
+            <div class="mb-3 rounded border border-pb-border p-2">
+                <div class="mb-2 text-xs font-semibold text-pb-fg-muted">@L.T("editor.props.label") · @BlockTypeName(_selected.Type)</div>
+
+                @if (_selected.Type is EditorBlockType.Heading)
+                {
+                    <label class="mb-1 block text-xs">@L.T("editor.props.level")</label>
+                    <select class="mb-2 w-full rounded border border-pb-border bg-pb-bg px-2 py-1" @bind="_selected.Level">
+                        <option value="1">H1</option><option value="2">H2</option><option value="3">H3</option>
+                    </select>
+                }
+
+                @if (_selected.Type is EditorBlockType.Heading or EditorBlockType.Paragraph or EditorBlockType.Image)
+                {
+                    <div class="mb-2 flex gap-1">
+                        <button class="btn-side flex-1 @(_selected.Align=="left"?"is-on":"")" @onclick="@(() => SetAlign("left"))">⯇</button>
+                        <button class="btn-side flex-1 @(_selected.Align=="center"?"is-on":"")" @onclick="@(() => SetAlign("center"))">≡</button>
+                        <button class="btn-side flex-1 @(_selected.Align=="right"?"is-on":"")" @onclick="@(() => SetAlign("right"))">⯈</button>
+                    </div>
+                }
+
+                @if (_selected.Type is EditorBlockType.Image)
+                {
+                    <label class="mb-1 block text-xs">@L.T("editor.props.chooseImage")</label>
+                    <InputFile class="mb-2 w-full text-xs" OnChange="OnImageSelected" accept="image/png,image/jpeg" />
+                    <label class="mb-1 block text-xs">@L.T("editor.props.imageWidth"): @_selected.WidthPercent%</label>
+                    <input type="range" min="10" max="100" step="5" class="mb-1 w-full" @bind="_selected.WidthPercent" @bind:event="oninput" />
+                }
+
+                @if (_selected.Type is EditorBlockType.Shape)
+                {
+                    <label class="mb-1 block text-xs">@L.T("editor.props.shape")</label>
+                    <select class="mb-2 w-full rounded border border-pb-border bg-pb-bg px-2 py-1" @bind="_selected.Shape">
+                        <option value="rectangle">@L.T("editor.props.shape.rectangle")</option>
+                        <option value="line">@L.T("editor.props.shape.line")</option>
+                        <option value="divider">@L.T("editor.props.shape.divider")</option>
+                    </select>
+                    <div class="mb-2 flex items-center gap-2">
+                        <input type="color" @bind="_selected.Color" />
+                        <input type="number" min="1" max="400" class="w-20 rounded border border-pb-border bg-pb-bg px-1 py-0.5" @bind="_selected.HeightPx" />
+                        <span class="text-xs text-pb-fg-muted">px</span>
+                    </div>
+                }
+
+                @if (_selected.Type is EditorBlockType.Spacer)
+                {
+                    <label class="mb-1 block text-xs">@L.T("editor.props.spacerHeight"): @_selected.HeightPx px</label>
+                    <input type="range" min="4" max="400" step="4" class="mb-2 w-full" @bind="_selected.HeightPx" @bind:event="oninput" />
+                }
+
+                @if (_selected.Type is EditorBlockType.Table)
+                {
+                    <label class="mb-2 flex items-center gap-2 text-xs"><input type="checkbox" @bind="_selected.HeaderRow" /> @L.T("editor.props.table.header")</label>
+                    <div class="grid grid-cols-2 gap-1">
+                        <button class="btn-side" @onclick="@(() => TableAddRow(_selected))">+ @L.T("editor.props.table.row")</button>
+                        <button class="btn-side" @onclick="@(() => TableRemoveRow(_selected))">− @L.T("editor.props.table.row")</button>
+                        <button class="btn-side" @onclick="@(() => TableAddCol(_selected))">+ @L.T("editor.props.table.col")</button>
+                        <button class="btn-side" @onclick="@(() => TableRemoveCol(_selected))">− @L.T("editor.props.table.col")</button>
+                    </div>
+                }
+
+                @if (_selected.Type is not EditorBlockType.Spacer)
+                {
+                    <label class="mb-1 mt-2 block text-xs">@L.T("editor.props.bg")</label>
+                    <div class="mb-2 flex items-center gap-2">
+                        <input type="color" value="@(_selected.Background ?? "#ffffff")" @onchange="@(e => { if (_selected is not null) _selected.Background = e.Value?.ToString(); })" />
+                        <button class="btn-side" @onclick="@(() => { if (_selected is not null) _selected.Background = null; })">@L.T("editor.props.bgNone")</button>
+                    </div>
+                }
+
+                <div class="mt-2 flex gap-1">
+                    <button class="btn-side flex-1" title="@L.T("editor.block.up")" @onclick="@(() => MoveBlock(_selected, -1))">↑</button>
+                    <button class="btn-side flex-1" title="@L.T("editor.block.down")" @onclick="@(() => MoveBlock(_selected, 1))">↓</button>
+                    <button class="btn-side flex-1" title="@L.T("editor.block.duplicate")" @onclick="@(() => DuplicateBlock(_selected))">⧉</button>
+                    <button class="btn-side flex-1 text-[#dc2626]" title="@L.T("editor.block.delete")" @onclick="@(() => DeleteBlock(_selected))">🗑</button>
+                </div>
+            </div>
+        }
+
+        @* ---- Entwürfe ---- *@
+        <div class="mb-1 text-xs font-medium text-pb-fg-muted">@L.T("editor.draft.label")</div>
+        <div class="mb-2 flex gap-1">
+            <button class="btn-side flex-1" @onclick="NewDocument">@L.T("editor.draft.new")</button>
+            <button class="btn-side flex-1 is-primary" @onclick="Save" disabled="@_busy">@(_busy ? L.T("editor.draft.saving") : L.T("editor.draft.save"))</button>
+        </div>
+        @if (!string.IsNullOrEmpty(_status)) { <div class="mb-2 text-xs text-pb-accent">@_status</div> }
+        @if (_drafts.Count == 0)
+        {
+            <div class="mb-3 text-xs text-pb-fg-muted">@L.T("editor.draft.none")</div>
+        }
+        else
+        {
+            <ul class="mb-3 space-y-1">
+                @foreach (var d in _drafts)
+                {
+                    <li class="flex items-center gap-1">
+                        <button class="flex-1 truncate rounded px-1 py-0.5 text-left hover:bg-pb-surface @(_doc.Id==d.Id?"text-pb-accent":"")"
+                                title="@L.T("editor.draft.load")" @onclick="@(() => LoadDraft(d.Id))">
+                            @(string.IsNullOrWhiteSpace(d.Title) ? L.T("common.untitled") : d.Title)
+                        </button>
+                        <button class="rounded px-1 text-pb-fg-muted hover:text-[#dc2626]" title="@L.T("editor.draft.delete")"
+                                @onclick="@(() => DeleteDraft(d.Id))">✕</button>
+                    </li>
+                }
+            </ul>
+        }
+
+        <div class="mb-1 text-xs font-medium text-pb-fg-muted">@L.T("editor.export.label")</div>
+        <div class="grid grid-cols-3 gap-1">
+            <button class="btn-side is-primary" @onclick="ExportPdf">@L.T("editor.export.pdf")</button>
+            <button class="btn-side" @onclick="ExportHtml">@L.T("editor.export.html")</button>
+            <button class="btn-side" @onclick="ExportJson">@L.T("editor.export.json")</button>
+        </div>
+    </aside>
+
+    @* ---- Hauptbereich: Rich-Text-Leiste + Seiten-Leinwand ------------- *@
+    <div class="flex min-w-0 flex-1 flex-col">
+        <div class="pb-editor-toolbar no-print flex flex-wrap items-center gap-1 border-b border-pb-border bg-pb-bg p-2 text-sm">
+            <button class="btn-fmt font-bold" @onmousedown:preventDefault="true" @onclick="@(() => Format("bold"))" title="@L.T("editor.fmt.bold")">B</button>
+            <button class="btn-fmt italic" @onmousedown:preventDefault="true" @onclick="@(() => Format("italic"))" title="@L.T("editor.fmt.italic")">I</button>
+            <button class="btn-fmt underline" @onmousedown:preventDefault="true" @onclick="@(() => Format("underline"))" title="@L.T("editor.fmt.underline")">U</button>
+            <span class="mx-1 h-4 w-px bg-pb-border"></span>
+            <button class="btn-fmt" @onmousedown:preventDefault="true" @onclick="@(() => Format("insertUnorderedList"))" title="@L.T("editor.fmt.ul")">• ≡</button>
+            <button class="btn-fmt" @onmousedown:preventDefault="true" @onclick="@(() => Format("insertOrderedList"))" title="@L.T("editor.fmt.ol")">1. ≡</button>
+            <span class="mx-1 h-4 w-px bg-pb-border"></span>
+            <button class="btn-fmt" @onmousedown:preventDefault="true" @onclick="@(() => Format("justifyLeft"))" title="@L.T("editor.fmt.alignLeft")">⯇</button>
+            <button class="btn-fmt" @onmousedown:preventDefault="true" @onclick="@(() => Format("justifyCenter"))" title="@L.T("editor.fmt.alignCenter")">≡</button>
+            <button class="btn-fmt" @onmousedown:preventDefault="true" @onclick="@(() => Format("justifyRight"))" title="@L.T("editor.fmt.alignRight")">⯈</button>
+            <button class="btn-fmt" @onmousedown:preventDefault="true" @onclick="@(() => Format("removeFormat"))" title="@L.T("editor.fmt.clear")">⌫</button>
+            <span class="mx-1 h-4 w-px bg-pb-border"></span>
+            <span class="text-xs text-pb-fg-muted" title="@L.T("editor.fmt.textColor")">A</span>
+            @foreach (var col in TextColors)
+            {
+                var c = col;
+                <button class="h-5 w-5 rounded-full border border-pb-border" style="background:@c" title="@L.T("editor.fmt.textColor")"
+                        @onmousedown:preventDefault="true" @onclick="@(() => Format("foreColor", c))"></button>
+            }
+            <input type="color" class="h-5 w-5 cursor-pointer rounded-full border border-pb-border bg-transparent p-0" title="@L.T("editor.fmt.textColorPick")"
+                   @onchange="@(e => ApplyColor("foreColor", e.Value?.ToString() ?? "#000000"))" />
+            <span class="ml-1 text-xs text-pb-fg-muted" title="@L.T("editor.fmt.highlight")">▩</span>
+            @foreach (var col in HiliteColors)
+            {
+                var c = col;
+                <button class="h-5 w-5 rounded border border-pb-border" style="background:@c" title="@L.T("editor.fmt.highlight")"
+                        @onmousedown:preventDefault="true" @onclick="@(() => Format("hiliteColor", c))"></button>
+            }
+            <input type="color" class="h-5 w-5 cursor-pointer rounded border border-pb-border bg-transparent p-0" title="@L.T("editor.fmt.highlightPick")"
+                   @onchange="@(e => ApplyColor("hiliteColor", e.Value?.ToString() ?? "#ffff00"))" />
+            <button class="btn-fmt" title="@L.T("editor.fmt.highlightNone")" @onmousedown:preventDefault="true" @onclick="@(() => Format("hiliteColor", "transparent"))">▢</button>
+            <span class="ml-auto text-xs text-pb-fg-muted">@L.T("editor.fmt.hint")</span>
+        </div>
+
+        <div class="pb-doc-stage flex-1" @onclick="DeselectIfBackground">
+            @{ var dim = EditorLayouts.For(_doc.Layout); }
+            @for (int pi = 0; pi < _doc.Pages.Count; pi++)
+            {
+                var page = _doc.Pages[pi];
+                var pageIndex = pi;
+                <div class="pb-page @(_selectedPage == page ? "pb-page-selected" : "")" id="pb-page-@pageIndex"
+                     style="@PageStyle(page, dim)"
+                     @onclick:stopPropagation="true" @onclick="@(() => SelectPage(page))">
+
+                    @* Seiten-Kopf (nur Bildschirm): Bezeichnung + Seiten-Aktionen *@
+                    <div class="no-print absolute -top-6 left-0 right-0 flex items-center justify-between text-xs text-white/90" contenteditable="false">
+                        <span class="rounded bg-black/40 px-1.5 py-0.5">@PageLabel(pageIndex)</span>
+                        <span class="flex gap-0.5">
+                            <button class="btn-fmt" title="@L.T("editor.page.up")" @onclick:stopPropagation="true" @onclick="@(() => MovePage(page, -1))">↑</button>
+                            <button class="btn-fmt" title="@L.T("editor.page.down")" @onclick:stopPropagation="true" @onclick="@(() => MovePage(page, 1))">↓</button>
+                            <button class="btn-fmt" title="@L.T("editor.page.duplicate")" @onclick:stopPropagation="true" @onclick="@(() => DuplicatePage(page))">⧉</button>
+                            <button class="btn-fmt text-[#fca5a5]" title="@L.T("editor.page.delete")" disabled="@(_doc.Pages.Count <= 1)" @onclick:stopPropagation="true" @onclick="@(() => DeletePage(page))">🗑</button>
+                        </span>
+                    </div>
+
+                    @if (_showCrops)
+                    {
+                        <span class="pb-crop pb-crop-tl"></span><span class="pb-crop pb-crop-tr"></span>
+                        <span class="pb-crop pb-crop-bl"></span><span class="pb-crop pb-crop-br"></span>
+                    }
+                    @if (page.Blocks.Count == 0)
+                    {
+                        <p class="text-pb-fg-muted" style="color:#9ca3af">@L.T("editor.emptyDoc")</p>
+                    }
+                    @foreach (var b in page.Blocks)
+                    {
+                        var blk = b;
+                        <div class="pb-block @(_selected==blk ? "pb-selected" : "")" @key="blk.Id"
+                             style="@(string.IsNullOrEmpty(blk.Background) ? null : $"background:{blk.Background}")"
+                             @onclick:stopPropagation="true" @onclick="@(() => SelectBlock(page, blk))">
+                            @if (_selected == blk)
+                            {
+                                <div class="no-print absolute -top-3 right-1 z-30 flex gap-0.5 rounded border border-pb-border bg-pb-bg px-1 py-0.5 shadow-sm" contenteditable="false">
+                                    <button class="btn-fmt" title="@L.T("editor.block.up")" @onmousedown:preventDefault="true" @onclick:stopPropagation="true" @onclick="@(() => MoveBlock(blk, -1))">↑</button>
+                                    <button class="btn-fmt" title="@L.T("editor.block.down")" @onmousedown:preventDefault="true" @onclick:stopPropagation="true" @onclick="@(() => MoveBlock(blk, 1))">↓</button>
+                                    <button class="btn-fmt" title="@L.T("editor.block.duplicate")" @onmousedown:preventDefault="true" @onclick:stopPropagation="true" @onclick="@(() => DuplicateBlock(blk))">⧉</button>
+                                    <button class="btn-fmt text-[#dc2626]" title="@L.T("editor.block.delete")" @onmousedown:preventDefault="true" @onclick:stopPropagation="true" @onclick="@(() => DeleteBlock(blk))">🗑</button>
+                                </div>
+                            }
+                            @switch (blk.Type)
+                            {
+                                case EditorBlockType.Heading:
+                                    <div id="blk-@blk.Id" class="pb-edit pb-h@(blk.Level) align-@blk.Align" contenteditable="true"
+                                         data-placeholder="@L.T("editor.ph.heading")" @onfocusin="@(() => SelectBlock(page, blk))" @onblur="OnEditableBlur">@((MarkupString)(blk.Text ?? ""))</div>
+                                    break;
+                                case EditorBlockType.Paragraph:
+                                    <div id="blk-@blk.Id" class="pb-edit pb-para align-@blk.Align" contenteditable="true"
+                                         data-placeholder="@L.T("editor.ph.paragraph")" @onfocusin="@(() => SelectBlock(page, blk))" @onblur="OnEditableBlur">@((MarkupString)(blk.Text ?? ""))</div>
+                                    break;
+                                case EditorBlockType.Image:
+                                    <div class="pb-img-wrap align-@blk.Align">
+                                        @if (!string.IsNullOrEmpty(blk.Src))
+                                        {
+                                            <img class="pb-img" src="@blk.Src" alt="@blk.Alt" style="width:@(blk.WidthPercent)%" />
+                                        }
+                                        else
+                                        {
+                                            <div style="border:1px dashed #9ca3af;color:#9ca3af;padding:24px;text-align:center">@L.T("editor.image.empty")</div>
+                                        }
+                                    </div>
+                                    break;
+                                case EditorBlockType.Spacer:
+                                    <div class="pb-spacer" style="height:@(blk.HeightPx)px"></div>
+                                    break;
+                                case EditorBlockType.Shape:
+                                    @if (blk.Shape == "line")
+                                    {
+                                        <div class="pb-shape-line" style="color:@blk.Color"></div>
+                                    }
+                                    else if (blk.Shape == "divider")
+                                    {
+                                        <div class="pb-shape-divider"></div>
+                                    }
+                                    else
+                                    {
+                                        <div class="pb-shape-rect" style="height:@(blk.HeightPx)px;color:@blk.Color"></div>
+                                    }
+                                    break;
+                                case EditorBlockType.Table:
+                                    <table class="pb-table">
+                                        @if (blk.Rows is not null)
+                                        {
+                                            @for (int r = 0; r < blk.Rows.Count; r++)
+                                            {
+                                                var rr = r;
+                                                <tr>
+                                                    @for (int c = 0; c < blk.Rows[rr].Count; c++)
+                                                    {
+                                                        var cc = c;
+                                                        @if (blk.HeaderRow && rr == 0)
+                                                        {
+                                                            <th id="cell-@blk.Id-@rr-@cc" class="pb-edit" contenteditable="true" @onblur="OnEditableBlur">@((MarkupString)blk.Rows[rr][cc])</th>
+                                                        }
+                                                        else
+                                                        {
+                                                            <td id="cell-@blk.Id-@rr-@cc" class="pb-edit" contenteditable="true" @onblur="OnEditableBlur">@((MarkupString)blk.Rows[rr][cc])</td>
+                                                        }
+                                                    }
+                                                </tr>
+                                            }
+                                        }
+                                    </table>
+                                    break;
+                            }
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter] public string? Id { get; set; }
+
+    private EditorDocument _doc = EditorDocument.NewEmpty(string.Empty);
+    private EditorBlock? _selected;
+    private EditorPage? _selectedPage;
+    private IReadOnlyList<EditorDraftInfo> _drafts = Array.Empty<EditorDraftInfo>();
+    private bool _showCrops;
+    private bool _busy;
+    private string? _status;
+    private string? _focusBlockId;
+    private bool _pageSizeDirty = true;
+
+    private static readonly JsonSerializerOptions ExportJsonOptions = new()
+    {
+        WriteIndented = true,
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        // Lesbarer Export-Sidecar (LF-05): <,>,& nicht zu \u00XX escapen. Sicher,
+        // weil die Datei heruntergeladen und nicht in HTML eingebettet wird.
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        Converters = { new JsonStringEnumConverter() }
+    };
+
+    private PageLayout LayoutBinding
+    {
+        get => _doc.Layout;
+        set { _doc.Layout = value; _pageSizeDirty = true; }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!string.IsNullOrWhiteSpace(Id))
+        {
+            var loaded = await Drafts.LoadAsync(Id, CancellationToken.None);
+            if (loaded is not null) _doc = loaded.Migrate();
+        }
+        _doc.Migrate();
+        _selectedPage = _doc.Pages.FirstOrDefault();
+        await RefreshDraftsAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await JS.InvokeVoidAsync("pageboundWysiwyg.initializeEditor");
+        }
+        if (_pageSizeDirty)
+        {
+            _pageSizeDirty = false;
+            await JS.InvokeVoidAsync("pageboundWysiwyg.setPageSize", EditorLayouts.For(_doc.Layout).CssPageSize);
+        }
+        if (_focusBlockId is not null)
+        {
+            var id = _focusBlockId;
+            _focusBlockId = null;
+            await JS.InvokeVoidAsync("pageboundWysiwyg.focusBlockEnd", $"blk-{id}");
+        }
+    }
+
+    private async Task RefreshDraftsAsync()
+        => _drafts = await Drafts.ListAsync(CancellationToken.None);
+
+    private string BlockTypeName(EditorBlockType t) => L.T($"editor.type.{t.ToString().ToLowerInvariant()}");
+
+    private bool IsSlide => _doc.Layout == PageLayout.Slide16x9;
+    private string PageLabel(int idx) => L.T(IsSlide ? "editor.page.nthSlide" : "editor.page.nthPage", new Dictionary<string, object> { ["n"] = idx + 1 });
+    private string AddPageLabel() => L.T(IsSlide ? "editor.page.addSlide" : "editor.page.add");
+
+    private string PageStyle(EditorPage page, PageDimensions dim)
+    {
+        var sb = new StringBuilder();
+        sb.Append("width:").Append(dim.CssWidth).Append(";height:").Append(dim.CssHeight).Append(";padding:").Append(dim.CssMargin).Append(';');
+        sb.Append(PageBgCss(page));
+        return sb.ToString();
+    }
+
+    private static string PageBgCss(EditorPage page)
+    {
+        var sb = new StringBuilder();
+        if (!string.IsNullOrEmpty(page.BackgroundImage))
+        {
+            if (!string.IsNullOrEmpty(page.Background)) sb.Append("background-color:").Append(page.Background).Append(';');
+            sb.Append("background-image:url('").Append(page.BackgroundImage).Append("');");
+            sb.Append("background-size:").Append(page.BackgroundSize == "contain" ? "contain" : "cover").Append(';');
+            sb.Append("background-position:center;background-repeat:no-repeat;");
+        }
+        else if (!string.IsNullOrEmpty(page.Background))
+        {
+            sb.Append("background:").Append(page.Background).Append(';');
+        }
+        return sb.ToString();
+    }
+
+    // --- Sync DOM (contentEditable) → Modell ---------------------------------
+    private async Task SyncAllAsync()
+    {
+        var ids = new List<string>();
+        foreach (var page in _doc.Pages)
+        {
+            foreach (var b in page.Blocks)
+            {
+                if (b.Type is EditorBlockType.Heading or EditorBlockType.Paragraph)
+                {
+                    ids.Add($"blk-{b.Id}");
+                }
+                else if (b.Type == EditorBlockType.Table && b.Rows is not null)
+                {
+                    for (var r = 0; r < b.Rows.Count; r++)
+                        for (var c = 0; c < b.Rows[r].Count; c++)
+                            ids.Add($"cell-{b.Id}-{r}-{c}");
+                }
+            }
+        }
+        if (ids.Count == 0) return;
+        var values = await JS.InvokeAsync<Dictionary<string, string>>("pageboundWysiwyg.readValues", ids);
+        foreach (var page in _doc.Pages)
+        {
+            foreach (var b in page.Blocks)
+            {
+                if (b.Type is EditorBlockType.Heading or EditorBlockType.Paragraph)
+                {
+                    if (values.TryGetValue($"blk-{b.Id}", out var v)) b.Text = v;
+                }
+                else if (b.Type == EditorBlockType.Table && b.Rows is not null)
+                {
+                    for (var r = 0; r < b.Rows.Count; r++)
+                        for (var c = 0; c < b.Rows[r].Count; c++)
+                            if (values.TryGetValue($"cell-{b.Id}-{r}-{c}", out var cv)) b.Rows[r][c] = cv;
+                }
+            }
+        }
+    }
+
+    private Task OnEditableBlur() => SyncAllAsync();
+
+    // --- Auswahl --------------------------------------------------------------
+    private void SelectBlock(EditorPage page, EditorBlock b) { _selected = b; _selectedPage = page; }
+    private void SelectPage(EditorPage page) { _selectedPage = page; _selected = null; }
+    private void DeselectIfBackground() => _selected = null;
+
+    private void SetAlign(string align)
+    {
+        if (_selected is null) return;
+        _selected.Align = align;
+    }
+
+    // --- Seiten ---------------------------------------------------------------
+    private EditorPage CurrentPage()
+    {
+        if (_selectedPage is null || !_doc.Pages.Contains(_selectedPage))
+        {
+            _selectedPage = _doc.Pages.FirstOrDefault();
+            if (_selectedPage is null)
+            {
+                _selectedPage = new EditorPage();
+                _doc.Pages.Add(_selectedPage);
+            }
+        }
+        return _selectedPage;
+    }
+
+    private async Task AddPage()
+    {
+        await SyncAllAsync();
+        var page = new EditorPage();
+        var at = _selectedPage is not null ? _doc.Pages.IndexOf(_selectedPage) + 1 : _doc.Pages.Count;
+        if (at < 0 || at > _doc.Pages.Count) at = _doc.Pages.Count;
+        _doc.Pages.Insert(at, page);
+        _selectedPage = page;
+        _selected = null;
+    }
+
+    private async Task DuplicatePage(EditorPage page)
+    {
+        await SyncAllAsync();
+        var copy = page.Clone();
+        _doc.Pages.Insert(_doc.Pages.IndexOf(page) + 1, copy);
+        _selectedPage = copy;
+        _selected = null;
+    }
+
+    private async Task DeletePage(EditorPage page)
+    {
+        if (_doc.Pages.Count <= 1) return;
+        await SyncAllAsync();
+        var i = _doc.Pages.IndexOf(page);
+        _doc.Pages.Remove(page);
+        if (_selected is not null && page.Blocks.Contains(_selected)) _selected = null;
+        _selectedPage = _doc.Pages[Math.Clamp(i, 0, _doc.Pages.Count - 1)];
+    }
+
+    private async Task MovePage(EditorPage page, int dir)
+    {
+        await SyncAllAsync();
+        var i = _doc.Pages.IndexOf(page);
+        var j = i + dir;
+        if (i < 0 || j < 0 || j >= _doc.Pages.Count) return;
+        (_doc.Pages[i], _doc.Pages[j]) = (_doc.Pages[j], _doc.Pages[i]);
+    }
+
+    // --- Blöcke hinzufügen/bewegen/löschen -----------------------------------
+    private async Task AddBlock(EditorBlockType type)
+    {
+        await SyncAllAsync();
+        var page = CurrentPage();
+        var b = new EditorBlock { Type = type };
+        switch (type)
+        {
+            case EditorBlockType.Heading: b.Level = 2; b.Text = ""; break;
+            case EditorBlockType.Paragraph: b.Text = ""; break;
+            case EditorBlockType.Image: b.WidthPercent = 60; b.Align = "center"; b.Alt = L.T("editor.image.empty"); break;
+            case EditorBlockType.Shape: b.Shape = "rectangle"; b.Color = "#1f2937"; b.HeightPx = 48; break;
+            case EditorBlockType.Spacer: b.HeightPx = 24; break;
+            case EditorBlockType.Table:
+                b.HeaderRow = true;
+                b.Rows = new List<List<string>>
+                {
+                    new() { "Spalte 1", "Spalte 2", "Spalte 3" },
+                    new() { "", "", "" },
+                    new() { "", "", "" }
+                };
+                break;
+        }
+        page.Blocks.Add(b);
+        _selected = b;
+        if (type is EditorBlockType.Heading or EditorBlockType.Paragraph) _focusBlockId = b.Id;
+    }
+
+    private EditorPage? PageOf(EditorBlock b) => _doc.Pages.FirstOrDefault(p => p.Blocks.Contains(b));
+
+    private async Task MoveBlock(EditorBlock b, int dir)
+    {
+        await SyncAllAsync();
+        var page = PageOf(b);
+        if (page is null) return;
+        var i = page.Blocks.IndexOf(b);
+        var j = i + dir;
+        if (i < 0 || j < 0 || j >= page.Blocks.Count) return;
+        (page.Blocks[i], page.Blocks[j]) = (page.Blocks[j], page.Blocks[i]);
+    }
+
+    private async Task DuplicateBlock(EditorBlock b)
+    {
+        await SyncAllAsync();
+        var page = PageOf(b);
+        if (page is null) return;
+        var copy = b.Clone();
+        page.Blocks.Insert(page.Blocks.IndexOf(b) + 1, copy);
+        _selected = copy;
+        _selectedPage = page;
+    }
+
+    private async Task DeleteBlock(EditorBlock b)
+    {
+        await SyncAllAsync();
+        var page = PageOf(b);
+        if (page is null) return;
+        page.Blocks.Remove(b);
+        if (_selected == b) _selected = null;
+    }
+
+    // --- Tabelle --------------------------------------------------------------
+    private async Task TableAddRow(EditorBlock b)
+    {
+        await SyncAllAsync();
+        if (b.Rows is null) return;
+        var cols = b.Rows.Count > 0 ? b.Rows[0].Count : 3;
+        b.Rows.Add(Enumerable.Repeat("", cols).ToList());
+    }
+    private async Task TableRemoveRow(EditorBlock b)
+    {
+        await SyncAllAsync();
+        if (b.Rows is { Count: > 1 }) b.Rows.RemoveAt(b.Rows.Count - 1);
+    }
+    private async Task TableAddCol(EditorBlock b)
+    {
+        await SyncAllAsync();
+        if (b.Rows is null) return;
+        foreach (var row in b.Rows) row.Add("");
+    }
+    private async Task TableRemoveCol(EditorBlock b)
+    {
+        await SyncAllAsync();
+        if (b.Rows is null) return;
+        foreach (var row in b.Rows) if (row.Count > 1) row.RemoveAt(row.Count - 1);
+    }
+
+    // --- Bild -----------------------------------------------------------------
+    private async Task OnImageSelected(InputFileChangeEventArgs e)
+    {
+        if (_selected is null || _selected.Type != EditorBlockType.Image) return;
+        var file = e.File;
+        if (file is null) return;
+        const long max = 8 * 1024 * 1024;
+        await using var stream = file.OpenReadStream(max);
+        using var ms = new MemoryStream();
+        await stream.CopyToAsync(ms);
+        var mime = string.IsNullOrEmpty(file.ContentType) ? "image/png" : file.ContentType;
+        _selected.Src = $"data:{mime};base64,{Convert.ToBase64String(ms.ToArray())}";
+    }
+
+    private async Task OnPageBgSelected(InputFileChangeEventArgs e)
+    {
+        if (_selectedPage is null) return;
+        var file = e.File;
+        if (file is null) return;
+        const long max = 12 * 1024 * 1024;
+        await using var stream = file.OpenReadStream(max);
+        using var ms = new MemoryStream();
+        await stream.CopyToAsync(ms);
+        var mime = string.IsNullOrEmpty(file.ContentType) ? "image/png" : file.ContentType;
+        _selectedPage.BackgroundImage = $"data:{mime};base64,{Convert.ToBase64String(ms.ToArray())}";
+    }
+
+    // --- Vorlagen / Entwürfe --------------------------------------------------
+    private void NewDocument()
+    {
+        _doc = EditorDocument.NewEmpty(string.Empty, _doc.Layout);
+        _selected = null;
+        _selectedPage = _doc.Pages.FirstOrDefault();
+        _status = null;
+        _pageSizeDirty = true;
+    }
+
+    private void ApplyTemplate(ChangeEventArgs e)
+    {
+        var raw = e.Value?.ToString();
+        if (string.IsNullOrEmpty(raw) || !Enum.TryParse<EditorTemplates.TemplateKind>(raw, out var kind)) return;
+        _doc = EditorTemplates.Create(kind).Migrate();
+        _selected = null;
+        _selectedPage = _doc.Pages.FirstOrDefault();
+        _status = null;
+        _pageSizeDirty = true;
+    }
+
+    private async Task Save()
+    {
+        if (_busy) return;
+        _busy = true;
+        _status = null;
+        try
+        {
+            await SyncAllAsync();
+            if (string.IsNullOrWhiteSpace(_doc.Title)) _doc.Title = L.T("common.untitled");
+            await Drafts.SaveAsync(_doc, CancellationToken.None);
+            await RefreshDraftsAsync();
+            _status = L.T("editor.draft.saved");
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task LoadDraft(string id)
+    {
+        var loaded = await Drafts.LoadAsync(id, CancellationToken.None);
+        if (loaded is null) return;
+        _doc = loaded.Migrate();
+        _selected = null;
+        _selectedPage = _doc.Pages.FirstOrDefault();
+        _status = null;
+        _pageSizeDirty = true;
+    }
+
+    private async Task DeleteDraft(string id)
+    {
+        await Drafts.DeleteAsync(id, CancellationToken.None);
+        if (_doc.Id == id) NewDocument();
+        await RefreshDraftsAsync();
+    }
+
+    // --- Formatierung + Export ------------------------------------------------
+    // Erweiterte Palette für „mehr Farbwahl" + freier Farbwähler (siehe Toolbar).
+    private static readonly string[] TextColors =
+        { "#111827", "#374151", "#6b7280", "#dc2626", "#ea580c", "#d97706", "#16a34a", "#0891b2", "#2563eb", "#7c3aed", "#db2777", "#ffffff" };
+    private static readonly string[] HiliteColors =
+        { "#fef08a", "#fde047", "#fdba74", "#86efac", "#67e8f9", "#93c5fd", "#c4b5fd", "#f9a8d4" };
+
+    private Task Format(string command, string? value = null) =>
+        JS.InvokeVoidAsync("pageboundWysiwyg.execFormat", command, value).AsTask();
+
+    private Task ApplyColor(string command, string value) =>
+        JS.InvokeVoidAsync("pageboundWysiwyg.applyColor", command, value).AsTask();
+
+    private async Task ExportPdf()
+    {
+        await JS.InvokeVoidAsync("pageboundWysiwyg.blurActive");
+        await SyncAllAsync();
+        _selected = null;
+        StateHasChanged();
+        await JS.InvokeVoidAsync("pageboundWysiwyg.setPageSize", EditorLayouts.For(_doc.Layout).CssPageSize);
+        await JS.InvokeVoidAsync("pageboundWysiwyg.triggerPrint");
+    }
+
+    private async Task ExportHtml()
+    {
+        await JS.InvokeVoidAsync("pageboundWysiwyg.blurActive");
+        await SyncAllAsync();
+        _selected = null;
+        StateHasChanged();
+        await Task.Yield();
+
+        var dim = EditorLayouts.For(_doc.Layout);
+        var pages = new List<(string Style, string Inner)>();
+        for (var i = 0; i < _doc.Pages.Count; i++)
+        {
+            var inner = await JS.InvokeAsync<string>("pageboundWysiwyg.getCleanHtml", $"pb-page-{i}");
+            pages.Add((PageBgCss(_doc.Pages[i]), inner));
+        }
+        var html = BuildStandaloneHtml(_doc.Title, dim, pages);
+        await DownloadTextAsync(SafeName(_doc.Title) + ".html", html, "text/html");
+    }
+
+    private async Task ExportJson()
+    {
+        await JS.InvokeVoidAsync("pageboundWysiwyg.blurActive");
+        await SyncAllAsync();
+        var json = JsonSerializer.Serialize(_doc, ExportJsonOptions);
+        await DownloadTextAsync(SafeName(_doc.Title) + ".json", json, "application/json");
+    }
+
+    private Task DownloadTextAsync(string filename, string text, string mime)
+    {
+        var b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(text));
+        return JS.InvokeVoidAsync("pageboundShortcuts.downloadBytes", filename, b64, mime).AsTask();
+    }
+
+    private static string SafeName(string? title)
+    {
+        var baseName = string.IsNullOrWhiteSpace(title) ? "dokument" : title;
+        return string.Concat(baseName.Select(c => char.IsLetterOrDigit(c) || c is '_' or '-' or ' ' ? c : '_')).Trim();
+    }
+
+    private static string BuildStandaloneHtml(string title, PageDimensions dim, List<(string Style, string Inner)> pages)
+    {
+        var safeTitle = System.Net.WebUtility.HtmlEncode(string.IsNullOrWhiteSpace(title) ? "Dokument" : title);
+        var sb = new StringBuilder();
+        sb.Append("<!doctype html><html lang=\"de\"><head><meta charset=\"utf-8\">");
+        sb.Append("<title>").Append(safeTitle).Append("</title><style>");
+        sb.Append("@page{size:").Append(dim.CssPageSize).Append(";margin:0}");
+        sb.Append("body{margin:0;background:#e5e7eb;color:#111827;font-family:Georgia,'Times New Roman',serif}");
+        sb.Append(".pb-page{box-sizing:border-box;position:relative;background:#fff;width:").Append(dim.CssWidth)
+          .Append(";min-height:").Append(dim.CssHeight).Append(";padding:").Append(dim.CssMargin).Append(";margin:0 auto 12px;page-break-after:always}");
+        sb.Append(".pb-page:last-child{page-break-after:auto;margin-bottom:0}");
+        sb.Append(".pb-h1{font-size:22pt;font-weight:700}.pb-h2{font-size:16pt;font-weight:700}.pb-h3{font-size:13pt;font-weight:700}");
+        sb.Append(".pb-para{font-size:11pt;line-height:1.5}");
+        sb.Append(".pb-spacer{width:100%}");
+        sb.Append(".pb-img{display:block;max-width:100%;height:auto}.pb-img-wrap.align-center{text-align:center}.pb-img-wrap.align-right{text-align:right}");
+        sb.Append(".pb-shape-rect{width:100%;border:1.5px solid currentColor}.pb-shape-line{border-top:1.5px solid currentColor}.pb-shape-divider{border-top:1px solid #d1d5db;margin:6px 0}");
+        sb.Append(".pb-table{width:100%;border-collapse:collapse;font-size:10.5pt}.pb-table td,.pb-table th{border:1px solid #9ca3af;padding:4px 8px;text-align:left}.pb-table th{background:#f3f4f6}");
+        sb.Append(".align-center{text-align:center}.align-right{text-align:right}.align-justify{text-align:justify}");
+        sb.Append("*{-webkit-print-color-adjust:exact;print-color-adjust:exact}");
+        sb.Append("</style></head><body>");
+        foreach (var (style, inner) in pages)
+        {
+            sb.Append("<div class=\"pb-page\" style=\"").Append(style).Append("\">").Append(inner).Append("</div>");
+        }
+        sb.Append("</body></html>");
+        return sb.ToString();
+    }
+}

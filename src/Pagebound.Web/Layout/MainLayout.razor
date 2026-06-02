@@ -1,0 +1,270 @@
+@inherits LayoutComponentBase
+@implements IDisposable
+@inject ILocalizationService L
+@inject ILibraryService LibrarySvc
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+
+<div class="@($"app{(IsCollapsed ? " collapsed" : "")}")">
+
+    @* Skip-Link (WCAG 2.4.1): erstes fokussierbares Element, springt an <main> *@
+    <a href="#main" class="skip-link">@L.T("a11y.skipToContent")</a>
+
+    @* RAIL — typografischer Index (FA-064: klappt im Lesemodus ein) *@
+    <nav id="app-rail" class="@($"rail{(_railOpen ? " open" : "")}")" aria-label="@L.T("nav.heading")">
+        <div class="masthead">
+            <a href="/" class="masthead-logo-link" @onclick="@(() => Go(""))" @onclick:preventDefault="true" aria-label="@L.T("app.title")">
+                <img class="masthead-logo" src="favicon.ico" alt="@L.T("app.title")" />
+            </a>
+            <div class="tagline"><span class="dot" aria-hidden="true"></span> @L.T("app.preAlpha")</div>
+        </div>
+
+        <div class="nav">
+            @* 1. Start *@
+            <button type="button" class="nav-item"
+                    aria-current="@(_route == "" ? "page" : null)"
+                    @onclick="@(() => Go(""))">
+                <span class="ix" aria-hidden="true">01</span>
+                <span class="lbl">@L.T("nav.start")</span>
+            </button>
+
+            @* 2. PDF — aufklappbare Gruppe mit den PDF-Werkzeugen *@
+            <button type="button" class="nav-item nav-group-toggle"
+                    aria-expanded="@(_pdfOpen ? "true" : "false")" aria-controls="nav-pdf-group"
+                    @onclick="@(() => _pdfOpen = !_pdfOpen)">
+                <span class="ix" aria-hidden="true">02</span>
+                <span class="lbl">@L.T("nav.pdf")</span>
+                <span class="chev" aria-hidden="true">›</span>
+            </button>
+            @if (_pdfOpen)
+            {
+                <div id="nav-pdf-group" class="nav-sub">
+                    @foreach (var s in PdfGroup)
+                    {
+                        var item = s;
+                        <button type="button" class="nav-item"
+                                aria-current="@(_route == item.Route ? "page" : null)"
+                                @onclick="@(() => Go(item.Route))">
+                            <span class="lbl">@L.T(item.LabelKey)</span>
+                        </button>
+                    }
+                </div>
+            }
+
+            @* 3. Designer *@
+            <button type="button" class="nav-item"
+                    aria-current="@(_route == "editor" ? "page" : null)"
+                    @onclick="@(() => Go("editor"))">
+                <span class="ix" aria-hidden="true">03</span>
+                <span class="lbl">@L.T("nav.editor")</span>
+            </button>
+        </div>
+
+        <div class="rail-lib">
+            <div class="coll-label">
+                @L.T("nav.collection")
+                <button type="button" class="focusable" @onclick="@(() => Go("library"))">@L.T("nav.library.viewAll")</button>
+            </div>
+            @if (_recent.Count == 0)
+            {
+                <span class="block py-1 text-xs italic" style="color: var(--ink-4)">@L.T("nav.library.empty")</span>
+            }
+            else
+            {
+                @foreach (var entry in _recent)
+                {
+                    var e = entry;
+                    <button type="button" class="lib-file" title="@e.Title" @onclick="@(() => OpenRecent(e))">
+                        <span class="nm">@e.Title</span>
+                        <span class="hsh">@ShortHash(e)</span>
+                    </button>
+                }
+            }
+        </div>
+
+        <div class="rail-foot">
+            <span class="priv">
+    <Icon Name="lock" />
+                @L.T("nav.privacy")
+            </span>
+            <a class="rail-gh" href="https://github.com/LupusMalusDeviant/Pagebound"
+               target="_blank" rel="noopener noreferrer"
+               aria-label="@L.T("nav.github")" title="@L.T("nav.github")">
+                <Icon Name="github" /> GitHub
+            </a>
+        </div>
+    </nav>
+
+    @if (_railOpen)
+    {
+        <div class="scrim" @onclick="@(() => _railOpen = false)" aria-hidden="true"></div>
+    }
+
+    @* TOPBAR — running head *@
+    <header class="topbar">
+        <button class="icon-btn menu-btn" @onclick="@(() => _railOpen = !_railOpen)" aria-label="@L.T("nav.sidebar.toggle")"
+                aria-expanded="@(_railOpen ? "true" : "false")" aria-controls="app-rail">
+<Icon Name="menu" />
+        </button>
+        <div class="runhead">
+            <span>@L.T("app.title")</span><span class="sep">—</span><b>@CrumbLabel</b>
+        </div>
+        <span class="spacer"></span>
+        <div class="theme-toggle" role="group" aria-label="@L.T("settings.theme")">
+            <button aria-pressed="@((_theme == "light").ToString().ToLowerInvariant())" @onclick='@(() => SetThemeAsync("light"))'>@L.T("settings.theme.light")</button>
+            <span class="bar" aria-hidden="true"></span>
+            <button aria-pressed="@((_theme == "dark").ToString().ToLowerInvariant())" @onclick='@(() => SetThemeAsync("dark"))'>@L.T("settings.theme.dark")</button>
+        </div>
+        <button class="icon-btn" @ref="_gearBtn" @onclick="@(() => _settingsOpen = true)" aria-label="@L.T("settings.open")" title="@L.T("settings.open")"
+                aria-haspopup="dialog" aria-expanded="@(_settingsOpen ? "true" : "false")" aria-controls="settings-panel">
+<Icon Name="sliders" />
+        </button>
+        <button class="icon-btn" style="width:auto;padding:0 0.55em;font-family:var(--font-mono);font-size:0.72rem"
+                @onclick="ToggleLanguageAsync" aria-label="@L.T("lang.toggle.title")" title="@L.T("lang.toggle.title")">
+            @L.CurrentLanguage.ToUpperInvariant()
+        </button>
+        <span class="ver">@L.T("app.version")</span>
+    </header>
+
+    @* MAIN *@
+    <main class="main" id="main" tabindex="-1">
+        @Body
+    </main>
+</div>
+
+<SettingsPanel Open="_settingsOpen" OnClose="OnSettingsClosedAsync" />
+
+@code {
+    private sealed record NavDef(string Ix, string Route, string LabelKey);
+
+    // Subtabs der „PDF"-Gruppe. Start + Designer stehen separat als Top-Level.
+    private static readonly NavDef[] PdfGroup =
+    {
+        new("", "reader",  "nav.reader"),
+        new("", "tools",   "nav.tools"),
+        new("", "split",   "nav.split"),
+        new("", "compare", "nav.compare"),
+        new("", "batch",   "nav.batch"),
+    };
+
+    private static bool IsPdfRoute(string route) =>
+        route is "reader" or "tools" or "split" or "compare" or "batch";
+
+    private string _route = "";
+    private bool _railOpen;
+    private bool _pdfOpen;
+    private bool _settingsOpen;
+    private string _theme = "dark";
+    private List<LibraryEntry> _recent = new();
+    private ElementReference _gearBtn;
+
+    // Schiene bleibt auf allen Routen sichtbar (kein Auto-Einklappen mehr im
+    // Lesemodus — auf Nutzerwunsch). Auf schmalen Viewports (≤940px) wandert sie
+    // weiterhin per @media off-canvas und wird über den ☰-Button geöffnet.
+    private bool IsCollapsed => false;
+
+    private string CrumbLabel => _route switch
+    {
+        "reader" => L.T("nav.reader"),
+        "tools" => L.T("nav.tools"),
+        "split" => L.T("nav.split"),
+        "compare" => L.T("nav.compare"),
+        "batch" => L.T("nav.batch"),
+        "library" => L.T("nav.library"),
+        "editor" => L.T("nav.editor"),
+        _ => L.T("nav.start"),
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        Nav.LocationChanged += OnLocationChanged;
+        UpdateRoute();
+        await RefreshRecentAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await SyncThemeAsync();
+        }
+    }
+
+    public void Dispose() => Nav.LocationChanged -= OnLocationChanged;
+
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
+    {
+        UpdateRoute();
+        _railOpen = false;
+        _ = RefreshRecentAsync();
+    }
+
+    private void UpdateRoute()
+    {
+        _route = Nav.ToBaseRelativePath(Nav.Uri).Split('?', '#')[0].Trim('/').ToLowerInvariant();
+        if (IsPdfRoute(_route)) _pdfOpen = true; // PDF-Gruppe auto-aufklappen, wenn ein Subtab aktiv ist
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void Go(string route)
+    {
+        _railOpen = false;
+        Nav.NavigateTo(route.Length == 0 ? "/" : "/" + route);
+    }
+
+    private void OpenRecent(LibraryEntry entry)
+    {
+        _railOpen = false;
+        var hash = entry.PdfMeta?.FileHashSha256;
+        Nav.NavigateTo(string.IsNullOrWhiteSpace(hash) ? "/reader" : $"/reader?pdf={Uri.EscapeDataString(hash)}");
+    }
+
+    private static string ShortHash(LibraryEntry e)
+    {
+        var h = e.PdfMeta?.FileHashSha256;
+        return string.IsNullOrEmpty(h) ? "" : h[..Math.Min(4, h.Length)];
+    }
+
+    private async Task RefreshRecentAsync()
+    {
+        try
+        {
+            var query = new LibraryQuery(Sort: LibrarySort.LastOpenedDesc, Take: 5);
+            _recent = (await LibrarySvc.QueryAsync(query, CancellationToken.None)).ToList();
+        }
+        catch { _recent = new(); }
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task SetThemeAsync(string theme)
+    {
+        _theme = theme;
+        try { await JS.InvokeVoidAsync("pageboundTweaks.set", "theme", theme); }
+        catch { /* Bridge nicht da */ }
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task ToggleLanguageAsync()
+    {
+        var next = L.CurrentLanguage == "de" ? "en" : "de";
+        await L.SetLanguageAsync(next, CancellationToken.None);
+    }
+
+    private async Task SyncThemeAsync()
+    {
+        try
+        {
+            var t = await JS.InvokeAsync<System.Text.Json.JsonElement>("pageboundTweaks.load");
+            if (t.TryGetProperty("theme", out var th) && th.GetString() is { } s) { _theme = s; await InvokeAsync(StateHasChanged); }
+        }
+        catch { /* ignore */ }
+    }
+
+    private async Task OnSettingsClosedAsync()
+    {
+        _settingsOpen = false;
+        await SyncThemeAsync(); // Theme könnte im Panel geändert worden sein
+        // Fokus zurück auf den Auslöser (WCAG 2.4.3 Fokus-Reihenfolge).
+        try { await _gearBtn.FocusAsync(); } catch { /* Element evtl. nicht gerendert */ }
+    }
+}

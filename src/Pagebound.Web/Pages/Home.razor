@@ -1,0 +1,86 @@
+@page "/"
+@inject ILocalizationService L
+
+<PageTitle>@L.T("app.title")</PageTitle>
+
+<article class="ed">
+    <header class="masthead-pg">
+        <div class="folio-line">
+            <span>@L.T("home.ed.folio")</span><span class="sep">·</span>
+            <span>@L.T("app.version")</span><span class="sep">·</span>
+            <span>@L.T("home.ed.local")</span>
+        </div>
+        <h1 class="wordmark-xl">Page<em>bound</em></h1>
+        <p class="standfirst">@L.T("home.hero.lead")</p>
+        <div class="actions">
+            <a href="/reader" class="btn primary"><Icon Name="reader" /> @L.T("home.hero.ctaReader")</a>
+            <a href="/library" class="link-cta">@L.T("home.hero.ctaLibrary") <Icon Name="arrowR" /></a>
+            <a href="/tools" class="link-cta">@L.T("home.hero.ctaTools") <Icon Name="arrowR" /></a>
+        </div>
+    </header>
+
+    <div class="ed-grid">
+        <div class="ed-main">
+            <section class="ed-sec" aria-labelledby="home-usp-h">
+                <h2 class="ed-h" id="home-usp-h">@L.T("home.ed.uspHeading")</h2>
+                <ol class="toc">
+                    <li class="toc-item">
+                        <span class="toc-num" aria-hidden="true">01</span>
+                        <div class="toc-body"><h3>@L.T("home.usp.signature.title")</h3><p>@L.T("home.usp.signature.body")</p></div>
+                    </li>
+                    <li class="toc-item">
+                        <span class="toc-num" aria-hidden="true">02</span>
+                        <div class="toc-body"><h3>@L.T("home.usp.library.title")</h3><p>@L.T("home.usp.library.body")</p></div>
+                    </li>
+                    <li class="toc-item">
+                        <span class="toc-num" aria-hidden="true">03</span>
+                        <div class="toc-body"><h3>@L.T("home.usp.markdown.title")</h3><p>@L.T("home.usp.markdown.body")</p></div>
+                    </li>
+                </ol>
+            </section>
+
+            <section class="ed-sec" aria-labelledby="home-have-h">
+                <h2 class="ed-h" id="home-have-h">@L.T("home.builtin.heading")</h2>
+                <ul class="feat-list">
+                    @foreach (var (kKey, dKey) in Haves)
+                    {
+                        <li><span class="k">@L.T(kKey)</span><p>@L.T(dKey)</p></li>
+                    }
+                </ul>
+            </section>
+        </div>
+
+        <aside class="ed-margin" aria-label="@L.T("home.margin.heading")">
+            <div>
+                <h2 class="m-h">@L.T("home.margin.heading")</h2>
+                <dl class="m-facts">
+                    <div class="m-fact"><dt>@L.T("home.margin.version")</dt><dd class="mono">@L.T("app.version")</dd></div>
+                    <div class="m-fact"><dt>@L.T("home.margin.backend")</dt><dd>@L.T("home.margin.backendVal")</dd></div>
+                    <div class="m-fact"><dt>@L.T("home.margin.integrity")</dt><dd class="mono">SHA-256</dd></div>
+                    <div class="m-fact"><dt>@L.T("home.margin.export")</dt><dd>JSON-Sidecar · Markdown</dd></div>
+                    <div class="m-fact"><dt>@L.T("home.margin.language")</dt><dd>DE / EN</dd></div>
+                </dl>
+            </div>
+            <div class="colophon">
+                <div class="c-h">
+<Icon Name="shield" />
+                    @L.T("home.colophon.heading")
+                </div>
+                <strong>@L.T("home.privacy.title").</strong> @L.T("home.privacy.body")
+            </div>
+        </aside>
+    </div>
+</article>
+
+@code {
+    // Linke "Register"-Spalte: Kategorie-Label (k) + bestehende Beschreibung (d).
+    private static readonly (string K, string D)[] Haves =
+    {
+        ("home.have.read", "home.builtin.viewer"),
+        ("home.have.annotate", "home.builtin.annotations"),
+        ("home.have.sign", "home.builtin.signature"),
+        ("home.have.tools", "home.builtin.tools"),
+        ("home.have.ocr", "home.builtin.ocr"),
+        ("home.have.view", "home.builtin.viewerExtras"),
+    };
+}

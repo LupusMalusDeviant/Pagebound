@@ -1,0 +1,3517 @@
+@using System.Globalization
+@using Markdig
+@using Microsoft.AspNetCore.Components.Forms
+@using Microsoft.AspNetCore.Components.Web
+@using Microsoft.JSInterop
+@inject IPdfRenderer Renderer
+@inject IPdfManipulator Manipulator
+@inject IHashService Hasher
+@inject IAnnotationService Annotations
+@inject IMarkdownExporter MarkdownExporter
+@inject IIntegrityService Integrity
+@inject IStorageService Storage
+@inject ISidecarService Sidecar
+@inject IWorkspaceService Workspace
+@inject ILibraryService Library
+@inject IOcrService Ocr
+@inject IFileHandleService Files
+@inject IPdfFormService FormService
+@inject ILocalizationService L
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+<section class="mx-auto max-w-[1800px] px-4 sm:px-6 lg:px-8 py-8">
+    <header class="max-w-4xl mx-auto mb-6">
+        <h1 class="text-2xl font-bold">@L.T("reader.heading")</h1>
+        <p class="mt-1 text-sm text-pb-fg-muted">
+            @L.T("reader.subheading")
+        </p>
+    </header>
+
+    <div class="max-w-4xl mx-auto rounded-lg pb-glass p-4">
+        <label class="flex flex-col gap-2 text-sm">
+            <span class="font-medium">@L.T("reader.choosePdf")</span>
+            @if (_fsaSupported)
+            {
+                @* File-System-Access-API: zeigt einen nativen Picker, dessen
+                   Handle wir nach dem ersten Open in IndexedDB persistieren.
+                   Späteres Wieder-Öffnen aus der Library kommt dann mit
+                   höchstens einem dezenten Permission-Dialog statt einem
+                   weiteren File-Picker durch. *@
+                <button type="button"
+                        class="btn primary self-start disabled:opacity-40"
+                        disabled="@_isLoading"
+                        @onclick="PickPdfViaFsaAsync">
+                    <Icon Name="folder" /> @L.T("reader.choosePdf")
+                </button>
+            }
+            else
+            {
+                <InputFile OnChange="HandleFileSelected"
+                           accept=".pdf"
+                           class="block text-sm file:mr-3 file:rounded file:border-0 file:bg-pb-accent file:px-3 file:py-1.5 file:font-semibold file:text-[var(--accent-ink)] file:cursor-pointer cursor-pointer" />
+            }
+        </label>
+
+        @if (_errorMessage is not null)
+        {
+            <div class="mt-3 rounded border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700 whitespace-pre-wrap font-mono"
+                 role="alert">
+                @_errorMessage
+            </div>
+        }
+
+        @if (_isLoading)
+        {
+            <div class="mt-3 text-sm text-pb-fg-muted" aria-live="polite">@L.T("app.loadingShort")</div>
+        }
+    </div>
+
+    @if (_handle is not null)
+    {
+        <div class="max-w-4xl mx-auto mt-4 rounded-lg pb-glass p-4">
+            <form @onsubmit="DoSearchAsync" @onsubmit:preventDefault>
+                <div class="flex flex-wrap gap-2 items-center">
+                    <input @bind="_searchQuery"
+                           @bind:event="oninput"
+                           type="search"
+                           data-pb-search-input
+                           class="flex-1 min-w-0 rounded border border-pb-border bg-pb-bg px-3 py-1.5 text-sm"
+                           placeholder="@L.T("reader.search.placeholder")"
+                           disabled="@_isSearching"
+                           aria-label="@L.T("reader.search.label")" />
+                    <button type="submit"
+                            class="btn primary disabled:opacity-40"
+                            disabled="@(_isSearching || string.IsNullOrWhiteSpace(_searchQuery))">
+                        @(_isSearching ? L.T("reader.search.searching") : L.T("reader.search.button"))
+                    </button>
+                    @if (_searchHits is not null)
+                    {
+                        <button type="button"
+                                class="rounded border border-pb-border px-2 py-1 text-xs text-pb-fg-muted hover:text-pb-fg"
+                                @onclick="ClearSearch"
+                                aria-label="@L.T("reader.search.resetAria")">
+                            @L.T("reader.search.reset")
+                        </button>
+                    }
+                </div>
+                <div class="mt-2 flex gap-4 text-xs text-pb-fg-muted">
+                    <label class="flex items-center gap-1 cursor-pointer">
+                        <input type="checkbox" @bind="_matchCase" class="rounded" />
+                        @L.T("reader.search.matchCase")
+                    </label>
+                    <label class="flex items-center gap-1 cursor-pointer">
+                        <input type="checkbox" @bind="_wholeWord" class="rounded" />
+                        @L.T("reader.search.wholeWord")
+                    </label>
+                    <button type="button"
+                            class="ml-auto rounded border border-pb-border px-2 py-1 text-xs text-pb-fg-muted hover:text-pb-fg disabled:opacity-40"
+                            disabled="@(_isOcrRunning || _handle is null)"
+                            title="@L.T("reader.ocr.title")"
+                            @onclick="RunOcrOnCurrentPageAsync">
+                        @(_isOcrRunning ? L.T("reader.ocr.running") : L.T("reader.ocr.button"))
+                    </button>
+                </div>
+            </form>
+
+            @if (_ocrStatus is not null)
+            {
+                <div class="@($"mt-2 rounded border px-3 py-1 text-xs {(_ocrStatusIsError ? "border-red-300/40 bg-red-50/10 text-pb-fg" : "border-green-300/40 bg-green-50/10 text-pb-fg-muted")}")"
+                     aria-live="polite">
+                    @_ocrStatus
+                    <button type="button"
+                            class="float-right text-pb-fg-muted hover:text-pb-fg ml-2"
+                            @onclick="@(() => _ocrStatus = null)"
+                            aria-label="@L.T("common.close")">✕</button>
+                </div>
+            }
+
+            @if (_searchHits is not null)
+            {
+                <div class="mt-3 text-sm" aria-live="polite">
+                    @if (_pdfHasNoTextLayer)
+                    {
+                        <div class="rounded border border-amber-300/40 bg-amber-50/10 px-3 py-2 text-pb-fg">
+                            <div class="font-medium">@L.T("reader.search.noTextLayer.title")</div>
+                            <p class="mt-1 text-pb-fg-muted">@L.T("reader.search.noTextLayer.body")</p>
+                            <button type="button"
+                                    class="btn primary sm mt-2 disabled:opacity-40"
+                                    disabled="@_isOcrRunning"
+                                    title="@L.T("reader.ocr.title")"
+                                    @onclick="RunOcrOnCurrentPageAsync">
+                                @(_isOcrRunning ? L.T("reader.ocr.running") : L.T("reader.ocr.button"))
+                            </button>
+                        </div>
+                    }
+                    else if (_searchHits.Count == 0)
+                    {
+                        <span class="text-pb-fg-muted">@L.T("reader.search.noHits", new Dictionary<string, object> { ["query"] = _lastSearched })</span>
+                    }
+                    else
+                    {
+                        <span>@L.T("reader.search.hitsCount", new Dictionary<string, object> { ["count"] = _searchHits.Count, ["query"] = _lastSearched })</span>
+                        <ul class="mt-2 max-h-64 overflow-y-auto divide-y divide-pb-border border border-pb-border rounded">
+                            @foreach (var hit in _searchHits)
+                            {
+                                var snippetBefore = hit.Snippet.Substring(0, Math.Min(hit.SnippetMatchStart, hit.Snippet.Length));
+                                var matchEnd = Math.Min(hit.SnippetMatchStart + hit.Match.Length, hit.Snippet.Length);
+                                var snippetMatch = hit.Snippet.Substring(Math.Min(hit.SnippetMatchStart, hit.Snippet.Length), matchEnd - Math.Min(hit.SnippetMatchStart, hit.Snippet.Length));
+                                var snippetAfter = matchEnd < hit.Snippet.Length ? hit.Snippet.Substring(matchEnd) : "";
+                                <li>
+                                    <button type="button"
+                                            class="block w-full text-left p-2 hover:bg-pb-bg"
+                                            @onclick="@(() => GoToPageAsync(hit.PageNumber))">
+                                        <div class="text-xs text-pb-fg-muted">@L.T("reader.search.hitPage", new Dictionary<string, object> { ["page"] = hit.PageNumber })</div>
+                                        <div class="text-sm">
+                                            @snippetBefore<mark class="bg-pb-accent/20 text-pb-fg rounded px-0.5">@snippetMatch</mark>@snippetAfter
+                                        </div>
+                                    </button>
+                                </li>
+                            }
+                        </ul>
+                    }
+                </div>
+            }
+        </div>
+
+        <div class="max-w-4xl mx-auto mt-6 flex items-center justify-between gap-3">
+            <div class="text-sm">
+                <span class="font-medium">@(_handle.Title ?? L.T("common.untitled"))</span>
+                <span class="text-pb-fg-muted"> · @_handle.PageCount @L.T("reader.pages")</span>
+            </div>
+            <nav class="flex items-center gap-2" aria-label="@L.T("reader.pageNav")">
+                <button type="button"
+                        class="rounded border border-pb-border px-3 py-1 text-sm disabled:opacity-40"
+                        disabled="@(_currentPage <= 1 || _isRendering)"
+                        @onclick="PreviousPage">
+                    @L.T("reader.prev")
+                </button>
+                <span class="text-sm tabular-nums">
+                    @L.T("reader.pageOfCount", new Dictionary<string, object> { ["current"] = _currentPage, ["total"] = _handle.PageCount })
+                </span>
+                <button type="button"
+                        class="rounded border border-pb-border px-3 py-1 text-sm disabled:opacity-40"
+                        disabled="@(_currentPage >= _handle.PageCount || _isRendering)"
+                        @onclick="NextPage">
+                    @L.T("reader.next")
+                </button>
+            </nav>
+        </div>
+
+        <div class="max-w-4xl mx-auto mt-3 flex flex-wrap items-center gap-4 text-sm">
+            <div class="flex flex-wrap items-center gap-2">
+                <span class="text-pb-fg-muted">@L.T("reader.zoom.label")</span>
+                @foreach (var z in _zoomLevels)
+                {
+                    var current = z;
+                    <button type="button"
+                            class="@($"rounded border px-2 py-0.5 {(Math.Abs(_zoomFactor - current) < 0.001 ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted")}")"
+                            disabled="@_isRendering"
+                            @onclick="@(() => SetZoom(current))">
+                        @($"{(int)(current * 100)}%")
+                    </button>
+                }
+            </div>
+            <div class="flex items-center gap-2">
+                <span class="text-pb-fg-muted">@L.T("reader.tool.label")</span>
+                <button type="button"
+                        class="@($"rounded border px-2 py-0.5 {(_annotationMode == AnnotationMode.Select ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted")}")"
+                        @onclick="@(() => SetAnnotationMode(AnnotationMode.Select))"
+                        title="@L.T("reader.tool.select.title")">
+                    @L.T("reader.tool.select")
+                </button>
+                <button type="button"
+                        class="@($"rounded border px-2 py-0.5 {(_annotationMode == AnnotationMode.StickyNote ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted")}")"
+                        @onclick="@(() => SetAnnotationMode(AnnotationMode.StickyNote))"
+                        title="@L.T("reader.tool.note.title")">
+                    @L.T("reader.tool.note")
+                </button>
+                @if (_activeSignatureImage is null)
+                {
+                    <label class="rounded border border-pb-border bg-pb-bg px-2 py-0.5 text-pb-fg-muted hover:text-pb-fg cursor-pointer"
+                           title="@L.T("reader.tool.signature.loadTitle")">
+                        @L.T("reader.tool.signature.load")
+                        <InputFile OnChange="HandleSignatureImageSelectedAsync"
+                                   accept=".png,.jpg,.jpeg,image/png,image/jpeg"
+                                   class="hidden" />
+                    </label>
+                }
+                else
+                {
+                    <button type="button"
+                            class="@($"rounded border px-2 py-0.5 {(_annotationMode == AnnotationMode.Signature ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted")}")"
+                            @onclick="@(() => SetAnnotationMode(AnnotationMode.Signature))"
+                            title="@L.T("reader.tool.signature.placeTitle")">
+                        @L.T("reader.tool.signature.placeFormat", new Dictionary<string, object> { ["name"] = _activeSignatureFilename ?? L.T("reader.tool.signature.defaultName") })
+                    </button>
+                    <button type="button"
+                            class="text-xs text-pb-fg-muted hover:text-pb-fg px-1"
+                            @onclick="ClearActiveSignature"
+                            title="@L.T("reader.tool.signature.unload")"
+                            aria-label="@L.T("reader.tool.signature.unload")">
+                        ✕
+                    </button>
+                }
+                <button type="button"
+                        class="@($"rounded border px-2 py-0.5 text-pb-fg-muted hover:text-pb-fg {(_signerPanelOpen ? "border-pb-accent text-pb-accent" : "border-pb-border")}")"
+                        @onclick="@(() => _signerPanelOpen = !_signerPanelOpen)"
+                        title="@L.T("reader.signer.toggleTitle")">
+                    @(string.IsNullOrWhiteSpace(_signer.Name) ? L.T("reader.signer.toggleEmpty") : "👤 " + _signer.Name)
+                </button>
+                @if (_annotations.Any(a => a.Type == AnnotationType.Signature))
+                {
+                    <button type="button"
+                            class="rounded border border-pb-border bg-pb-bg px-2 py-0.5 text-pb-fg-muted hover:text-pb-fg disabled:opacity-40"
+                            disabled="@_isSavingSignedPdf"
+                            @onclick="ExportSignedPdfAsync"
+                            title="@L.T("reader.signed.saveTitle")">
+                        @(_isSavingSignedPdf ? L.T("reader.signed.saving") : L.T("reader.signed.save"))
+                    </button>
+                }
+                <span class="text-pb-fg-muted ml-2">@L.T("reader.draw.label")</span>
+                <button type="button"
+                        class="@($"rounded border px-2 py-0.5 {(_annotationMode == AnnotationMode.Pen ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted")}")"
+                        @onclick="@(() => SetAnnotationMode(AnnotationMode.Pen))"
+                        title="@L.T("reader.draw.pen.title")">
+                    @L.T("reader.draw.pen")
+                </button>
+                <button type="button"
+                        class="@($"rounded border px-2 py-0.5 {(_annotationMode == AnnotationMode.RectShape ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted")}")"
+                        @onclick="@(() => SetAnnotationMode(AnnotationMode.RectShape))"
+                        title="@L.T("reader.draw.rect.title")">
+                    @L.T("reader.draw.rect")
+                </button>
+                <button type="button"
+                        class="@($"rounded border px-2 py-0.5 {(_annotationMode == AnnotationMode.ArrowShape ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted")}")"
+                        @onclick="@(() => SetAnnotationMode(AnnotationMode.ArrowShape))"
+                        title="@L.T("reader.draw.arrow.title")">
+                    @L.T("reader.draw.arrow")
+                </button>
+                <button type="button"
+                        class="@($"rounded border px-2 py-0.5 {(_annotationMode == AnnotationMode.LineShape ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted")}")"
+                        @onclick="@(() => SetAnnotationMode(AnnotationMode.LineShape))"
+                        title="@L.T("reader.draw.line.title")">
+                    @L.T("reader.draw.line")
+                </button>
+                <span class="mx-1 h-4 w-px bg-pb-border"></span>
+                <button type="button"
+                        class="@($"rounded border px-2 py-0.5 {(_annotationMode == AnnotationMode.Redaction ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted")}")"
+                        @onclick="@(() => SetAnnotationMode(AnnotationMode.Redaction))"
+                        title="@L.T("reader.redact.title")">
+                    @L.T("reader.redact.tool")
+                </button>
+            </div>
+            @if (_annotationMode == AnnotationMode.Redaction || _redactions.Count > 0)
+            {
+                <div class="max-w-4xl mx-auto mt-1 flex flex-wrap items-center gap-2 text-xs">
+                    <span class="text-pb-fg-muted">@L.T("reader.redact.hint")</span>
+                    <span class="text-pb-fg-muted">·&nbsp;@L.T("reader.redact.count", new Dictionary<string, object> { ["count"] = _redactions.Count })</span>
+                    <button type="button" class="btn primary"
+                            disabled="@(_isRedacting || _redactions.Count == 0 || _originalPdfBytes is null)"
+                            @onclick="ApplyRedactionsAsync">
+                        @(_isRedacting ? L.T("reader.redact.running") : L.T("reader.redact.apply"))
+                    </button>
+                    <button type="button" class="rounded border border-pb-border px-2 py-0.5 text-pb-fg-muted hover:text-pb-fg disabled:opacity-40"
+                            disabled="@(_redactions.Count == 0)" @onclick="ClearRedactions">
+                        @L.T("reader.redact.clear")
+                    </button>
+                </div>
+            }
+            @if (IsDrawingMode(_annotationMode))
+            {
+                <div class="max-w-4xl mx-auto mt-1 flex flex-wrap items-center gap-3 text-xs text-pb-fg-muted">
+                    <span>@L.T("reader.draw.color")</span>
+                    @foreach (var (labelKey, css) in DrawPalette)
+                    {
+                        var c = css;
+                        var label = L.T(labelKey);
+                        var isActive = string.Equals(_drawColor, c, StringComparison.OrdinalIgnoreCase);
+                        <button type="button"
+                                class="@($"w-6 h-6 rounded-full border {(isActive ? "border-pb-accent ring-2 ring-pb-accent/40" : "border-pb-border")} hover:scale-110 transition-transform")"
+                                style="@($"background-color:{c}")"
+                                title="@label"
+                                aria-label="@L.T("reader.draw.color.aria", new Dictionary<string, object> { ["label"] = label })"
+                                @onclick="@(() => SetDrawColor(c))"></button>
+                    }
+                    <span class="ml-2">@L.T("reader.draw.width")</span>
+                    @foreach (var (labelKey, fraction) in DrawStrokeWidths)
+                    {
+                        var f = fraction;
+                        var label = L.T(labelKey);
+                        var isActive = Math.Abs(_drawStrokeWidth - f) < 1e-6;
+                        <button type="button"
+                                class="@($"rounded border px-2 py-0.5 {(isActive ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted")}")"
+                                title="@L.T("reader.draw.width.title", new Dictionary<string, object> { ["label"] = label })"
+                                @onclick="@(() => SetDrawStrokeWidth(f))">
+                            @label
+                        </button>
+                    }
+                </div>
+            }
+            <div class="flex items-center gap-2">
+                <button type="button"
+                        class="@($"rounded border px-2 py-0.5 {(_continuous ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted")}")"
+                        title="@L.T("reader.view.continuousTitle")"
+                        @onclick="ToggleContinuousAsync">
+                    @L.T("reader.view.continuous")
+                    @if (_continuous && _handle is not null && _continuousRenderedCount < _handle.PageCount)
+                    {
+                        <span class="ml-1 text-xs text-pb-fg-muted">@_continuousRenderedCount/@_handle.PageCount</span>
+                    }
+                </button>
+                <button type="button"
+                        class="@($"rounded border px-2 py-0.5 {(_nightMode ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted")}")"
+                        title="@L.T("reader.view.nightTitle")"
+                        @onclick="@(() => _nightMode = !_nightMode)">
+                    @L.T("reader.view.night")
+                </button>
+                <button type="button"
+                        class="@($"rounded border px-2 py-0.5 {(_outlineOpen ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted")}")"
+                        title="@L.T("reader.outline.toggleTitle")"
+                        @onclick="@(() => _outlineOpen = !_outlineOpen)">
+                    @L.T("reader.outline.toggle")
+                    @if (_outline is null && _handle is not null)
+                    {
+                        <span class="ml-1 text-xs text-pb-fg-muted">@L.T("reader.outline.empty")</span>
+                    }
+                </button>
+                <button type="button"
+                        class="@($"rounded border px-2 py-0.5 {(_thumbsOpen ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted")}")"
+                        title="@L.T("reader.thumbs.toggleTitle")"
+                        @onclick="ToggleThumbsAsync">
+                    @L.T("reader.thumbs.toggle")
+                    @if (_thumbsOpen && _handle is not null && _thumbnailsProgress < _handle.PageCount)
+                    {
+                        <span class="ml-1 text-xs text-pb-fg-muted">
+                            @L.T("reader.thumbs.loading", new Dictionary<string, object> { ["current"] = _thumbnailsProgress, ["total"] = _handle.PageCount })
+                        </span>
+                    }
+                </button>
+                @if (HasFormFields)
+                {
+                    <button type="button"
+                            class="@($"rounded border px-2 py-0.5 {(_formPanelOpen ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted")}")"
+                            title="@L.T("reader.form.toggleTitle")"
+                            @onclick="@(() => _formPanelOpen = !_formPanelOpen)">
+                        @L.T("reader.form.toggle")
+                        <span class="ml-1 text-xs text-pb-fg-muted">(@_formFields.Count)</span>
+                    </button>
+                }
+                <button type="button"
+                        class="rounded border border-pb-border bg-pb-bg px-2 py-0.5 text-pb-fg-muted hover:text-pb-fg disabled:opacity-40 disabled:cursor-not-allowed"
+                        disabled="@(_isExporting || _annotations.Count == 0)"
+                        title="@(_annotations.Count == 0 ? L.T("reader.export.empty") : L.T("reader.export.title"))"
+                        @onclick="ExportMarkdownAsync">
+                    @(_isExporting ? L.T("common.exportingProgress") : L.T("reader.export.button"))
+                    @if (!_isExporting && _annotations.Count > 0)
+                    {
+                        <span class="ml-1 text-xs">(@_annotations.Count)</span>
+                    }
+                </button>
+                <button type="button"
+                        class="rounded border border-pb-border bg-pb-bg px-2 py-0.5 text-pb-fg-muted hover:text-pb-fg disabled:opacity-40 disabled:cursor-not-allowed"
+                        disabled="@(_isFlattening || _annotations.Count == 0 || _originalPdfBytes is null)"
+                        title="@(_annotations.Count == 0 ? L.T("reader.flatten.empty") : L.T("reader.flatten.title"))"
+                        @onclick="FlattenAnnotationsAsync">
+                    @(_isFlattening ? L.T("reader.flatten.running") : L.T("reader.flatten.button"))
+                </button>
+                <button type="button"
+                        class="rounded border border-pb-border bg-pb-bg px-2 py-0.5 text-pb-fg-muted hover:text-pb-fg disabled:opacity-40 disabled:cursor-not-allowed"
+                        disabled="@(_isExportingSidecar || _annotations.Count == 0)"
+                        title="@(_annotations.Count == 0 ? L.T("reader.sidecar.exportEmpty") : L.T("reader.sidecar.exportTitle"))"
+                        @onclick="ExportSidecarAsync">
+                    @(_isExportingSidecar ? L.T("reader.sidecar.exporting") : L.T("reader.sidecar.export"))
+                </button>
+                @if (_workspaceName is not null)
+                {
+                    <button type="button"
+                            class="rounded border border-pb-border bg-pb-bg px-2 py-0.5 text-pb-fg-muted hover:text-pb-fg disabled:opacity-40 disabled:cursor-not-allowed"
+                            disabled="@(_isSavingToWorkspace || _annotations.Count == 0)"
+                            title="@L.T("reader.workspace.saveTitle", new Dictionary<string, object> { ["folder"] = _workspaceName })"
+                            @onclick="SaveToWorkspaceAsync">
+                        @(_isSavingToWorkspace ? L.T("reader.workspace.saving") : L.T("reader.workspace.save"))
+                    </button>
+                }
+                <label class="rounded border border-pb-border bg-pb-bg px-2 py-0.5 text-pb-fg-muted hover:text-pb-fg cursor-pointer @(_handle is null ? "opacity-40 cursor-not-allowed" : "")"
+                       title="@L.T("reader.sidecar.importTitle")">
+                    @L.T("reader.sidecar.import")
+                    <InputFile OnChange="HandleSidecarFileSelectedAsync"
+                               accept=".json,application/json"
+                               disabled="@(_handle is null)"
+                               class="hidden" />
+                </label>
+            </div>
+        </div>
+
+        @if (_sidecarStatus is not null)
+        {
+            <div class="@($"max-w-4xl mx-auto mt-2 rounded border px-3 py-2 text-sm {(_sidecarStatusIsError ? "border-red-300/40 bg-red-50/10 text-pb-fg" : "border-green-300/40 bg-green-50/10 text-pb-fg")}")">
+                @_sidecarStatus
+                <button type="button"
+                        class="float-right text-pb-fg-muted hover:text-pb-fg ml-2"
+                        @onclick="@(() => _sidecarStatus = null)"
+                        aria-label="@L.T("common.close")">✕</button>
+            </div>
+        }
+
+        @if (_signerPanelOpen)
+        {
+            <div class="max-w-4xl mx-auto mt-2 rounded-lg pb-glass-strong p-3">
+                <div class="flex items-center justify-between mb-2">
+                    <span class="text-sm font-medium">@L.T("reader.signer.panel.heading")</span>
+                    <span class="text-xs text-pb-fg-muted">@L.T("reader.signer.panel.subheading")</span>
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+                    <label class="flex flex-col gap-1">
+                        <span class="text-xs text-pb-fg-muted">@L.T("reader.signer.name") <span class="text-red-400">*</span></span>
+                        <input type="text"
+                               class="rounded border border-pb-border bg-pb-bg px-2 py-1"
+                               placeholder="@L.T("reader.signer.name.placeholder")"
+                               value="@_signer.Name"
+                               @oninput="@(e => _signer = _signer with { Name = e.Value?.ToString() ?? string.Empty })" />
+                    </label>
+                    <label class="flex flex-col gap-1">
+                        <span class="text-xs text-pb-fg-muted">@L.T("reader.signer.email")</span>
+                        <input type="email"
+                               class="rounded border border-pb-border bg-pb-bg px-2 py-1"
+                               placeholder="@L.T("reader.signer.email.placeholder")"
+                               value="@(_signer.Email ?? string.Empty)"
+                               @oninput="@(e => _signer = _signer with { Email = NullIfBlank(e.Value?.ToString()) })" />
+                    </label>
+                    <label class="flex flex-col gap-1">
+                        <span class="text-xs text-pb-fg-muted">@L.T("reader.signer.reason")</span>
+                        <input type="text"
+                               class="rounded border border-pb-border bg-pb-bg px-2 py-1"
+                               placeholder="@L.T("reader.signer.reason.placeholder")"
+                               value="@(_signer.Reason ?? string.Empty)"
+                               @oninput="@(e => _signer = _signer with { Reason = NullIfBlank(e.Value?.ToString()) })" />
+                    </label>
+                    <label class="flex flex-col gap-1">
+                        <span class="text-xs text-pb-fg-muted">@L.T("reader.signer.location")</span>
+                        <input type="text"
+                               class="rounded border border-pb-border bg-pb-bg px-2 py-1"
+                               placeholder="@L.T("reader.signer.location.placeholder")"
+                               value="@(_signer.Location ?? string.Empty)"
+                               @oninput="@(e => _signer = _signer with { Location = NullIfBlank(e.Value?.ToString()) })" />
+                    </label>
+                </div>
+                <div class="mt-2 flex justify-end gap-2">
+                    <button type="button"
+                            class="text-xs text-pb-fg-muted hover:text-pb-fg"
+                            @onclick="@(() => _signerPanelOpen = false)">
+                        @L.T("common.close")
+                    </button>
+                    <button type="button"
+                            class="btn primary sm disabled:opacity-40"
+                            disabled="@(!_signer.IsComplete)"
+                            @onclick="SaveSignerToStorageAsync"
+                            title="@L.T("reader.signer.rememberTitle")">
+                        @L.T("reader.signer.remember")
+                    </button>
+                </div>
+            </div>
+        }
+
+        @if (_formPanelOpen && HasFormFields)
+        {
+            <div class="max-w-4xl mx-auto mt-2 rounded-lg pb-glass-strong p-3">
+                <div class="flex items-center justify-between mb-3">
+                    <div>
+                        <span class="text-sm font-medium">@L.T("reader.form.heading")</span>
+                        <span class="ml-2 text-xs text-pb-fg-muted">@L.T("reader.form.fieldCount", new Dictionary<string, object> { ["count"] = _formFields.Count })</span>
+                    </div>
+                    <button type="button"
+                            class="text-pb-fg-muted hover:text-pb-fg text-xs"
+                            @onclick="@(() => _formPanelOpen = false)"
+                            aria-label="@L.T("common.close")">✕</button>
+                </div>
+
+                <div class="space-y-4 max-h-[60vh] overflow-y-auto pr-1">
+                    @foreach (var group in _formFields.GroupBy(f => f.PageNumber).OrderBy(g => g.Key == 0 ? int.MaxValue : g.Key))
+                    {
+                        <div>
+                            <div class="text-xs font-medium text-pb-fg-muted mb-1 border-b border-pb-border pb-1">
+                                @(group.Key == 0
+                                    ? L.T("reader.form.pageUnknown")
+                                    : L.T("reader.form.pageLabel", new Dictionary<string, object> { ["page"] = group.Key }))
+                            </div>
+                            <div class="space-y-2 pt-1">
+                                @foreach (var field in group)
+                                {
+                                    var f = field;
+                                    <div class="grid grid-cols-1 sm:grid-cols-[12rem_1fr] gap-2 items-start">
+                                        <button type="button"
+                                                class="text-sm text-pb-fg pt-1 text-left break-words hover:text-pb-accent disabled:hover:text-pb-fg"
+                                                disabled="@(f.PageNumber < 1)"
+                                                title="@L.T("reader.form.jumpTitle")"
+                                                @onclick="@(() => JumpToFormFieldPage(f))">
+                                            @f.Name
+                                            @if (f.Required)
+                                            {
+                                                <span class="text-red-400">*</span>
+                                            }
+                                        </button>
+                                        <div>
+                                            @switch (f.Type)
+                                            {
+                                                case PdfFormFieldType.Text:
+                                                    <input type="text"
+                                                           aria-label="@f.Name"
+                                                           class="w-full rounded border border-pb-border bg-pb-bg px-2 py-1 text-sm disabled:opacity-50"
+                                                           value="@GetSingle(f.Name)"
+                                                           disabled="@f.ReadOnly"
+                                                           @onchange="@(e => SetSingle(f.Name, e.Value?.ToString()))" />
+                                                    break;
+                                                case PdfFormFieldType.Checkbox:
+                                                    <label class="flex items-center gap-2 text-sm">
+                                                        <input type="checkbox"
+                                                               checked="@IsChecked(f.Name)"
+                                                               disabled="@f.ReadOnly"
+                                                               @onchange="@(e => SetChecked(f.Name, e.Value is true))" />
+                                                        <span class="text-pb-fg-muted">@L.T("reader.form.checkboxOn")</span>
+                                                    </label>
+                                                    break;
+                                                case PdfFormFieldType.Radio:
+                                                    <div class="flex flex-wrap gap-3 text-sm">
+                                                        @foreach (var opt in f.Options)
+                                                        {
+                                                            var o = opt;
+                                                            <label class="flex items-center gap-1 cursor-pointer">
+                                                                <input type="radio"
+                                                                       name="@($"radio-{f.Name}")"
+                                                                       checked="@(GetSingle(f.Name) == o)"
+                                                                       disabled="@f.ReadOnly"
+                                                                       @onchange="@(() => SetSingle(f.Name, o))" />
+                                                                @o
+                                                            </label>
+                                                        }
+                                                    </div>
+                                                    break;
+                                                case PdfFormFieldType.Dropdown:
+                                                    <select aria-label="@f.Name"
+                                                            class="w-full rounded border border-pb-border bg-pb-bg px-2 py-1 text-sm disabled:opacity-50"
+                                                            disabled="@f.ReadOnly"
+                                                            @onchange="@(e => SetSingle(f.Name, e.Value?.ToString()))">
+                                                        <option value="" selected="@(GetSingle(f.Name).Length == 0)">@L.T("reader.form.dropdownEmpty")</option>
+                                                        @foreach (var opt in f.Options)
+                                                        {
+                                                            var o = opt;
+                                                            <option value="@o" selected="@(GetSingle(f.Name) == o)">@o</option>
+                                                        }
+                                                    </select>
+                                                    break;
+                                                case PdfFormFieldType.ListBox:
+                                                    <select multiple
+                                                            aria-label="@f.Name"
+                                                            class="w-full rounded border border-pb-border bg-pb-bg px-2 py-1 text-sm disabled:opacity-50 min-h-[4rem]"
+                                                            disabled="@f.ReadOnly"
+                                                            @onchange="@(e => SetMulti(f.Name, e.Value))">
+                                                        @foreach (var opt in f.Options)
+                                                        {
+                                                            var o = opt;
+                                                            <option value="@o" selected="@(GetMulti(f.Name).Contains(o))">@o</option>
+                                                        }
+                                                    </select>
+                                                    break;
+                                            }
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+                        </div>
+                    }
+                </div>
+
+                <div class="mt-4 flex flex-wrap items-center justify-end gap-3 border-t border-pb-border pt-3">
+                    <div class="flex items-center gap-3 text-xs text-pb-fg-muted mr-auto">
+                        <span>@L.T("reader.form.saveMode")</span>
+                        <label class="flex items-center gap-1 cursor-pointer">
+                            <input type="radio" name="form-save-mode"
+                                   checked="@(!_formSaveFlatten)"
+                                   @onchange="@(() => _formSaveFlatten = false)" />
+                            @L.T("reader.form.saveEditable")
+                        </label>
+                        <label class="flex items-center gap-1 cursor-pointer">
+                            <input type="radio" name="form-save-mode"
+                                   checked="@_formSaveFlatten"
+                                   @onchange="@(() => _formSaveFlatten = true)" />
+                            @L.T("reader.form.saveFlatten")
+                        </label>
+                    </div>
+                    <button type="button"
+                            class="btn primary disabled:opacity-40"
+                            disabled="@_isFillingForm"
+                            @onclick="SaveFilledFormAsync">
+                        @(_isFillingForm ? L.T("reader.form.saving") : L.T("reader.form.save"))
+                    </button>
+                </div>
+
+                @if (_formStatus is not null)
+                {
+                    <div class="@($"mt-2 rounded border px-3 py-1 text-xs {(_formStatusIsError ? "border-red-300/40 bg-red-50/10 text-pb-fg" : "border-green-300/40 bg-green-50/10 text-pb-fg-muted")}")"
+                         aria-live="polite">
+                        @_formStatus
+                        <button type="button"
+                                class="float-right text-pb-fg-muted hover:text-pb-fg ml-2"
+                                @onclick="@(() => _formStatus = null)"
+                                aria-label="@L.T("common.close")">✕</button>
+                    </div>
+                }
+            </div>
+        }
+
+        <div class="mt-6 flex gap-4 items-start">
+
+        @if (_outlineOpen)
+        {
+            <aside class="w-64 shrink-0 rounded-lg pb-glass-strong p-3 max-h-[80vh] overflow-y-auto"
+                   aria-label="@L.T("reader.outline.heading")">
+                <div class="flex items-center justify-between mb-2">
+                    <h3 class="text-sm font-medium">@L.T("reader.outline.heading")</h3>
+                    <button type="button"
+                            class="text-pb-fg-muted hover:text-pb-fg text-xs"
+                            @onclick="@(() => _outlineOpen = false)"
+                            aria-label="@L.T("reader.outline.closeAria")">
+                        ✕
+                    </button>
+                </div>
+                @if (_outline is null)
+                {
+                    <p class="text-xs text-pb-fg-muted italic">@L.T("reader.outline.noOutline")</p>
+                }
+                else
+                {
+                    <ul class="text-sm">
+                        @foreach (var entry in _outline.Entries)
+                        {
+                            <OutlineNode Entry="entry" OnNavigate="GoToPageAsync" />
+                        }
+                    </ul>
+                }
+            </aside>
+        }
+
+        @if (_thumbsOpen)
+        {
+            <aside class="w-44 shrink-0 rounded-lg pb-glass p-2 max-h-[80vh] overflow-y-auto"
+                   aria-label="@L.T("reader.thumbs.heading")">
+                <div class="flex items-center justify-between mb-2 px-1">
+                    <h3 class="text-sm font-medium">@L.T("reader.thumbs.heading")</h3>
+                    <button type="button"
+                            class="text-pb-fg-muted hover:text-pb-fg text-xs"
+                            @onclick="@(() => _thumbsOpen = false)"
+                            aria-label="@L.T("reader.thumbs.closeAria")">
+                        ✕
+                    </button>
+                </div>
+                @if (_handle is not null)
+                {
+                    <ul class="space-y-2">
+                        @for (var i = 1; i <= _handle.PageCount; i++)
+                        {
+                            var pageNum = i;
+                            var thumb = _thumbnails.GetValueOrDefault(pageNum);
+                            var isCurrent = pageNum == _currentPage;
+                            <li>
+                                <button type="button"
+                                        class="@($"w-full flex flex-col items-center gap-1 rounded border p-1 hover:border-pb-fg-muted {(isCurrent ? "border-pb-accent ring-2 ring-pb-accent/30" : "border-pb-border")}")"
+                                        title="@L.T("reader.thumbs.pageAria", new Dictionary<string, object> { ["page"] = pageNum })"
+                                        aria-label="@L.T("reader.thumbs.pageAria", new Dictionary<string, object> { ["page"] = pageNum })"
+                                        @onclick="@(() => GoToPageAsync(pageNum))">
+                                    @if (thumb is not null)
+                                    {
+                                        <img src="@thumb"
+                                             alt="@L.T("reader.thumbs.pageLabel", new Dictionary<string, object> { ["page"] = pageNum })"
+                                             draggable="false"
+                                             class="block w-full h-auto bg-pb-bg shadow-sm" />
+                                    }
+                                    else
+                                    {
+                                        <div class="w-full aspect-[3/4] bg-pb-bg animate-pulse"></div>
+                                    }
+                                    <span class="text-xs text-pb-fg-muted tabular-nums">@pageNum</span>
+                                </button>
+                            </li>
+                        }
+                    </ul>
+                }
+            </aside>
+        }
+
+        @if (_continuous && _handle is not null)
+        {
+            @* Fortlaufende Leseansicht (FA Reader-Komfort): alle Seiten gestapelt,
+               scrollbar. Read-only (Annotieren/Schwärzen im Einzelseiten-Modus). *@
+            <div class="flex-1 min-w-0 overflow-auto rounded-lg border border-pb-border bg-pb-bg p-4"
+                 style="max-height: calc(100vh - 230px)">
+                <div class="mx-auto flex w-full max-w-3xl flex-col items-center gap-4">
+                    @for (var p = 1; p <= _handle.PageCount; p++)
+                    {
+                        var pg = p;
+                        @if (_continuousPages.TryGetValue(pg, out var url))
+                        {
+                            <img src="@url" draggable="false"
+                                 alt="@L.T("reader.thumbs.pageLabel", new Dictionary<string, object> { ["page"] = pg })"
+                                 class="block w-full select-none shadow-sm"
+                                 style="@(_nightMode ? NightFilterStyle : null)" />
+                        }
+                        else
+                        {
+                            <div class="flex w-full items-center justify-center text-xs text-pb-fg-muted"
+                                 style="aspect-ratio: 1 / 1.414; background: var(--bg-sunken, #1118270d)">
+                                @L.T("reader.thumbs.pageLabel", new Dictionary<string, object> { ["page"] = pg })
+                            </div>
+                        }
+                    }
+                </div>
+            </div>
+        }
+        else
+        {
+        <figure class="flex-1 min-w-0 flex justify-center rounded-lg border border-pb-border bg-pb-bg p-4 overflow-visible">
+            @if (_rasterDataUrl is not null && _renderedPage is not null)
+            {
+                var pageW = _renderedPage.PageWidthPt;
+                var pageH = _renderedPage.PageHeightPt;
+                var maxWidthPx = _renderedPage.WidthPx;
+                var canvasStyle = string.Format(
+                    CultureInfo.InvariantCulture,
+                    "container-type:size; aspect-ratio:{0}/{1}; width:min(100%, {2}px)",
+                    pageW, pageH, maxWidthPx);
+                <div data-pb-page-canvas
+                     class="relative @(_annotationMode == AnnotationMode.StickyNote || IsDrawCaptureMode(_annotationMode) ? "cursor-crosshair" : "cursor-text")"
+                     style="@canvasStyle"
+                     @onclick="HandlePdfClickAsync"
+                     @onmouseup="HandleCanvasMouseUpAsync">
+                    <img src="@_rasterDataUrl"
+                         data-pb-pdf-image
+                         alt="@L.T("reader.imageAlt", new Dictionary<string, object> { ["current"] = _currentPage, ["total"] = _handle.PageCount })"
+                         class="block w-full h-full shadow-sm select-none pointer-events-none"
+                         style="@(_nightMode ? NightFilterStyle : null)"
+                         draggable="false" />
+
+                    @* Text-Layer für FA-005 (Suche-Highlighting) und FA-010 (Highlight-Selection).
+                       Im Sticky-Note-/Zeichnen-Modus deaktiviert, damit Klicks aufs PDF
+                       direkt auf das Canvas-Div durchschlagen.
+
+                       Zwei Code-Pfade:
+                       a) Native PDF-Text: PDF.js' eigene TextLayer-Klasse rendert die
+                          Spans pixel-genau (siehe pdfjs-bridge.renderTextLayerToContainer).
+                          Der Container ist hier nur ein leeres Anker-Div mit dem
+                          data-pb-native-text-layer-Selector; JavaScript füllt ihn nach
+                          jedem Render.
+                       b) OCR-Output (FA-050): kommt mit Pixel-Bounding-Boxes statt
+                          font-stream — die rendern wir als Razor-Spans mit scaleX-Helper. *@
+                    @{
+                        var textLayerInteractiveCss = (_annotationMode == AnnotationMode.StickyNote || IsDrawCaptureMode(_annotationMode))
+                            ? "select-none pointer-events-none"
+                            : "select-text";
+                    }
+                    @if (_useOcrTextLayer && _pageTextItems.Count > 0)
+                    {
+                        <div class="@($"absolute inset-0 leading-none whitespace-pre {textLayerInteractiveCss}")"
+                             aria-hidden="true">
+                            @foreach (var item in _pageTextItems)
+                            {
+                                var leftPct = (item.X / pageW * 100).ToString("F3", CultureInfo.InvariantCulture);
+                                var topPct = (item.Y / pageH * 100).ToString("F3", CultureInfo.InvariantCulture);
+                                var widthPct = (item.Width / pageW * 100).ToString("F3", CultureInfo.InvariantCulture);
+                                var fontCqh = (item.Height / pageH * 100).ToString("F3", CultureInfo.InvariantCulture);
+                                <span data-pb-text="true"
+                                      data-pb-target-width="@widthPct"
+                                      class="absolute text-transparent origin-top-left whitespace-pre leading-none"
+                                      style="@($"left:{leftPct}%; top:{topPct}%; font-size:{fontCqh}cqh; line-height:1")">@item.Text</span>
+                            }
+                        </div>
+                    }
+                    else
+                    {
+                        @* pb-textLayer-Klasse muss als statischer Wert im Razor-Markup stehen —
+                           sonst überschreibt Blazor sie bei jedem Re-Render (z.B. Werkzeug-Wechsel)
+                           und die `color:transparent`-Regel auf den PDF.js-Spans greift nicht mehr,
+                           wodurch der Text-Layer plötzlich wieder sichtbar wird. *@
+                        <div data-pb-native-text-layer
+                             class="@($"pb-textLayer {textLayerInteractiveCss}")"
+                             aria-hidden="true"></div>
+                    }
+
+                    @* Highlight-Layer (über Text, semi-transparent, klickbar zur Bearbeitung) *@
+                    @foreach (var hl in HighlightsOnCurrentPage)
+                    {
+                        var highlight = hl;
+                        var color = HighlightAnnotation.GetColor(highlight);
+                        foreach (var rect in HighlightAnnotation.GetRects(highlight))
+                        {
+                            var rLeft = (rect.X * 100).ToString("F3", CultureInfo.InvariantCulture);
+                            var rTop = (rect.Y * 100).ToString("F3", CultureInfo.InvariantCulture);
+                            var rWidth = (rect.Width * 100).ToString("F3", CultureInfo.InvariantCulture);
+                            var rHeight = (rect.Height * 100).ToString("F3", CultureInfo.InvariantCulture);
+                            <button type="button"
+                                    class="absolute cursor-pointer border-0 p-0"
+                                    style="@($"left:{rLeft}%; top:{rTop}%; width:{rWidth}%; height:{rHeight}%; background-color:{color}; mix-blend-mode:multiply; opacity:0.85")"
+                                    aria-label="@L.T("reader.highlight.editAria")"
+                                    title="@HighlightAnnotation.GetText(highlight)"
+                                    @onclick="@(() => OpenHighlightEditor(highlight))"
+                                    @onclick:stopPropagation></button>
+                        }
+                    }
+
+                    @* Schwärzungs-Vorschau: solide schwarze Kästen (echte Redaktion
+                       passiert erst beim Anwenden via redactPdf — Rasterung). *@
+                    @foreach (var rb in RedactionsOnCurrentPage)
+                    {
+                        var r = rb;
+                        <div class="absolute"
+                             style="@($"left:{(r.X * 100).ToString("F3", CultureInfo.InvariantCulture)}%; top:{(r.Y * 100).ToString("F3", CultureInfo.InvariantCulture)}%; width:{(r.Width * 100).ToString("F3", CultureInfo.InvariantCulture)}%; height:{(r.Height * 100).ToString("F3", CultureInfo.InvariantCulture)}%; background:#000; pointer-events:none; z-index:20")"
+                             aria-hidden="true"></div>
+                    }
+
+                    @* Ink + Shape Overlay (FA-013 Stift, FA-014 Formen).
+                       SVG mit viewBox 0..1 — alle Punkte/Bounds sind als
+                       Seiten-Anteile gespeichert und skalieren automatisch
+                       mit dem Zoom. *@
+                    @if (InkOnCurrentPage.Any() || ShapesOnCurrentPage.Any())
+                    {
+                        var drawingActive = IsDrawingMode(_annotationMode);
+                        // Hit-Helper-Stroke: transparente, deutlich dickere
+                        // Variante jedes Pfads — pointer-events:stroke fängt
+                        // nur EXAKT auf der Strichbreite, deshalb brauchen wir
+                        // ein eigenes Element mit ~0.02 Seiten-Anteilen für
+                        // bequemes Klicken zum Löschen. Im Zeichen-Modus auch
+                        // diese Helper deaktivieren, damit Klicks beim Live-Zeichnen
+                        // an die JS-Bridge auf dem Canvas durchgereicht werden.
+                        const string HitStrokeWidth = "0.024";
+                        var hitPointerCss = drawingActive
+                            ? "pointer-events:none"
+                            : "pointer-events:stroke; cursor:pointer";
+                        <svg class="absolute inset-0 w-full h-full"
+                             style="pointer-events:none; z-index:10"
+                             viewBox="0 0 1 1" preserveAspectRatio="none" aria-hidden="true">
+                            @foreach (var ink in InkOnCurrentPage)
+                            {
+                                var inkAnn = ink;
+                                var inkColor = InkAnnotation.GetColor(inkAnn);
+                                var inkSw = InkAnnotation.GetStrokeWidth(inkAnn)
+                                    .ToString("F4", CultureInfo.InvariantCulture);
+                                foreach (var stroke in InkAnnotation.GetStrokes(inkAnn))
+                                {
+                                    var d = BuildInkPath(stroke);
+                                    if (string.IsNullOrEmpty(d)) continue;
+                                    @* Hit-Helper: transparent + dick + klickbar *@
+                                    <path d="@d" fill="none" stroke="transparent" stroke-width="@HitStrokeWidth"
+                                          stroke-linecap="round" stroke-linejoin="round"
+                                          style="@hitPointerCss"
+                                          @onclick="@(() => OpenDrawingEditor(inkAnn))"
+                                          @onclick:stopPropagation />
+                                    @* Sichtbarer Stroke: pointer-events deaktiviert *@
+                                    <path d="@d" fill="none" stroke="@inkColor" stroke-width="@inkSw"
+                                          stroke-linecap="round" stroke-linejoin="round"
+                                          style="pointer-events:none" />
+                                }
+                            }
+                            @foreach (var shape in ShapesOnCurrentPage)
+                            {
+                                var sa = shape;
+                                var kind = ShapeAnnotation.GetShape(sa);
+                                var col = ShapeAnnotation.GetColor(sa);
+                                var sw = ShapeAnnotation.GetStrokeWidth(sa);
+                                var swStr = sw.ToString("F4", CultureInfo.InvariantCulture);
+                                var sx = ShapeAnnotation.GetStartX(sa);
+                                var sy = ShapeAnnotation.GetStartY(sa);
+                                var ex = ShapeAnnotation.GetEndX(sa);
+                                var ey = ShapeAnnotation.GetEndY(sa);
+                                if (kind == ShapeKind.Rectangle)
+                                {
+                                    var rx = Math.Min(sx, ex).ToString("F4", CultureInfo.InvariantCulture);
+                                    var ry = Math.Min(sy, ey).ToString("F4", CultureInfo.InvariantCulture);
+                                    var rw = Math.Abs(ex - sx).ToString("F4", CultureInfo.InvariantCulture);
+                                    var rh = Math.Abs(ey - sy).ToString("F4", CultureInfo.InvariantCulture);
+                                    @* Hit-Helper auf den Rahmen, nicht auf den hohlen Innenraum *@
+                                    <rect x="@rx" y="@ry" width="@rw" height="@rh"
+                                          fill="none" stroke="transparent" stroke-width="@HitStrokeWidth"
+                                          style="@hitPointerCss"
+                                          @onclick="@(() => OpenDrawingEditor(sa))"
+                                          @onclick:stopPropagation />
+                                    <rect x="@rx" y="@ry" width="@rw" height="@rh"
+                                          fill="none" stroke="@col" stroke-width="@swStr"
+                                          style="pointer-events:none" />
+                                }
+                                else
+                                {
+                                    var aspect = pageH > 0 ? pageW / pageH : 1.0;
+                                    var head = kind == ShapeKind.Arrow
+                                        ? ComputeArrowHead(sx, sy, ex, ey, sw, aspect)
+                                        : null;
+                                    // Sichtbarer Schaft endet bei Pfeilen an der Spitzen-Basis,
+                                    // damit die runde Strich-Endkappe unter dem Dreieck
+                                    // verschwindet (sonst „Punkt" an der Spitze).
+                                    var lex = ex; var ley = ey;
+                                    if (head is { } hb) { lex = (hb.X2 + hb.X3) / 2; ley = (hb.Y2 + hb.Y3) / 2; }
+                                    var x1 = sx.ToString("F4", CultureInfo.InvariantCulture);
+                                    var y1 = sy.ToString("F4", CultureInfo.InvariantCulture);
+                                    var hxe = ex.ToString("F4", CultureInfo.InvariantCulture);
+                                    var hye = ey.ToString("F4", CultureInfo.InvariantCulture);
+                                    var vxe = lex.ToString("F4", CultureInfo.InvariantCulture);
+                                    var vye = ley.ToString("F4", CultureInfo.InvariantCulture);
+                                    @* Hit-Helper über die volle Länge (auch über der Spitze klickbar) *@
+                                    <line x1="@x1" y1="@y1" x2="@hxe" y2="@hye"
+                                          stroke="transparent" stroke-width="@HitStrokeWidth"
+                                          stroke-linecap="round"
+                                          style="@hitPointerCss"
+                                          @onclick="@(() => OpenDrawingEditor(sa))"
+                                          @onclick:stopPropagation />
+                                    <line x1="@x1" y1="@y1" x2="@vxe" y2="@vye"
+                                          stroke="@col" stroke-width="@swStr"
+                                          stroke-linecap="round"
+                                          style="pointer-events:none" />
+                                    @if (head is { } h2)
+                                    {
+                                        var (hx1, hy1, hx2, hy2, hx3, hy3) = h2;
+                                        var points = string.Format(CultureInfo.InvariantCulture,
+                                            "{0:F4},{1:F4} {2:F4},{3:F4} {4:F4},{5:F4}",
+                                            hx1, hy1, hx2, hy2, hx3, hy3);
+                                        <polygon points="@points" fill="@col" stroke="none"
+                                                 style="pointer-events:none" />
+                                    }
+                                }
+                            }
+                        </svg>
+                    }
+
+                    @* Lösch-Mini-Toolbar (FA-013/014) bei selektierter Ink/Shape *@
+                    @if (_editingDrawing is not null && _editingDrawing.PageNumber == _currentPage)
+                    {
+                        var (anchorX, anchorY) = GetDrawingAnchor(_editingDrawing);
+                        var anchorLeftPct = (anchorX * 100).ToString("F2", CultureInfo.InvariantCulture);
+                        var anchorTopPct = (anchorY * 100).ToString("F2", CultureInfo.InvariantCulture);
+                        var translateY = anchorY < 0.08 ? "8px" : "calc(-100% - 6px)";
+                        <div class="absolute z-20 flex items-center gap-1 rounded-md pb-glass-strong px-2 py-1"
+                             style="@($"left:{anchorLeftPct}%; top:{anchorTopPct}%; transform: translate(-50%, {translateY})")"
+                             @onclick:stopPropagation>
+                            <span class="text-xs text-pb-fg-muted mr-1">
+                                @(_editingDrawing.Type == AnnotationType.Ink ? L.T("reader.draw.kind.ink") : L.T("reader.draw.kind.shape"))
+                            </span>
+                            <button type="button"
+                                    class="px-2 py-0.5 text-xs rounded border border-pb-border text-pb-fg-muted hover:text-pb-fg"
+                                    @onclick="DeleteEditingDrawingAsync"
+                                    title="@L.T("common.delete")">
+                                @L.T("common.deleteIcon")
+                            </button>
+                            <button type="button"
+                                    class="ml-1 px-1 text-pb-fg-muted hover:text-pb-fg text-sm"
+                                    @onclick="@(() => _editingDrawing = null)"
+                                    aria-label="@L.T("common.deleteAria")">✕</button>
+                        </div>
+                    }
+
+                    @* Inline-Toolbar bei Selection (FA-018) *@
+                    @if (_pendingSelection is not null && _editingHighlight is null)
+                    {
+                        var anchorLeft = (_pendingSelection.AnchorX * 100).ToString("F2", CultureInfo.InvariantCulture);
+                        var anchorTop = (_pendingSelection.AnchorY * 100).ToString("F2", CultureInfo.InvariantCulture);
+                        // Bei Selection ganz oben auf der Seite klappt die Toolbar
+                        // nach unten, sonst nach oben (Default).
+                        var toolbarTranslateY = _pendingSelection.AnchorY < 0.08
+                            ? "8px"
+                            : "calc(-100% - 6px)";
+                        <div class="absolute z-20 flex items-center gap-1 rounded-md pb-glass-strong px-2 py-1"
+                             style="@($"left:{anchorLeft}%; top:{anchorTop}%; transform: translate(-50%, {toolbarTranslateY})")"
+                             @onmousedown:preventDefault
+                             @onclick:stopPropagation>
+                            <span class="text-xs text-pb-fg-muted mr-1">@L.T("reader.highlight.markLabel")</span>
+                            @foreach (var color in HighlightPalette)
+                            {
+                                var c = color;
+                                <button type="button"
+                                        class="w-5 h-5 rounded-full border border-pb-border hover:scale-110 transition-transform"
+                                        style="@($"background-color:{c}")"
+                                        title="@c"
+                                        aria-label="@L.T("reader.highlight.colorButtonAria", new Dictionary<string, object> { ["color"] = c })"
+                                        @onclick="@(() => HighlightPendingSelectionAsync(c))"></button>
+                            }
+                            <button type="button"
+                                    class="ml-1 px-1 text-pb-fg-muted hover:text-pb-fg text-sm"
+                                    @onclick="DismissSelection"
+                                    aria-label="@L.T("common.deleteAria")">✕</button>
+                        </div>
+                    }
+
+                    @* Highlight-Editor (Click auf bereits gesetzten Highlight) *@
+                    @if (_editingHighlight is not null && _editingHighlight.PageNumber == _currentPage)
+                    {
+                        var firstRect = HighlightAnnotation.GetRects(_editingHighlight).FirstOrDefault();
+                        if (firstRect is not null)
+                        {
+                            var editLeft = (firstRect.X * 100).ToString("F2", CultureInfo.InvariantCulture);
+                            var editTop = (firstRect.Y * 100).ToString("F2", CultureInfo.InvariantCulture);
+                            // Highlight oben → Toolbar unter dem Rechteck.
+                            var hlTranslateY = firstRect.Y < 0.08
+                                ? $"calc({firstRect.Height * 100:F2}% + 6px)"
+                                : "calc(-100% - 6px)";
+                            <div class="absolute z-20 flex items-center gap-1 rounded-md pb-glass-strong px-2 py-1"
+                                 style="@($"left:{editLeft}%; top:{editTop}%; transform: translate(0, {hlTranslateY})")"
+                                 @onclick:stopPropagation>
+                                <span class="text-xs text-pb-fg-muted mr-1">@L.T("reader.highlight.colorLabel")</span>
+                                @foreach (var color in HighlightPalette)
+                                {
+                                    var c = color;
+                                    var isCurrent = HighlightAnnotation.GetColor(_editingHighlight) == c;
+                                    <button type="button"
+                                            class="@($"w-5 h-5 rounded-full border hover:scale-110 transition-transform {(isCurrent ? "border-pb-accent" : "border-pb-border")}")"
+                                            style="@($"background-color:{c}")"
+                                            @onclick="@(() => ChangeHighlightColorAsync(c))"></button>
+                                }
+                                <button type="button"
+                                        class="ml-1 rounded border border-red-300/40 px-2 py-0.5 text-xs text-red-400 hover:bg-red-50/10"
+                                        @onclick="DeleteEditingHighlightAsync">
+                                    @L.T("common.delete")
+                                </button>
+                                <button type="button"
+                                        class="ml-1 px-1 text-pb-fg-muted hover:text-pb-fg text-sm"
+                                        @onclick="CancelHighlightEditing"
+                                        aria-label="@L.T("common.close")">✕</button>
+                            </div>
+                        }
+                    }
+
+                    @* Signaturen (FA-015) — PNG-Bild mit Integritäts-Status-Badge *@
+                    @foreach (var sig in SignaturesOnCurrentPage)
+                    {
+                        var signature = sig;
+                        var sigLeft = (SignatureAnnotation.GetX(signature) * 100).ToString("F3", CultureInfo.InvariantCulture);
+                        var sigTop = (SignatureAnnotation.GetY(signature) * 100).ToString("F3", CultureInfo.InvariantCulture);
+                        var sigWidth = (SignatureAnnotation.GetWidth(signature) * 100).ToString("F3", CultureInfo.InvariantCulture);
+                        var sigHeight = (SignatureAnnotation.GetHeight(signature) * 100).ToString("F3", CultureInfo.InvariantCulture);
+                        var status = _signatureStatuses.GetValueOrDefault(signature.Id.Value, SignatureIntegrityStatus.NoHash);
+                        var ringClass = status switch
+                        {
+                            SignatureIntegrityStatus.Valid => "ring-2 ring-green-400/70",
+                            SignatureIntegrityStatus.Invalid => "ring-2 ring-red-400/80",
+                            _ => "ring-1 ring-amber-400/50"
+                        };
+                        var badgeBg = status switch
+                        {
+                            SignatureIntegrityStatus.Valid => "bg-green-500",
+                            SignatureIntegrityStatus.Invalid => "bg-red-500",
+                            _ => "bg-amber-500"
+                        };
+                        var badgeIcon = status switch
+                        {
+                            SignatureIntegrityStatus.Valid => "✓",
+                            SignatureIntegrityStatus.Invalid => "!",
+                            _ => "?"
+                        };
+                        var badgeTitle = status switch
+                        {
+                            SignatureIntegrityStatus.Valid => L.T("reader.signature.statusValid"),
+                            SignatureIntegrityStatus.Invalid => L.T("reader.signature.statusInvalid"),
+                            _ => L.T("reader.signature.statusNoHash")
+                        };
+                        var signedAtLabel = SignatureAnnotation.GetSignedAt(signature).ToLocalTime().ToString("yyyy-MM-dd HH:mm");
+                        var dragTitle = L.T("reader.signature.dragTitle", new Dictionary<string, object> { ["date"] = signedAtLabel, ["status"] = badgeTitle });
+                        <div data-pb-signature-id="@signature.Id.Value"
+                             class="absolute @ringClass rounded bg-white/40 cursor-move select-none touch-none"
+                             style="@($"left:{sigLeft}%; top:{sigTop}%; width:{sigWidth}%; height:{sigHeight}%")"
+                             title="@dragTitle"
+                             @onmousedown="@((MouseEventArgs e) => HandleSignatureMouseDownAsync(e, signature))"
+                             @onmousedown:stopPropagation
+                             @onclick:stopPropagation>
+                            <img src="@SignatureAnnotation.GetImageDataUrl(signature)"
+                                 alt="@L.T("reader.signature.alt")"
+                                 draggable="false"
+                                 class="w-full h-full object-contain pointer-events-none" />
+                            <span class="absolute -top-2 -right-2 w-5 h-5 rounded-full text-xs text-white flex items-center justify-center shadow @badgeBg pointer-events-none"
+                                  aria-label="@badgeTitle">@badgeIcon</span>
+                            <button type="button"
+                                    class="absolute -bottom-2 -left-2 w-5 h-5 rounded-full bg-pb-surface border border-pb-border text-xs text-pb-fg-muted hover:text-red-500 flex items-center justify-center shadow"
+                                    @onclick="@(() => DeleteSignatureAsync(signature))"
+                                    @onclick:stopPropagation
+                                    @onmousedown:stopPropagation
+                                    title="@L.T("reader.signature.removeTitle")"
+                                    aria-label="@L.T("reader.signature.removeTitle")">
+                                ✕
+                            </button>
+                            <div class="absolute -bottom-2 -right-2 w-5 h-5 rounded-full bg-pb-surface border border-pb-border text-xs text-pb-fg-muted hover:text-pb-accent flex items-center justify-center shadow cursor-nwse-resize"
+                                 @onmousedown="@((MouseEventArgs e) => HandleSignatureResizeMouseDownAsync(e, signature))"
+                                 @onmousedown:stopPropagation
+                                 @onclick:stopPropagation
+                                 title="@L.T("reader.signature.resizeTitle")"
+                                 aria-label="@L.T("reader.signature.resizeAria")">
+                                ↘
+                            </div>
+                        </div>
+                    }
+
+                    @* Pins für alle Sticky Notes auf der aktuellen Seite *@
+                    @foreach (var note in StickyNotesOnCurrentPage)
+                    {
+                        var n = note;
+                        var leftPct = (StickyNoteAnnotation.GetX(n) * 100).ToString("F2", CultureInfo.InvariantCulture);
+                        var topPct = (StickyNoteAnnotation.GetY(n) * 100).ToString("F2", CultureInfo.InvariantCulture);
+                        var color = StickyNoteAnnotation.GetColor(n);
+                        var preview = StickyNoteAnnotation.GetContent(n);
+                        var previewText = string.IsNullOrWhiteSpace(preview) ? L.T("common.empty") : preview;
+                        <button type="button"
+                                class="absolute -translate-x-1/2 -translate-y-1/2 rounded-full border border-pb-border shadow-md w-7 h-7 flex items-center justify-center text-xs hover:scale-110 transition-transform"
+                                style="@($"left:{leftPct}%; top:{topPct}%; background-color:{color}")"
+                                title="@previewText"
+                                aria-label="@L.T("reader.note.pinAria", new Dictionary<string, object> { ["page"] = n.PageNumber, ["preview"] = previewText })"
+                                @onclick="@(() => OpenEditor(n))"
+                                @onclick:stopPropagation>
+                            <Icon Name="note" />
+                        </button>
+                    }
+
+                    @* Editor-Popover für aktuelle Notiz *@
+                    @if (_editingAnnotation is not null && _editingAnnotation.PageNumber == _currentPage)
+                    {
+                        var noteX = StickyNoteAnnotation.GetX(_editingAnnotation);
+                        var noteY = StickyNoteAnnotation.GetY(_editingAnnotation);
+                        var editLeft = (noteX * 100).ToString("F2", CultureInfo.InvariantCulture);
+                        var editTop = (noteY * 100).ToString("F2", CultureInfo.InvariantCulture);
+                        // Pin sitzt rechts → Popover nach links flippen, damit es nicht überhängt.
+                        // Pin sitzt unten → Popover nach oben flippen.
+                        var translateX = noteX > 0.55 ? "calc(-100% - 8px)" : "8px";
+                        var translateY = noteY > 0.65 ? "calc(-100% + 8px)" : "-8px";
+                        <div class="absolute z-10 w-80 rounded-lg pb-glass-strong p-3"
+                             style="@($"left:{editLeft}%; top:{editTop}%; transform: translate({translateX}, {translateY})")"
+                             @onclick:stopPropagation>
+                            <div class="flex items-center justify-between mb-2 gap-2">
+                                <span class="text-xs text-pb-fg-muted">@L.T("reader.note.contextLabel", new Dictionary<string, object> { ["page"] = _editingAnnotation.PageNumber })</span>
+                                <div class="flex items-center gap-1">
+                                    <button type="button"
+                                            class="text-xs text-pb-fg-muted hover:text-pb-fg rounded border border-pb-border px-1.5 py-0.5"
+                                            @onclick="ToggleEditorPreview"
+                                            title="@(_editorPreviewMode ? L.T("reader.note.toEditTitle") : L.T("reader.note.toPreviewTitle"))">
+                                        @(_editorPreviewMode ? L.T("reader.note.edit") : L.T("reader.note.preview"))
+                                    </button>
+                                    <button type="button"
+                                            class="text-pb-fg-muted hover:text-pb-fg text-sm"
+                                            @onclick="CancelEditing"
+                                            aria-label="@L.T("common.close")">
+                                        ✕
+                                    </button>
+                                </div>
+                            </div>
+
+                            @if (_editorPreviewMode)
+                            {
+                                @if (string.IsNullOrWhiteSpace(_editingContent))
+                                {
+                                    <p class="h-28 rounded border border-pb-border bg-pb-bg px-2 py-1 text-sm text-pb-fg-muted italic">
+                                        @L.T("reader.note.emptyPreview")
+                                    </p>
+                                }
+                                else
+                                {
+                                    <div class="pb-markdown h-28 overflow-y-auto rounded border border-pb-border bg-pb-bg px-2 py-1 text-sm">
+                                        @RenderMarkdown(_editingContent)
+                                    </div>
+                                }
+                            }
+                            else
+                            {
+                                <textarea @bind="_editingContent"
+                                          @bind:event="oninput"
+                                          class="w-full h-28 rounded border border-pb-border bg-pb-bg px-2 py-1 text-sm resize-none font-mono"
+                                          placeholder="@L.T("reader.note.placeholder")"
+                                          aria-label="@L.T("reader.note.contentAria")"></textarea>
+                            }
+                            <div class="mt-2 flex gap-2 justify-end">
+                                <button type="button"
+                                        class="rounded border border-red-300/40 px-2 py-1 text-xs text-red-400 hover:bg-red-50/10"
+                                        @onclick="DeleteEditingAnnotationAsync">
+                                    @L.T("common.delete")
+                                </button>
+                                <button type="button"
+                                        class="btn primary sm"
+                                        @onclick="SaveEditingAnnotationAsync">
+                                    @L.T("common.save")
+                                </button>
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+            else
+            {
+                <div class="text-sm text-pb-fg-muted py-12">@L.T("common.renderingProgress")</div>
+            }
+        </figure>
+        }
+
+        </div> @* /flex-Wrapper Outline+PDF *@
+
+        <p class="max-w-4xl mx-auto mt-4 text-xs text-pb-fg-muted">
+            @L.T("reader.shortcuts.label")
+            <kbd class="rounded border border-pb-border px-1.5 py-0.5">←</kbd>
+            <kbd class="rounded border border-pb-border px-1.5 py-0.5">→</kbd>
+            @L.T("reader.shortcuts.pageChange") ·
+            <kbd class="rounded border border-pb-border px-1.5 py-0.5">Pos1</kbd>
+            <kbd class="rounded border border-pb-border px-1.5 py-0.5">Ende</kbd>
+            @L.T("reader.shortcuts.firstLast") ·
+            <kbd class="rounded border border-pb-border px-1.5 py-0.5">Strg+F</kbd>
+            @L.T("reader.shortcuts.search") ·
+            <kbd class="rounded border border-pb-border px-1.5 py-0.5">Esc</kbd>
+            @L.T("reader.shortcuts.reset") ·
+            <kbd class="rounded border border-pb-border px-1.5 py-0.5">Strg+ +</kbd>
+            <kbd class="rounded border border-pb-border px-1.5 py-0.5">Strg+ −</kbd>
+            <kbd class="rounded border border-pb-border px-1.5 py-0.5">Strg+0</kbd>
+            @L.T("reader.shortcuts.zoom")
+        </p>
+    }
+    else if (!_isLoading)
+    {
+        <div class="max-w-4xl mx-auto mt-6 rounded-lg border border-dashed border-pb-border p-6 text-center text-sm text-pb-fg-muted">
+            @L.T("reader.empty")
+        </div>
+    }
+</section>
+
+@code {
+    private const long MaxFileSize = 100L * 1024 * 1024; // 100 MB Demo-Limit
+    private const string ShortcutsJs = "pageboundShortcuts";
+    private const string SearchInputSelector = "[data-pb-search-input]";
+
+    // Interner PDF.js-Scale für den User-Faktor "100 %" (1.0).
+    // Damit ergibt der Default eine gut lesbare Render-Auflösung; alle weiteren
+    // Stufen sind Vielfache davon (siehe _zoomLevels).
+    private const double BaseScale = 2.0;
+
+    // Zoom-Faktoren wie sie der Nutzer sieht: 0.5 = "50 %", 1.0 = "100 %", ...
+    private readonly double[] _zoomLevels = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
+
+    private PdfDocumentHandle? _handle;
+    private int _currentPage = 1;
+    private double _zoomFactor = 1.0;
+    private string? _rasterDataUrl;
+    private string? _errorMessage;
+    private bool _isLoading;
+    private bool _isRendering;
+
+    // Such-Zustand (FA-005)
+    private string _searchQuery = string.Empty;
+    private bool _matchCase;
+    private bool _wholeWord;
+    private bool _isSearching;
+    private IReadOnlyList<SearchHit>? _searchHits;
+    private string _lastSearched = string.Empty;
+    private bool _pdfHasNoTextLayer;
+
+    // Tastatur-Shortcuts (NFA-031 Tastatur-Navigation)
+    private DotNetObjectReference<ReaderPane>? _dotNetRef;
+    private bool _shortcutsRegistered;
+
+    // Annotation-State (FA-011 Sticky Notes, FA-070 ff. Persistenz)
+    private const string PdfImageSelector = "[data-pb-pdf-image]";
+    private const string PageCanvasSelector = "[data-pb-page-canvas]";
+    private const string NativeTextLayerSelector = "[data-pb-native-text-layer]";
+    private PdfId? _currentPdfId;
+    private string? _currentFilename;
+    private bool _isExporting;
+    private bool _isExportingSidecar;
+    private bool _isFlattening;
+    // FA-072: Name des aktiven Sidecar-Workspace (null = keiner gesetzt), wird beim
+    // PDF-Öffnen geladen und steuert die Sichtbarkeit des "In Workspace speichern".
+    private string? _workspaceName;
+    private bool _isSavingToWorkspace;
+    private string? _sidecarStatus;
+    private bool _sidecarStatusIsError;
+    private IReadOnlyList<Annotation> _annotations = Array.Empty<Annotation>();
+    private AnnotationMode _annotationMode = AnnotationMode.Select;
+    private Annotation? _editingAnnotation;
+    private string _editingContent = string.Empty;
+
+    // Text-Layer + Highlight-State (FA-010 Highlight, FA-018 Inline-Toolbar)
+    private RenderedPage? _renderedPage;
+    private IReadOnlyList<TextItem> _pageTextItems = Array.Empty<TextItem>();
+    private SelectionDto? _pendingSelection;
+    private Annotation? _editingHighlight;
+
+    // Outline (FA-006)
+    private PdfOutline? _outline;
+    private bool _outlineOpen;
+
+    // OCR-State (FA-050). Default-Sprachen für Erkennung — Tesseract.js
+    // kombiniert beide und matcht in einem Pass.
+    private const string OcrLanguages = "eng+deu";
+    private bool _isOcrRunning;
+    private string? _ocrStatus;
+    private bool _ocrStatusIsError;
+    // Wenn true: Razor rendert OCR-Spans (Tesseract-Bounding-Boxes) für Selection.
+    // Wenn false: PDF.js' eigene TextLayer-Klasse rendert das nativ ins
+    // data-pb-native-text-layer-Div — pixel-genau, ohne scaleX-Approximation.
+    private bool _useOcrTextLayer;
+
+    // Thumbnail-Sidebar (FA-007). Pro Seite eine Daten-URL; gerendert mit
+    // kleiner Skalierung im Hintergrund nach dem ersten Öffnen. Cancel-Token
+    // bricht das Rendering ab, wenn der User die PDF wechselt oder die
+    // Sidebar wieder schließt.
+    private bool _thumbsOpen;
+    private Dictionary<int, string> _thumbnails = new();
+    private int _thumbnailsProgress;
+    private CancellationTokenSource? _thumbnailsCts;
+
+    // Notiz-Editor-Modus (FA-012 Markdown-Live-Preview)
+    private bool _editorPreviewMode;
+
+    // Markdig-Pipeline ohne raw HTML (XSS-Schutz für NFA-025).
+    // Static damit die Pipeline einmal pro App-Lifetime gebaut wird.
+    private static readonly MarkdownPipeline MarkdownPipeline =
+        new MarkdownPipelineBuilder()
+            .UseAdvancedExtensions()
+            .DisableHtml()
+            .Build();
+
+    private static MarkupString RenderMarkdown(string source)
+    {
+        if (string.IsNullOrWhiteSpace(source))
+        {
+            return new MarkupString(string.Empty);
+        }
+        return new MarkupString(Markdown.ToHtml(source, MarkdownPipeline));
+    }
+
+    private static readonly string[] HighlightPalette =
+    {
+        HighlightAnnotation.DefaultColor, // gelb
+        "#bbf7d0", // green-200
+        "#bae6fd", // sky-200
+        "#fbcfe8", // pink-200
+        "#ddd6fe"  // violet-200
+    };
+
+    private double InternalScale => BaseScale * _zoomFactor;
+
+    private IEnumerable<Annotation> StickyNotesOnCurrentPage =>
+        _annotations.Where(a => a.Type == AnnotationType.StickyNote && a.PageNumber == _currentPage);
+
+    private IEnumerable<Annotation> HighlightsOnCurrentPage =>
+        _annotations.Where(a => a.Type == AnnotationType.Highlight && a.PageNumber == _currentPage);
+
+    private enum AnnotationMode
+    {
+        Select,
+        StickyNote,
+        Signature,
+        Pen,
+        RectShape,
+        ArrowShape,
+        LineShape,
+        Redaction
+    }
+
+    private static bool IsDrawingMode(AnnotationMode mode) => mode is
+        AnnotationMode.Pen or AnnotationMode.RectShape or
+        AnnotationMode.ArrowShape or AnnotationMode.LineShape;
+
+    // Modi, die den Rechteck/Strich-Capture im JS brauchen (Zeichnen + Schwärzen).
+    private static bool IsDrawCaptureMode(AnnotationMode mode) =>
+        IsDrawingMode(mode) || mode == AnnotationMode.Redaction;
+
+    // Schwärzungs-Bereiche (FA — echte Redaktion). Transient (NICHT in der Sidecar
+    // — Redaktion ist destruktiv und gehört nicht in die wiederherstellbaren
+    // Annotationen). 0..1-Koordinaten, oben-links, je Seite.
+    private sealed record RedactionBox(int Page, double X, double Y, double Width, double Height);
+    private readonly List<RedactionBox> _redactions = new();
+    private bool _isRedacting;
+
+    private IEnumerable<RedactionBox> RedactionsOnCurrentPage =>
+        _redactions.Where(r => r.Page == _currentPage);
+
+    // Reader-Komfort (FA): Nachtmodus (invertierte Anzeige) + fortlaufende Lese-
+    // ansicht (alle Seiten gestapelt). Beide nur Anzeige — die Quell-PDF bleibt
+    // unangetastet. Fortlaufend ist read-only (Annotieren/Schwärzen im Einzelmodus).
+    private const string NightFilterStyle = "filter: invert(0.92) hue-rotate(180deg)";
+    private bool _nightMode;
+    private bool _continuous;
+    private bool _continuousRendering;
+    private int _continuousRenderedCount;
+    private readonly Dictionary<int, string> _continuousPages = new();
+
+    // Zeichenwerkzeug-State (FA-013 Stift, FA-014 Formen).
+    // Persistente Listener-Verwaltung liegt im JS (shortcuts-bridge), pro
+    // pointerdown→up kommt ein Callback zurück mit den 0..1-Punkten.
+    // Labels als i18n-Keys; das Markup ruft L.T(labelKey) zum Anzeigen auf.
+    private static readonly (string LabelKey, string Css)[] DrawPalette =
+    {
+        ("reader.draw.color.black", "#000000"),
+        ("reader.draw.color.red", "#dc2626"),
+        ("reader.draw.color.blue", "#2563eb")
+    };
+
+    private static readonly (string LabelKey, double Fraction)[] DrawStrokeWidths =
+    {
+        ("reader.draw.width.thin", 0.002),
+        ("reader.draw.width.normal", 0.004),
+        ("reader.draw.width.thick", 0.008)
+    };
+
+    private string _drawColor = "#000000";
+    private double _drawStrokeWidth = 0.004;
+    private int? _captureAttachedToPage;
+
+    // Signatur-State (FA-015/016/017)
+    private const string SignerStorageKey = "settings:signer";
+    private string? _activeSignatureImage; // Data-URL
+    private string? _activeSignatureFilename;
+    private const int MaxSignatureBytes = 2 * 1024 * 1024; // 2 MB
+    private Dictionary<string, SignatureIntegrityStatus> _signatureStatuses = new();
+    private byte[]? _originalPdfBytes;
+    private SignerInfo _signer = SignerInfo.Empty;
+    private bool _signerPanelOpen;
+    private bool _isSavingSignedPdf;
+    private bool _signerLoaded;
+
+    // Formular-State (FA-040/041). Erkannte AcroForm-Felder + die aktuell im
+    // Panel editierten Werte (pro Feldname). _formSaveFlatten steuert, ob beim
+    // Speichern geflattet wird (Werte fixiert) oder das Formular editierbar bleibt.
+    private IReadOnlyList<PdfFormField> _formFields = Array.Empty<PdfFormField>();
+    private readonly Dictionary<string, List<string>> _formValues = new();
+    private bool _formPanelOpen;
+    private bool _formSaveFlatten;
+    private bool _isFillingForm;
+    private string? _formStatus;
+    private bool _formStatusIsError;
+
+    private bool HasFormFields => _formFields.Count > 0;
+
+    private IEnumerable<Annotation> SignaturesOnCurrentPage =>
+        _annotations.Where(a => a.Type == AnnotationType.Signature && a.PageNumber == _currentPage);
+
+    private IEnumerable<Annotation> InkOnCurrentPage =>
+        _annotations.Where(a => a.Type == AnnotationType.Ink && a.PageNumber == _currentPage);
+
+    private IEnumerable<Annotation> ShapesOnCurrentPage =>
+        _annotations.Where(a => a.Type == AnnotationType.Shape && a.PageNumber == _currentPage);
+
+    private sealed record SelectionDto(
+        string Text,
+        IReadOnlyList<HighlightRect> Rects,
+        double AnchorX,
+        double AnchorY);
+
+    private static string? NullIfBlank(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value;
+
+    /// <summary>
+    /// Optional: SHA-256-Hash einer PDF, die beim Mount automatisch aus
+    /// IndexedDB geladen werden soll (kommt aus dem ?pdf=-URL-Parameter
+    /// der ReaderPage-Wrapper). Wird beim Wechsel des Parameters
+    /// ausgelöst, sodass auch die Navigation zwischen Library-Einträgen
+    /// im selben Pane funktioniert.
+    /// </summary>
+    [Parameter] public string? InitialPdfHash { get; set; }
+
+    private string? _lastAutoOpenedHash;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!string.IsNullOrWhiteSpace(InitialPdfHash) && InitialPdfHash != _lastAutoOpenedHash)
+        {
+            _lastAutoOpenedHash = InitialPdfHash;
+            // Auto-Open ist best-effort: wenn die Bytes nicht (mehr) im
+            // IndexedDB liegen, bleibt der File-Picker für den User.
+            await TryAutoOpenByHashAsync(InitialPdfHash).ConfigureAwait(false);
+        }
+    }
+
+    private async Task HandleFileSelected(InputFileChangeEventArgs e)
+    {
+        _errorMessage = null;
+        _isLoading = true;
+        _rasterDataUrl = null;
+        ClearSearchState();
+        ResetAnnotationState();
+
+        try
+        {
+            await using var stream = e.File.OpenReadStream(MaxFileSize);
+            await using var buffer = new MemoryStream();
+            await stream.CopyToAsync(buffer);
+            await LoadPdfBytesAsync(buffer.ToArray(), e.File.Name).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"PDF konnte nicht geöffnet werden: {ex.Message}";
+            _handle = null;
+            ResetAnnotationState();
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    /// <summary>
+    /// Lädt eine PDF aus rohen Bytes — entweder direkt aus einem File-Picker
+    /// (HandleFileSelected) oder beim Auto-Open via Library-Klick + IndexedDB-
+    /// gespeicherten Bytes. Persistiert die Bytes für späteres One-Click-
+    /// Wiederöffnen (FA-060), wenn die Datei kleiner als <see cref="MaxPersistBytes"/>
+    /// ist; sehr große PDFs würden sonst die IndexedDB-Quota sprengen.
+    /// </summary>
+    private async Task LoadPdfBytesAsync(byte[] bytes, string filename, string? tempHandleId = null)
+    {
+        if (_handle is not null)
+        {
+            await Renderer.UnloadAsync(_handle).ConfigureAwait(false);
+            _handle = null;
+        }
+
+        _currentFilename = filename;
+        _originalPdfBytes = bytes;
+
+        await using var buffer = new MemoryStream(bytes, writable: false);
+        var hash = await Hasher.ComputeAsync(buffer, HashAlgorithm.Sha256, CancellationToken.None).ConfigureAwait(false);
+        buffer.Position = 0;
+        _currentPdfId = PdfId.FromHash(hash);
+
+        _handle = await Renderer.LoadAsync(buffer, new LoadOptions(), CancellationToken.None).ConfigureAwait(false);
+        _currentPage = 1;
+        _redactions.Clear();
+        _continuous = false;
+        _continuousPages.Clear();
+        _continuousRenderedCount = 0;
+
+        _annotations = await Annotations.GetForDocumentAsync(_currentPdfId.Value, CancellationToken.None).ConfigureAwait(false);
+
+        // FA-072/073: Wenn ein zentraler Sidecar-Workspace gesetzt ist, dort nach
+        // einem Sidecar für diesen Hash suchen und neue (noch nicht in IndexedDB
+        // vorhandene) Annotationen zusammenführen — so synchronisiert der Ordner
+        // Annotationen zwischen Geräten/Browsern.
+        _workspaceName = await Workspace.GetWorkspaceNameAsync(CancellationToken.None).ConfigureAwait(false);
+        if (_workspaceName is not null)
+        {
+            try
+            {
+                var wsJson = await Workspace.LoadSidecarAsync(hash, CancellationToken.None).ConfigureAwait(false);
+                if (!string.IsNullOrWhiteSpace(wsJson))
+                {
+                    var added = await MergeSidecarJsonAsync(wsJson!).ConfigureAwait(false);
+                    if (added > 0)
+                    {
+                        _sidecarStatus = L.T("reader.workspace.autoloaded",
+                            new Dictionary<string, object> { ["added"] = added, ["folder"] = _workspaceName });
+                        _sidecarStatusIsError = false;
+                    }
+                }
+            }
+            catch
+            {
+                // Best-effort — Workspace-Probleme dürfen das Öffnen nicht blockieren.
+            }
+        }
+
+        await RecomputeSignatureStatusesAsync().ConfigureAwait(false);
+
+        // FA-060: Library-Tracking + Persistenz der Bytes für späteres One-Click-Open.
+        try
+        {
+            var pdfMeta = new PdfMeta(
+                Filename: filename,
+                FileHashSha256: hash,
+                FileSize: bytes.LongLength,
+                PageCount: _handle.PageCount);
+            var existing = await Library.FindByHashAsync(hash, CancellationToken.None).ConfigureAwait(false);
+            var entry = existing is null
+                ? new LibraryEntry(
+                    Id: LibraryEntryId.NewId(),
+                    PdfPath: filename,
+                    Title: _handle.Title ?? filename,
+                    Author: null,
+                    Tags: Array.Empty<string>(),
+                    Rating: null,
+                    AddedAt: DateTimeOffset.UtcNow,
+                    LastOpenedAt: DateTimeOffset.UtcNow,
+                    Progress: new ReadingProgress(1, DateTimeOffset.UtcNow),
+                    PdfMeta: pdfMeta)
+                : existing with
+                {
+                    LastOpenedAt = DateTimeOffset.UtcNow,
+                    PdfMeta = pdfMeta
+                };
+            await Library.AddOrUpdateAsync(entry, CancellationToken.None).ConfigureAwait(false);
+
+            if (bytes.LongLength <= MaxPersistBytes)
+            {
+                await Storage.SetBytesAsync(PdfBytesKeyFor(hash), bytes, CancellationToken.None).ConfigureAwait(false);
+            }
+
+            // File-System-Access-API: Wenn der initiale Pick ein Handle
+            // mitgeliefert hat, jetzt unter dem PDF-Hash persistieren. Ab dann
+            // kann der Library-Klick die Datei via Permission-Dialog
+            // reaktivieren statt über den Bytes-Cache zu gehen — auch wenn
+            // die PDF gar nicht oder nicht mehr im Cache liegt.
+            if (!string.IsNullOrEmpty(tempHandleId))
+            {
+                try
+                {
+                    await Files.PersistHandleAsync(tempHandleId, hash, CancellationToken.None).ConfigureAwait(false);
+                }
+                catch
+                {
+                    // Best-effort — beim nächsten Open wird notfalls neu gepickt.
+                }
+            }
+        }
+        catch
+        {
+            // Tracking + Persistenz sind beide non-essential; Fehler schlucken wir leise.
+        }
+
+        try
+        {
+            _outline = await Renderer.GetOutlineAsync(_handle, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch
+        {
+            _outline = null;
+        }
+        _outlineOpen = _outline is not null;
+
+        // AcroForm-Felder erkennen (FA-040). Fehlt ein Formular oder schlägt das
+        // Lesen fehl, bleibt der Formular-Toggle einfach ausgeblendet.
+        try
+        {
+            await using var formStream = new MemoryStream(bytes, writable: false);
+            SetFormFields(await FormService.GetFieldsAsync(formStream, CancellationToken.None).ConfigureAwait(false));
+        }
+        catch
+        {
+            SetFormFields(Array.Empty<PdfFormField>());
+        }
+
+        await RenderCurrentPageAsync().ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Versucht, eine PDF anhand ihres SHA-256-Hashes aus der IndexedDB-
+    /// Persistenz zu laden. Gibt <c>true</c> zurück, wenn die Bytes da waren
+    /// und erfolgreich geladen wurden — sonst <c>false</c> (z.B. nie gespeichert,
+    /// zu groß gewesen, Storage gelöscht). Der Aufrufer muss dann den File-
+    /// Picker anzeigen.
+    /// </summary>
+    public async Task<bool> TryAutoOpenByHashAsync(string hash)
+    {
+        if (string.IsNullOrWhiteSpace(hash)) return false;
+        _errorMessage = null;
+        _isLoading = true;
+        ClearSearchState();
+        ResetAnnotationState();
+        try
+        {
+            // 1) File-System-Access-API: gespeichertes Handle reaktivieren —
+            //    der User bekommt höchstens einen Permission-Dialog, keinen
+            //    weiteren File-Picker. Funktioniert nur in Chromium.
+            var reopened = await Files.TryReopenAsync(hash, CancellationToken.None).ConfigureAwait(false);
+            if (reopened is not null)
+            {
+                await LoadPdfBytesAsync(reopened.Bytes, reopened.Filename).ConfigureAwait(false);
+                return true;
+            }
+
+            // 2) Bytes-Cache aus IndexedDB (alle Browser, Cap 100 MB).
+            var bytes = await Storage.GetBytesAsync(PdfBytesKeyFor(hash), CancellationToken.None).ConfigureAwait(false);
+            if (bytes is null || bytes.Length == 0) return false;
+
+            var entry = await Library.FindByHashAsync(hash, CancellationToken.None).ConfigureAwait(false);
+            var filename = entry?.PdfMeta?.Filename
+                ?? entry?.Title
+                ?? "document.pdf";
+
+            await LoadPdfBytesAsync(bytes, filename).ConfigureAwait(false);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Auto-Open fehlgeschlagen: {ex.Message}";
+            return false;
+        }
+        finally
+        {
+            _isLoading = false;
+            await InvokeAsync(StateHasChanged).ConfigureAwait(false);
+        }
+    }
+
+    private const long MaxPersistBytes = 100L * 1024 * 1024; // 100 MB Cap pro PDF
+    private static string PdfBytesKeyFor(string hash) => $"pdf:bytes:{hash}";
+
+    // File-System-Access-API (Chromium). Im Pane gecached, damit die Markup-
+    // Variante (Button vs InputFile) nicht jedes Re-Render einen JS-Roundtrip
+    // braucht.
+    private bool _fsaSupported;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _fsaSupported = await Files.IsSupportedAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+        catch
+        {
+            _fsaSupported = false;
+        }
+    }
+
+    /// <summary>
+    /// Klick-Handler für den FSA-Open-Button. Lädt die gewählte PDF in den
+    /// Reader und persistiert das File-Handle unter ihrem SHA-256-Hash —
+    /// damit kann ein späterer Library-Klick die Datei ohne weiteren Picker
+    /// wieder öffnen.
+    /// </summary>
+    private async Task PickPdfViaFsaAsync()
+    {
+        _errorMessage = null;
+        _isLoading = true;
+        _rasterDataUrl = null;
+        ClearSearchState();
+        ResetAnnotationState();
+        try
+        {
+            var picked = await Files.PickPdfAsync(CancellationToken.None).ConfigureAwait(false);
+            if (picked is null) return; // User-canceled
+            await LoadPdfBytesAsync(picked.Bytes, picked.Filename, picked.TempHandleId).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"PDF konnte nicht geöffnet werden: {ex.Message}";
+            _handle = null;
+            ResetAnnotationState();
+        }
+        finally
+        {
+            _isLoading = false;
+            await InvokeAsync(StateHasChanged).ConfigureAwait(false);
+        }
+    }
+
+    private void ResetAnnotationState()
+    {
+        _annotations = Array.Empty<Annotation>();
+        _currentPdfId = null;
+        _currentFilename = null;
+        _isExporting = false;
+        _annotationMode = AnnotationMode.Select;
+        _redactions.Clear();
+        _continuous = false;
+        _continuousPages.Clear();
+        _continuousRenderedCount = 0;
+        _editingAnnotation = null;
+        _editingContent = string.Empty;
+        _pageTextItems = Array.Empty<TextItem>();
+        _renderedPage = null;
+        _pendingSelection = null;
+        _editingHighlight = null;
+        _outline = null;
+        _outlineOpen = false;
+        _activeSignatureImage = null;
+        _activeSignatureFilename = null;
+        _signatureStatuses.Clear();
+        _originalPdfBytes = null;
+        _signerPanelOpen = false;
+        _isSavingSignedPdf = false;
+        _formFields = Array.Empty<PdfFormField>();
+        _formValues.Clear();
+        _formPanelOpen = false;
+        _isFillingForm = false;
+        _formStatus = null;
+        _formStatusIsError = false;
+        // Thumbnails (FA-007): laufendes Render abbrechen + Cache leeren,
+        // damit das nächste Dokument bei Bedarf frische Thumbnails bekommt.
+        _thumbnailsCts?.Cancel();
+        _thumbnailsCts = null;
+        _thumbnails = new Dictionary<int, string>();
+        _thumbnailsProgress = 0;
+        _thumbsOpen = false;
+        // OCR-Status der Vorgänger-PDF nicht "vererben".
+        _ocrStatus = null;
+        _ocrStatusIsError = false;
+        _isOcrRunning = false;
+        _useOcrTextLayer = false;
+    }
+
+    // --- Formular / AcroForms (FA-040/041) --------------------------------
+
+    /// <summary>Übernimmt frisch erkannte Felder und initialisiert die Editierwerte.</summary>
+    private void SetFormFields(IReadOnlyList<PdfFormField> fields)
+    {
+        _formFields = fields;
+        _formValues.Clear();
+        foreach (var f in fields)
+        {
+            _formValues[f.Name] = f.Value.ToList();
+        }
+        _formPanelOpen = false;
+        _formStatus = null;
+        _formStatusIsError = false;
+    }
+
+    private string GetSingle(string name) =>
+        _formValues.TryGetValue(name, out var v) && v.Count > 0 ? v[0] : string.Empty;
+
+    private void SetSingle(string name, string? value) =>
+        _formValues[name] = string.IsNullOrEmpty(value)
+            ? new List<string>()
+            : new List<string> { value };
+
+    private bool IsChecked(string name) =>
+        _formValues.TryGetValue(name, out var v) && v.Contains("true");
+
+    private void SetChecked(string name, bool on) =>
+        _formValues[name] = on ? new List<string> { "true" } : new List<string>();
+
+    private IReadOnlyList<string> GetMulti(string name) =>
+        _formValues.TryGetValue(name, out var v) ? v : Array.Empty<string>();
+
+    private void SetMulti(string name, object? value)
+    {
+        var arr = value switch
+        {
+            string[] strings => strings,
+            IEnumerable<string> en => en.ToArray(),
+            _ => Array.Empty<string>()
+        };
+        _formValues[name] = arr.ToList();
+    }
+
+    private async Task JumpToFormFieldPage(PdfFormField field)
+    {
+        if (field.PageNumber >= 1 && _handle is not null && field.PageNumber <= _handle.PageCount)
+        {
+            await GoToPageAsync(field.PageNumber);
+        }
+    }
+
+    /// <summary>
+    /// Schreibt die editierten Werte zurück ins PDF (FA-041) und lädt das
+    /// Ergebnis als <c>&lt;name&gt;.filled.pdf</c> herunter. ReadOnly-Felder
+    /// werden nicht angefasst.
+    /// </summary>
+    private async Task SaveFilledFormAsync()
+    {
+        if (_originalPdfBytes is null || !HasFormFields || _isFillingForm) return;
+
+        _isFillingForm = true;
+        _formStatus = null;
+        _formStatusIsError = false;
+        try
+        {
+            var editable = _formFields.Where(f => !f.ReadOnly).Select(f => f.Name).ToHashSet();
+            var values = _formValues
+                .Where(kv => editable.Contains(kv.Key))
+                .Select(kv => new FormFieldValue(kv.Key, kv.Value.ToArray()))
+                .ToList();
+
+            var options = new FillFormOptions(
+                _formSaveFlatten ? FormSaveMode.Flatten : FormSaveMode.KeepEditable);
+
+            await using var ms = new MemoryStream(_originalPdfBytes, writable: false);
+            var filled = await FormService.FillAsync(ms, values, options, CancellationToken.None);
+
+            var baseName = !string.IsNullOrWhiteSpace(_currentFilename)
+                ? System.IO.Path.GetFileNameWithoutExtension(_currentFilename)
+                : (_handle?.Title ?? "pagebound");
+            var safeBase = string.Concat(baseName.Select(c =>
+                char.IsLetterOrDigit(c) || c is '_' or '-' or '.' or ' ' ? c : '_'));
+            var downloadName = $"{safeBase}.filled.pdf";
+
+            await JS.InvokeVoidAsync(
+                "pageboundShortcuts.downloadBytes",
+                downloadName,
+                Convert.ToBase64String(filled),
+                "application/pdf");
+
+            _formStatus = L.T("reader.form.saved", new Dictionary<string, object> { ["name"] = downloadName });
+        }
+        catch (Exception ex)
+        {
+            _formStatus = L.T("reader.form.saveError", new Dictionary<string, object> { ["error"] = ex.Message });
+            _formStatusIsError = true;
+        }
+        finally
+        {
+            _isFillingForm = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    // --- OCR (FA-050) -----------------------------------------------------
+
+    private async Task RunOcrOnCurrentPageAsync()
+    {
+        if (_handle is null || _isOcrRunning) return;
+        _isOcrRunning = true;
+        _ocrStatus = null;
+        try
+        {
+            // High-res Render speziell für OCR — die Display-Qualität (BaseScale ×
+            // Zoom-Faktor) ist sonst stark vom User-Zoom abhängig; ein
+            // konsistentes Scale 2.5 hält die Trefferquote stabil.
+            var hiRes = await Renderer.RenderPageAsync(
+                _handle,
+                _currentPage,
+                new RenderOptions(Scale: 2.5),
+                CancellationToken.None).ConfigureAwait(false);
+            if (hiRes.RasterBytes is null) return;
+
+            var dataUrl = $"data:{hiRes.RasterFormat ?? "image/png"};base64,{Convert.ToBase64String(hiRes.RasterBytes)}";
+            var result = await Ocr.RecognizePageAsync(dataUrl, OcrLanguages, CancellationToken.None).ConfigureAwait(false);
+
+            var pageW = hiRes.PageWidthPt;
+            var pageH = hiRes.PageHeightPt;
+            // Bewusst die tatsächliche Render-Größe nehmen, nicht das
+            // result.ImageWidth/Height aus der JS-Bridge — Tesseract liefert
+            // dort nur die max-bbox über alle erkannten Wörter zurück, das
+            // ist bei PDFs mit Rand systematisch zu klein und verschiebt
+            // anschließend alle Mappings nach rechts/unten.
+            double imgW = hiRes.WidthPx;
+            double imgH = hiRes.HeightPx;
+
+            if (imgW > 0 && imgH > 0 && result.Words.Count > 0)
+            {
+                // OCR-Bounding-Boxes in PDF-Punkte umrechnen — die Render-Skala
+                // ist intern bekannt, aber das simple Verhältnis Bild ↔ Page
+                // reicht, weil RenderPageAsync proportional skaliert.
+                var scaleX = pageW / imgW;
+                var scaleY = pageH / imgH;
+                _pageTextItems = result.Words.Select(w => new TextItem(
+                    w.Text,
+                    w.X * scaleX,
+                    w.Y * scaleY,
+                    w.Width * scaleX,
+                    w.Height * scaleY)).ToList();
+                // Sobald wir Wörter haben, gilt die Seite als durchsuchbar —
+                // die "kein Textlayer"-Box im Such-UI klappt damit zu.
+                _pdfHasNoTextLayer = false;
+                // Native PDF.js-TextLayer abräumen und den OCR-Pfad aktivieren:
+                // OCR liefert Pixel-Bounding-Boxes, keinen TextContent-Stream,
+                // also kann PDF.js' Layer-Klasse sie nicht rendern.
+                _useOcrTextLayer = true;
+                try
+                {
+                    await JS.InvokeVoidAsync("pageboundPdf.clearTextLayer", NativeTextLayerSelector);
+                }
+                catch
+                {
+                    // best-effort
+                }
+            }
+
+            _ocrStatus = L.T("reader.ocr.success", new Dictionary<string, object>
+            {
+                ["count"] = result.Words.Count,
+                ["confidence"] = result.Confidence.ToString("F0", CultureInfo.InvariantCulture)
+            });
+            _ocrStatusIsError = false;
+        }
+        catch (Exception ex)
+        {
+            _ocrStatus = L.T("reader.ocr.failed", new Dictionary<string, object> { ["message"] = ex.Message });
+            _ocrStatusIsError = true;
+        }
+        finally
+        {
+            _isOcrRunning = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task ToggleThumbsAsync()
+    {
+        if (_thumbsOpen)
+        {
+            _thumbsOpen = false;
+            _thumbnailsCts?.Cancel();
+            _thumbnailsCts = null;
+            return;
+        }
+
+        _thumbsOpen = true;
+        // Gegenseitig schließend mit Outline — beide Sidebars gleichzeitig
+        // wäre auf dem 1280er-Layout zu eng. Wenn der User Outline aktiv hat,
+        // klappt sie hier wegen.
+        _outlineOpen = false;
+
+        if (_handle is null) return;
+        if (_thumbnails.Count >= _handle.PageCount) return;
+
+        _thumbnailsCts = new CancellationTokenSource();
+        await RenderThumbnailsAsync(_handle, _thumbnailsCts.Token).ConfigureAwait(false);
+    }
+
+    private async Task RenderThumbnailsAsync(PdfDocumentHandle handle, CancellationToken ct)
+    {
+        try
+        {
+            for (var i = 1; i <= handle.PageCount; i++)
+            {
+                ct.ThrowIfCancellationRequested();
+                if (_thumbnails.ContainsKey(i))
+                {
+                    _thumbnailsProgress = i;
+                    continue;
+                }
+                var rendered = await Renderer
+                    .RenderPageAsync(handle, i, new RenderOptions(Scale: 0.35), ct)
+                    .ConfigureAwait(false);
+                if (rendered.RasterBytes is not null && rendered.RasterFormat is not null)
+                {
+                    _thumbnails[i] = $"data:{rendered.RasterFormat};base64,{Convert.ToBase64String(rendered.RasterBytes)}";
+                }
+                _thumbnailsProgress = i;
+                await InvokeAsync(StateHasChanged);
+                // Browser-Frame Zeit zum Atmen geben — sonst friert die UI ein,
+                // wenn jemand bei einer 200-Seiten-PDF die Sidebar öffnet.
+                await Task.Yield();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Erwartet bei Datei-Wechsel oder Sidebar-Close.
+        }
+    }
+
+    private async Task RenderCurrentPageAsync()
+    {
+        if (_handle is null) return;
+
+        _isRendering = true;
+        _pendingSelection = null;
+        try
+        {
+            var rendered = await Renderer.RenderPageAsync(
+                _handle,
+                _currentPage,
+                new RenderOptions(Scale: InternalScale),
+                CancellationToken.None);
+
+            _renderedPage = rendered;
+            if (rendered.RasterBytes is not null && rendered.RasterFormat is not null)
+            {
+                _rasterDataUrl = $"data:{rendered.RasterFormat};base64,{Convert.ToBase64String(rendered.RasterBytes)}";
+            }
+
+            // Text-Layer nachladen: ohne ihn ist keine Text-Selection und damit
+            // kein Highlighting möglich. Bei PDFs ohne Text-Layer (vektorisiert)
+            // kommt ein leeres Array zurück und der Layer rendert einfach nichts.
+            try
+            {
+                _pageTextItems = await Renderer.ExtractTextAsync(_handle, _currentPage, CancellationToken.None);
+            }
+            catch
+            {
+                _pageTextItems = Array.Empty<TextItem>();
+            }
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Seite konnte nicht gerendert werden: {ex.Message}";
+        }
+        finally
+        {
+            _isRendering = false;
+        }
+
+        // StateHasChanged + await sorgt dafür, dass das neue Markup im DOM
+        // liegt, bevor wir Layer-Manipulationen vornehmen.
+        await InvokeAsync(StateHasChanged);
+
+        if (_useOcrTextLayer)
+        {
+            // OCR-Pfad: Razor hat die <span>s schon gerendert; jetzt skaliert
+            // der Helper sie pixel-genau auf ihre Ziel-Bounding-Box.
+            try
+            {
+                await JS.InvokeVoidAsync("pageboundShortcuts.fixTextLayerScale", PageCanvasSelector);
+            }
+            catch
+            {
+                // Bridge nicht erreichbar — Spans bleiben ungeskaliert, Selection
+                // funktioniert weiter, ist nur ein paar Pixel daneben.
+            }
+        }
+        else if (_handle is not null)
+        {
+            // Native-Pfad: PDF.js' eigene TextLayer-Klasse rendert die Spans in
+            // den Anker-Container. Das Result enthält die für die Suche
+            // benötigten TextItems (in PDF-Punkten, mit ascent-korrigiertem Y).
+            try
+            {
+                var items = await JS.InvokeAsync<TextItem[]>(
+                    "pageboundPdf.renderTextLayerToContainer",
+                    _handle.Id,
+                    _currentPage,
+                    NativeTextLayerSelector,
+                    PdfImageSelector);
+                if (items is not null)
+                {
+                    _pageTextItems = items;
+                }
+            }
+            catch
+            {
+                // Bridge oder TextLayer nicht erreichbar — Selection ist dann
+                // disabled, Suche funktioniert weiter über getTextContent.
+            }
+        }
+    }
+
+    private async Task PreviousPage()
+    {
+        if (_handle is null || _currentPage <= 1) return;
+        _currentPage--;
+        await RenderCurrentPageAsync();
+    }
+
+    private async Task NextPage()
+    {
+        if (_handle is null || _currentPage >= _handle.PageCount) return;
+        _currentPage++;
+        await RenderCurrentPageAsync();
+    }
+
+    private async Task SetZoom(double zoomFactor)
+    {
+        if (Math.Abs(_zoomFactor - zoomFactor) < 0.001) return;
+        _zoomFactor = zoomFactor;
+        await RenderCurrentPageAsync();
+    }
+
+    private async Task DoSearchAsync()
+    {
+        if (_handle is null) return;
+        if (string.IsNullOrWhiteSpace(_searchQuery))
+        {
+            _searchHits = null;
+            return;
+        }
+
+        _isSearching = true;
+        _errorMessage = null;
+        _pdfHasNoTextLayer = false;
+        try
+        {
+            var options = new SearchOptions(MatchCase: _matchCase, WholeWord: _wholeWord);
+            _searchHits = await Renderer.SearchAsync(_handle, _searchQuery, options, CancellationToken.None);
+            _lastSearched = _searchQuery;
+
+            // Wenn die Suche gar nichts gefunden hat, prüfen wir, ob das
+            // überhaupt am PDF liegt: hat Seite 1 *irgendeinen* Text-Item?
+            // Wenn nicht, ist die PDF vektorisiert (typisch für stilisierte
+            // Designer-Layouts) — dafür braucht es OCR (FA-050 / Release 0.9).
+            if (_searchHits.Count == 0)
+            {
+                var sample = await Renderer.ExtractTextAsync(_handle, 1, CancellationToken.None);
+                _pdfHasNoTextLayer = sample.Count == 0;
+            }
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Suche fehlgeschlagen: {ex.Message}";
+            _searchHits = null;
+        }
+        finally
+        {
+            _isSearching = false;
+        }
+    }
+
+    private void ClearSearch()
+    {
+        ClearSearchState();
+    }
+
+    private void ClearSearchState()
+    {
+        _searchHits = null;
+        _searchQuery = string.Empty;
+        _lastSearched = string.Empty;
+        _pdfHasNoTextLayer = false;
+    }
+
+    private async Task GoToPageAsync(int pageNumber)
+    {
+        if (_handle is null) return;
+        if (pageNumber < 1 || pageNumber > _handle.PageCount) return;
+        if (pageNumber == _currentPage) return;
+        _currentPage = pageNumber;
+        await RenderCurrentPageAsync();
+    }
+
+    // --- Annotations (Sticky Notes, FA-011) ---------------------------------
+
+    private void SetAnnotationMode(AnnotationMode mode)
+    {
+        _annotationMode = mode;
+        // Editor schließen, wenn wir den Modus wechseln — sonst überlappen
+        // sich Modus-Indikatoren und offener Popover unangenehm.
+        _editingAnnotation = null;
+        _editingContent = string.Empty;
+        _editingDrawing = null;
+        // Drawing-Capture (FA-013/014): bei Mode-Wechsel JS-Listener
+        // (de-)attachen. Fire-and-Forget — stopDrawingCapture in JS ist
+        // idempotent, also race-frei.
+        _ = SyncDrawingCaptureAsync();
+    }
+
+    private void SetDrawColor(string color)
+    {
+        _drawColor = color;
+        _ = SyncDrawingCaptureAsync();
+    }
+
+    private void SetDrawStrokeWidth(double fraction)
+    {
+        _drawStrokeWidth = fraction;
+        _ = SyncDrawingCaptureAsync();
+    }
+
+    /// <summary>
+    /// Hängt den JS-seitigen Pointer-Listener für Stift/Formen an das
+    /// Page-Canvas-Element, sobald ein Drawing-Mode aktiv ist — und entfernt
+    /// ihn wieder, sobald wir den Modus verlassen. Wird nach jedem Tool-/
+    /// Stilwechsel aufgerufen, damit Farbe + Strichstärke live ankommen.
+    /// </summary>
+    private async Task SyncDrawingCaptureAsync()
+    {
+        if (_dotNetRef is null) return;
+        try
+        {
+            if (IsDrawCaptureMode(_annotationMode))
+            {
+                await JS.InvokeVoidAsync(
+                    "pageboundShortcuts.startDrawingCapture",
+                    PageCanvasSelector,
+                    MapDrawingModeToJs(_annotationMode),
+                    new { color = _drawColor, strokeWidthFraction = _drawStrokeWidth },
+                    _dotNetRef,
+                    nameof(HandleDrawCompletedAsync));
+                _captureAttachedToPage = _currentPage;
+            }
+            else if (_captureAttachedToPage is not null)
+            {
+                await JS.InvokeVoidAsync("pageboundShortcuts.stopDrawingCapture");
+                _captureAttachedToPage = null;
+            }
+        }
+        catch
+        {
+            // Bridge nicht erreichbar — Tool tut dann einfach nichts.
+        }
+    }
+
+    private static string MapDrawingModeToJs(AnnotationMode mode) => mode switch
+    {
+        AnnotationMode.Pen => "ink",
+        AnnotationMode.RectShape => "rect",
+        AnnotationMode.ArrowShape => "arrow",
+        AnnotationMode.LineShape => "line",
+        AnnotationMode.Redaction => "rect",
+        _ => "ink"
+    };
+
+    [JSInvokable]
+    public async Task HandleDrawCompletedAsync(DrawingCaptureResult result)
+    {
+        if (_currentPdfId is null) return;
+        if (result.Strokes is null || result.Strokes.Count == 0) return;
+
+        // Schwärzen: transienter Redaktions-Bereich (rechteckig), keine Annotation.
+        if (_annotationMode == AnnotationMode.Redaction)
+        {
+            if (result.Strokes[0].Count >= 2)
+            {
+                var s = result.Strokes[0][0];
+                var e = result.Strokes[0][^1];
+                var w = Math.Abs(e.X - s.X);
+                var h = Math.Abs(e.Y - s.Y);
+                if (w > 0.003 && h > 0.003)
+                {
+                    _redactions.Add(new RedactionBox(_currentPage, Math.Min(s.X, e.X), Math.Min(s.Y, e.Y), w, h));
+                    await InvokeAsync(StateHasChanged);
+                }
+            }
+            return;
+        }
+
+        NewAnnotation? toCreate = null;
+        if (string.Equals(result.Mode, "ink", StringComparison.OrdinalIgnoreCase))
+        {
+            var strokes = result.Strokes
+                .Select(s => new InkStroke(
+                    s.Select(p => new InkPoint(p.X, p.Y)).ToList()))
+                .ToList();
+            toCreate = InkAnnotation.Create(
+                _currentPdfId.Value,
+                _currentPage,
+                strokes,
+                result.Color,
+                result.StrokeWidthFraction);
+        }
+        else if (result.Strokes[0].Count >= 2)
+        {
+            var startPoint = result.Strokes[0][0];
+            var endPoint = result.Strokes[0][^1];
+            var shape = result.Mode.ToLowerInvariant() switch
+            {
+                "rect" => ShapeKind.Rectangle,
+                "arrow" => ShapeKind.Arrow,
+                "line" => ShapeKind.Line,
+                _ => ShapeKind.Rectangle
+            };
+            toCreate = ShapeAnnotation.Create(
+                _currentPdfId.Value,
+                _currentPage,
+                shape,
+                startPoint.X, startPoint.Y,
+                endPoint.X, endPoint.Y,
+                result.Color,
+                result.StrokeWidthFraction);
+        }
+
+        if (toCreate is null) return;
+
+        var created = await Annotations.CreateAsync(toCreate, CancellationToken.None);
+        _annotations = _annotations.Append(created).ToList();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    public sealed record DrawingCaptureResult(
+        string Mode,
+        string Color,
+        double StrokeWidthFraction,
+        List<List<DrawPoint>> Strokes);
+
+    public sealed record DrawPoint(double X, double Y);
+
+    private void ClearRedactions() => _redactions.Clear();
+
+    // Fortlaufende Leseansicht: beim Einschalten alle Seiten progressiv rendern.
+    private async Task ToggleContinuousAsync()
+    {
+        _continuous = !_continuous;
+        if (_continuous && _handle is not null && _continuousRenderedCount < _handle.PageCount)
+        {
+            await RenderContinuousAsync();
+        }
+    }
+
+    private async Task RenderContinuousAsync()
+    {
+        if (_handle is null || _continuousRendering) return;
+        _continuousRendering = true;
+        try
+        {
+            for (var p = 1; p <= _handle.PageCount; p++)
+            {
+                if (_continuousPages.ContainsKey(p)) continue;
+                var rendered = await Renderer.RenderPageAsync(
+                    _handle, p, new RenderOptions(Scale: 1.5), CancellationToken.None).ConfigureAwait(false);
+                _continuousPages[p] = $"data:{rendered.RasterFormat};base64,{Convert.ToBase64String(rendered.RasterBytes)}";
+                _continuousRenderedCount = _continuousPages.Count;
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        finally
+        {
+            _continuousRendering = false;
+        }
+    }
+
+    // Echte Redaktion anwenden: rasterisiert die betroffenen Seiten und brennt die
+    // schwarzen Bereiche ein (entfernt den darunterliegenden Text), Download als
+    // <name>.redacted.pdf. Die Originaldatei/Sidecar bleibt unangetastet.
+    private async Task ApplyRedactionsAsync()
+    {
+        if (_originalPdfBytes is null || _redactions.Count == 0 || _isRedacting) return;
+        _isRedacting = true;
+        _errorMessage = null;
+        try
+        {
+            var regions = _redactions
+                .Select(r => new RedactionRegion(r.Page, r.X, r.Y, r.Width, r.Height))
+                .ToList();
+            using var ms = new MemoryStream(_originalPdfBytes);
+            var redacted = await Manipulator.RedactAsync(ms, regions, CancellationToken.None);
+
+            var baseName = !string.IsNullOrWhiteSpace(_currentFilename)
+                ? System.IO.Path.GetFileNameWithoutExtension(_currentFilename)
+                : (_handle?.Title ?? "pagebound");
+            var safeBase = string.Concat(baseName.Select(c =>
+                char.IsLetterOrDigit(c) || c is '_' or '-' or '.' or ' ' ? c : '_'));
+            await JS.InvokeVoidAsync(
+                "pageboundShortcuts.downloadBytes",
+                $"{safeBase}.redacted.pdf",
+                Convert.ToBase64String(redacted),
+                "application/pdf");
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Schwärzung fehlgeschlagen:\n{ex.Message}";
+        }
+        finally
+        {
+            _isRedacting = false;
+        }
+    }
+
+    // Selektierte Ink/Shape für die Lösch-Mini-Toolbar.
+    private Annotation? _editingDrawing;
+
+    private void OpenDrawingEditor(Annotation annotation)
+    {
+        // In Zeichen-Modi schlucken wir Klicks auf existierende Annotations,
+        // damit der User wirklich zeichnet und nicht versehentlich editiert.
+        if (IsDrawingMode(_annotationMode)) return;
+        _editingDrawing = annotation;
+    }
+
+    private async Task DeleteEditingDrawingAsync()
+    {
+        if (_editingDrawing is null) return;
+        var id = _editingDrawing.Id;
+        await Annotations.DeleteAsync(id, CancellationToken.None);
+        _annotations = _annotations.Where(a => a.Id.Value != id.Value).ToList();
+        _editingDrawing = null;
+    }
+
+    /// <summary>
+    /// Ankerpunkt für die Lösch-Mini-Toolbar (oben-Mitte der Bounding-Box
+    /// der jeweiligen Ink/Shape).
+    /// </summary>
+    private static (double X, double Y) GetDrawingAnchor(Annotation annotation)
+    {
+        if (annotation.Type == AnnotationType.Ink)
+        {
+            var minX = 1.0; var minY = 1.0; var maxX = 0.0;
+            var found = false;
+            foreach (var stroke in InkAnnotation.GetStrokes(annotation))
+            {
+                foreach (var p in stroke.Points)
+                {
+                    if (p.X < minX) minX = p.X;
+                    if (p.X > maxX) maxX = p.X;
+                    if (p.Y < minY) minY = p.Y;
+                    found = true;
+                }
+            }
+            return found ? ((minX + maxX) * 0.5, minY) : (0.5, 0.5);
+        }
+        if (annotation.Type == AnnotationType.Shape)
+        {
+            var sx = ShapeAnnotation.GetStartX(annotation);
+            var sy = ShapeAnnotation.GetStartY(annotation);
+            var ex = ShapeAnnotation.GetEndX(annotation);
+            var ey = ShapeAnnotation.GetEndY(annotation);
+            return ((sx + ex) * 0.5, Math.Min(sy, ey));
+        }
+        return (0.5, 0.5);
+    }
+
+    private static string BuildInkPath(InkStroke stroke)
+    {
+        if (stroke.Points.Count < 2) return string.Empty;
+        return string.Join(" ", stroke.Points.Select((p, i) =>
+            string.Format(CultureInfo.InvariantCulture,
+                "{0} {1:F4} {2:F4}",
+                i == 0 ? "M" : "L", p.X, p.Y)));
+    }
+
+    /// <summary>
+    /// Liefert die drei Eckpunkte der Pfeilspitze (Endpunkt + zwei Basis-Punkte
+    /// links/rechts der Linienrichtung). Größe skaliert leicht mit der
+    /// Strichstärke, ist aber nach unten begrenzt damit dünne Pfeile sichtbar
+    /// bleiben. Gibt <c>null</c> zurück, wenn Start und Ende identisch sind.
+    /// </summary>
+    private static (double X1, double Y1, double X2, double Y2, double X3, double Y3)?
+        ComputeArrowHead(double sx, double sy, double ex, double ey, double strokeWidth, double aspect)
+    {
+        if (aspect <= 0) aspect = 1;
+        // Die Spitze wird im quadratischen Pixel-Raum berechnet (x mit dem Seiten-
+        // verhältnis skaliert), sonst verzerrt der SVG-viewBox 0..1 mit
+        // preserveAspectRatio=none die Geometrie und die Spitze wirkt schief.
+        var sxs = sx * aspect;
+        var exs = ex * aspect;
+        var dxs = exs - sxs;
+        var dys = ey - sy;
+        var len = Math.Sqrt(dxs * dxs + dys * dys);
+        if (len <= 0) return null;
+        var ux = dxs / len;
+        var uy = dys / len;
+        // Spitzenlänge: solide sichtbar, skaliert mit der Strichstärke
+        // (strokeWidth ist Seitenbreiten-Anteil → ×aspect = Höhen-Anteil),
+        // bei kurzen Pfeilen auf 40 % der Länge gedeckelt.
+        var arrowSize = Math.Min(len * 0.4, Math.Max(0.024, strokeWidth * aspect * 4.0));
+        var bxs = exs - ux * arrowSize;
+        var bys = ey - uy * arrowSize;
+        var nx = -uy;
+        var ny = ux;
+        var hb = arrowSize * 0.5;
+        // zurück in 0..1-Seiten-Koordinaten (x wieder „entzerren")
+        return (ex, ey,
+                (bxs + nx * hb) / aspect, bys + ny * hb,
+                (bxs - nx * hb) / aspect, bys - ny * hb);
+    }
+
+    private async Task HandlePdfClickAsync(MouseEventArgs e)
+    {
+        // Editor schließt, sobald wir ins Dokument klicken (außer eben in den
+        // Editor selbst — der stoppt das Event via @onclick:stopPropagation).
+        if (_editingAnnotation is not null)
+        {
+            await SaveEditingAnnotationAsync();
+        }
+
+        if (_currentPdfId is null || _handle is null) return;
+
+        if (_annotationMode == AnnotationMode.Signature)
+        {
+            await PlaceSignatureAsync(e);
+            return;
+        }
+
+        if (_annotationMode != AnnotationMode.StickyNote) return;
+
+        var fraction = await JS.InvokeAsync<NormalizedPosition?>(
+            "pageboundShortcuts.clientPositionToFraction",
+            PdfImageSelector,
+            e.ClientX,
+            e.ClientY);
+        if (fraction is null) return;
+
+        var newAnnotation = StickyNoteAnnotation.Create(
+            _currentPdfId.Value,
+            _currentPage,
+            fraction.X,
+            fraction.Y,
+            string.Empty);
+
+        var created = await Annotations.CreateAsync(newAnnotation, CancellationToken.None);
+        _annotations = _annotations.Append(created).ToList();
+
+        // Sofort in den Edit-Modus springen, damit der Nutzer den Text
+        // eingeben kann, ohne erst auf den Pin zu klicken.
+        OpenEditor(created);
+
+        // Nach dem Erstellen zurück zum Select-Modus — verhindert versehentliche
+        // Mehrfach-Erstellung beim Weiterklicken.
+        _annotationMode = AnnotationMode.Select;
+        await RecomputeSignatureStatusesAsync();
+    }
+
+    private void OpenEditor(Annotation annotation)
+    {
+        _editingAnnotation = annotation;
+        _editingContent = StickyNoteAnnotation.GetContent(annotation);
+        // Vorhandener Inhalt → erst lesen, sonst direkt schreiben.
+        _editorPreviewMode = !string.IsNullOrWhiteSpace(_editingContent);
+    }
+
+    private void ToggleEditorPreview()
+    {
+        _editorPreviewMode = !_editorPreviewMode;
+    }
+
+    private async Task SaveEditingAnnotationAsync()
+    {
+        if (_editingAnnotation is null) return;
+        var current = _editingAnnotation;
+        var newContent = _editingContent;
+
+        // Wenn sich nichts geändert hat, Editor einfach schließen.
+        if (StickyNoteAnnotation.GetContent(current) != newContent)
+        {
+            var updated = StickyNoteAnnotation.WithContent(current, newContent);
+            var saved = await Annotations.UpdateAsync(updated, CancellationToken.None);
+            _annotations = _annotations
+                .Select(a => a.Id.Value == saved.Id.Value ? saved : a)
+                .ToList();
+            await RecomputeSignatureStatusesAsync();
+        }
+
+        _editingAnnotation = null;
+        _editingContent = string.Empty;
+    }
+
+    private async Task DeleteEditingAnnotationAsync()
+    {
+        if (_editingAnnotation is null) return;
+        var idToRemove = _editingAnnotation.Id;
+        await Annotations.DeleteAsync(idToRemove, CancellationToken.None);
+        _annotations = _annotations.Where(a => a.Id.Value != idToRemove.Value).ToList();
+        _editingAnnotation = null;
+        _editingContent = string.Empty;
+        await RecomputeSignatureStatusesAsync();
+    }
+
+    private void CancelEditing()
+    {
+        _editingAnnotation = null;
+        _editingContent = string.Empty;
+    }
+
+    private sealed record NormalizedPosition(double X, double Y);
+
+    // --- PNG-Signatur + Integrität (FA-015, FA-016, FA-017) -----------------
+
+    private async Task HandleSignatureImageSelectedAsync(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        _errorMessage = null;
+
+        if (file.Size > MaxSignatureBytes)
+        {
+            _errorMessage = $"Signaturbild ist zu groß (max {MaxSignatureBytes / 1024} KB).";
+            return;
+        }
+        if (!file.ContentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+        {
+            _errorMessage = "Bitte eine Bilddatei (PNG / JPG) auswählen.";
+            return;
+        }
+
+        try
+        {
+            await using var stream = file.OpenReadStream(MaxSignatureBytes);
+            await using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms);
+            var bytes = ms.ToArray();
+            var base64 = Convert.ToBase64String(bytes);
+            var mime = string.IsNullOrEmpty(file.ContentType) ? "image/png" : file.ContentType;
+            _activeSignatureImage = $"data:{mime};base64,{base64}";
+            _activeSignatureFilename = file.Name;
+            _annotationMode = AnnotationMode.Signature;
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Signaturbild konnte nicht geladen werden: {ex.Message}";
+            _activeSignatureImage = null;
+            _activeSignatureFilename = null;
+        }
+    }
+
+    private void ClearActiveSignature()
+    {
+        _activeSignatureImage = null;
+        _activeSignatureFilename = null;
+        if (_annotationMode == AnnotationMode.Signature)
+        {
+            _annotationMode = AnnotationMode.Select;
+        }
+    }
+
+    private async Task PlaceSignatureAsync(MouseEventArgs e)
+    {
+        if (_activeSignatureImage is null) return;
+        if (_currentPdfId is null) return;
+
+        var fraction = await JS.InvokeAsync<NormalizedPosition?>(
+            "pageboundShortcuts.clientPositionToFraction",
+            PdfImageSelector,
+            e.ClientX,
+            e.ClientY);
+        if (fraction is null) return;
+
+        // Default-Größe: 25 % Breite, 8 % Höhe — ausreichend für eine
+        // handschriftliche Unterschrift. Klick ist Top-Left der Signatur.
+        const double width = 0.25;
+        const double height = 0.08;
+        var x = Math.Min(fraction.X, 1 - width);
+        var y = Math.Min(fraction.Y, 1 - height);
+        var signedAt = DateTimeOffset.UtcNow;
+
+        var newAnnotation = SignatureAnnotation.Create(
+            _currentPdfId.Value,
+            _currentPage,
+            _activeSignatureImage,
+            x, y, width, height,
+            signedAt,
+            integrityHash: null,
+            signer: _signer);
+
+        // Erst Annotation anlegen — damit wir eine echte ID haben.
+        var created = await Annotations.CreateAsync(newAnnotation, CancellationToken.None);
+
+        // Hash berechnen über pdfHash + Bestand vor dieser Signatur + Zeitstempel.
+        var hash = await Integrity.ComputeSignatureHashAsync(
+            _currentPdfId.Value,
+            created,
+            _annotations, // _annotations enthält noch nicht 'created'
+            signedAt,
+            CancellationToken.None);
+
+        // Hash zurück in die Signatur schreiben.
+        var withHash = SignatureAnnotation.WithIntegrityHash(created, hash);
+        var saved = await Annotations.UpdateAsync(withHash, CancellationToken.None);
+
+        _annotations = _annotations.Append(saved).ToList();
+        _signatureStatuses[saved.Id.Value] = SignatureIntegrityStatus.Valid;
+
+        // Nach Platzieren: zurück zum Select-Modus, Signatur bleibt geladen
+        // damit weitere Platzierungen mit derselben Unterschrift möglich sind.
+        _annotationMode = AnnotationMode.Select;
+    }
+
+    private async Task RecomputeSignatureStatusesAsync()
+    {
+        if (_currentPdfId is null)
+        {
+            _signatureStatuses.Clear();
+            return;
+        }
+
+        var newStatuses = new Dictionary<string, SignatureIntegrityStatus>();
+        foreach (var sig in _annotations.Where(a => a.Type == AnnotationType.Signature))
+        {
+            var status = await Integrity.VerifySignatureAsync(
+                _currentPdfId.Value,
+                sig,
+                _annotations,
+                CancellationToken.None);
+            newStatuses[sig.Id.Value] = status;
+        }
+        _signatureStatuses = newStatuses;
+    }
+
+    private async Task DeleteSignatureAsync(Annotation signature)
+    {
+        await Annotations.DeleteAsync(signature.Id, CancellationToken.None);
+        _annotations = _annotations.Where(a => a.Id.Value != signature.Id.Value).ToList();
+        _signatureStatuses.Remove(signature.Id.Value);
+        await RecomputeSignatureStatusesAsync();
+    }
+
+    private async Task LoadSignerFromStorageAsync()
+    {
+        if (_signerLoaded) return;
+        _signerLoaded = true;
+        try
+        {
+            var stored = await Storage.GetAsync<SignerInfo>(SignerStorageKey, CancellationToken.None);
+            if (stored is not null)
+            {
+                _signer = stored;
+            }
+        }
+        catch
+        {
+            // Storage nicht erreichbar — Signer bleibt leer, harmlos.
+        }
+    }
+
+    private async Task SaveSignerToStorageAsync()
+    {
+        try
+        {
+            await Storage.SetAsync(SignerStorageKey, _signer, CancellationToken.None);
+        }
+        catch
+        {
+            // Persistenz best-effort; UI bleibt funktional.
+        }
+    }
+
+    private async Task ExportSignedPdfAsync()
+    {
+        if (_originalPdfBytes is null || _currentPdfId is null) return;
+        var signatureAnnotations = _annotations
+            .Where(a => a.Type == AnnotationType.Signature)
+            .OrderBy(a => a.PageNumber)
+            .ThenBy(a => SignatureAnnotation.GetSignedAt(a))
+            .ToList();
+        if (signatureAnnotations.Count == 0) return;
+
+        _isSavingSignedPdf = true;
+        _errorMessage = null;
+
+        try
+        {
+            var embedded = signatureAnnotations.Select(a =>
+            {
+                var dataUrl = SignatureAnnotation.GetImageDataUrl(a);
+                var commaIdx = dataUrl.IndexOf(',');
+                var base64 = commaIdx >= 0 ? dataUrl[(commaIdx + 1)..] : dataUrl;
+                var bytes = Convert.FromBase64String(base64);
+                return new EmbeddedSignature(
+                    PageNumber: a.PageNumber,
+                    ImageBytes: bytes,
+                    X: SignatureAnnotation.GetX(a),
+                    Y: SignatureAnnotation.GetY(a),
+                    Width: SignatureAnnotation.GetWidth(a),
+                    Height: SignatureAnnotation.GetHeight(a),
+                    SignedAt: SignatureAnnotation.GetSignedAt(a),
+                    Signer: SignatureAnnotation.GetSigner(a),
+                    IntegrityHash: SignatureAnnotation.GetIntegrityHash(a));
+            }).ToList();
+
+            using var ms = new MemoryStream(_originalPdfBytes);
+            var signed = await Manipulator.EmbedSignaturesAsync(ms, embedded, CancellationToken.None);
+
+            var baseName = !string.IsNullOrWhiteSpace(_currentFilename)
+                ? System.IO.Path.GetFileNameWithoutExtension(_currentFilename)
+                : (_handle?.Title ?? "pagebound");
+            var safeBase = string.Concat(baseName.Select(c =>
+                char.IsLetterOrDigit(c) || c is '_' or '-' or '.' or ' ' ? c : '_'));
+            var downloadName = $"{safeBase}_signed.pdf";
+
+            var b64 = Convert.ToBase64String(signed);
+            await JS.InvokeVoidAsync(
+                "pageboundShortcuts.downloadBytes",
+                downloadName,
+                b64,
+                "application/pdf");
+        }
+        catch (Exception ex)
+        {
+            // Volle Diagnose in die UI rendern, weil TargetInvocationException
+            // bei JS-Interop-Rückgabewegen die echte Exception oft verschluckt.
+            var details = new System.Text.StringBuilder();
+            var walker = ex;
+            while (walker is not null)
+            {
+                details.AppendLine($"{walker.GetType().FullName}: {walker.Message}");
+                walker = walker.InnerException;
+            }
+            _errorMessage = $"Signiertes PDF konnte nicht erzeugt werden:\n{details}";
+            try
+            {
+                await JS.InvokeVoidAsync("console.error", "[Pagebound] sign-pdf failed", ex.ToString());
+            }
+            catch
+            {
+                // Konsole nicht verfügbar — Fehler steht eh in der UI.
+            }
+        }
+        finally
+        {
+            _isSavingSignedPdf = false;
+        }
+    }
+
+    // „Annotationen einbrennen": brennt ALLE Sidecar-Annotationen (Highlights,
+    // Notizen, Ink, Formen, Signaturen) fest in die PDF-Bytes und lädt das
+    // Ergebnis als <name>.flach.pdf herunter. Die Sidecar/Originaldatei bleibt
+    // unangetastet — das Ergebnis ist eine eigenständige, „flache" PDF.
+    private async Task FlattenAnnotationsAsync()
+    {
+        if (_originalPdfBytes is null || _annotations.Count == 0 || _isFlattening) return;
+
+        _isFlattening = true;
+        _errorMessage = null;
+        try
+        {
+            using var ms = new MemoryStream(_originalPdfBytes);
+            var flattened = await Manipulator.FlattenAnnotationsAsync(ms, _annotations, CancellationToken.None);
+
+            var baseName = !string.IsNullOrWhiteSpace(_currentFilename)
+                ? System.IO.Path.GetFileNameWithoutExtension(_currentFilename)
+                : (_handle?.Title ?? "pagebound");
+            var safeBase = string.Concat(baseName.Select(c =>
+                char.IsLetterOrDigit(c) || c is '_' or '-' or '.' or ' ' ? c : '_'));
+
+            await JS.InvokeVoidAsync(
+                "pageboundShortcuts.downloadBytes",
+                $"{safeBase}.flach.pdf",
+                Convert.ToBase64String(flattened),
+                "application/pdf");
+        }
+        catch (Exception ex)
+        {
+            var details = new System.Text.StringBuilder();
+            var walker = ex;
+            while (walker is not null)
+            {
+                details.AppendLine($"{walker.GetType().FullName}: {walker.Message}");
+                walker = walker.InnerException;
+            }
+            _errorMessage = $"Annotationen konnten nicht eingebrannt werden:\n{details}";
+        }
+        finally
+        {
+            _isFlattening = false;
+        }
+    }
+
+    private async Task HandleSignatureMouseDownAsync(MouseEventArgs e, Annotation signature)
+    {
+        if (_dotNetRef is null) return;
+        // Linke Maustaste nur; ohne diese Prüfung würde Rechtsklick auch
+        // einen Drag-Listener registrieren.
+        if (e.Button != 0) return;
+        try
+        {
+            await JS.InvokeVoidAsync(
+                "pageboundShortcuts.dragElementToFraction",
+                $"[data-pb-signature-id=\"{signature.Id.Value}\"]",
+                PageCanvasSelector,
+                e.ClientX,
+                e.ClientY,
+                _dotNetRef,
+                nameof(HandleSignatureDragCompleteAsync),
+                signature.Id.Value);
+        }
+        catch (JSException)
+        {
+            // Bridge nicht erreichbar — Drag wird einfach nicht starten.
+        }
+    }
+
+    private async Task HandleSignatureResizeMouseDownAsync(MouseEventArgs e, Annotation signature)
+    {
+        if (_dotNetRef is null) return;
+        if (e.Button != 0) return;
+        try
+        {
+            await JS.InvokeVoidAsync(
+                "pageboundShortcuts.resizeElementToFraction",
+                $"[data-pb-signature-id=\"{signature.Id.Value}\"]",
+                PageCanvasSelector,
+                e.ClientX,
+                e.ClientY,
+                0.05, // minWidth
+                0.02, // minHeight
+                _dotNetRef,
+                nameof(HandleSignatureResizeCompleteAsync),
+                signature.Id.Value);
+        }
+        catch (JSException)
+        {
+            // Bridge nicht erreichbar — Resize wird einfach nicht starten.
+        }
+    }
+
+    [JSInvokable]
+    public async Task HandleSignatureResizeCompleteAsync(string signatureId, double newWidth, double newHeight)
+    {
+        var signature = _annotations.FirstOrDefault(a =>
+            a.Id.Value == signatureId && a.Type == AnnotationType.Signature);
+        if (signature is null) return;
+
+        var currentW = SignatureAnnotation.GetWidth(signature);
+        var currentH = SignatureAnnotation.GetHeight(signature);
+        if (Math.Abs(currentW - newWidth) < 0.0005 && Math.Abs(currentH - newHeight) < 0.0005)
+        {
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
+        var payload = signature.Payload.ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
+        payload[SignatureAnnotation.PayloadKeyWidth] = newWidth;
+        payload[SignatureAnnotation.PayloadKeyHeight] = newHeight;
+        var updated = signature with
+        {
+            UpdatedAt = DateTimeOffset.UtcNow,
+            Payload = payload
+        };
+        var saved = await Annotations.UpdateAsync(updated, CancellationToken.None);
+        _annotations = _annotations.Select(a => a.Id.Value == saved.Id.Value ? saved : a).ToList();
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    [JSInvokable]
+    public async Task HandleSignatureDragCompleteAsync(string signatureId, double newX, double newY)
+    {
+        var signature = _annotations.FirstOrDefault(a =>
+            a.Id.Value == signatureId && a.Type == AnnotationType.Signature);
+        if (signature is null) return;
+
+        var currentX = SignatureAnnotation.GetX(signature);
+        var currentY = SignatureAnnotation.GetY(signature);
+        // Wenn sich die Position effektiv nicht geändert hat (Klick ohne Bewegung),
+        // sparen wir uns die Persistenz.
+        if (Math.Abs(currentX - newX) < 0.0005 && Math.Abs(currentY - newY) < 0.0005)
+        {
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
+        // Position-Update — Hash bleibt valid, weil Signaturen sich gegenseitig
+        // im Canonical-String nicht enthalten (siehe IntegrityService).
+        var payload = signature.Payload.ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
+        payload[SignatureAnnotation.PayloadKeyX] = newX;
+        payload[SignatureAnnotation.PayloadKeyY] = newY;
+        var updated = signature with
+        {
+            UpdatedAt = DateTimeOffset.UtcNow,
+            Payload = payload
+        };
+        var saved = await Annotations.UpdateAsync(updated, CancellationToken.None);
+        _annotations = _annotations.Select(a => a.Id.Value == saved.Id.Value ? saved : a).ToList();
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    // --- Markdown-Export (FA-080, FA-081, FA-082) ---------------------------
+
+    private async Task ExportMarkdownAsync()
+    {
+        if (_currentPdfId is null || _handle is null) return;
+        if (_isExporting) return;
+
+        _isExporting = true;
+        _errorMessage = null;
+        try
+        {
+            var options = new MarkdownExportOptions(
+                Title: _handle.Title,
+                SourceFilename: _currentFilename,
+                PageCount: _handle.PageCount,
+                IncludeHighlights: true,
+                IncludeNotes: true,
+                IncludeYamlFrontmatter: true,
+                UseWikilinks: true);
+
+            var content = await MarkdownExporter.ExportAsync(
+                _currentPdfId.Value,
+                options,
+                CancellationToken.None);
+
+            var baseName = !string.IsNullOrWhiteSpace(_currentFilename)
+                ? System.IO.Path.GetFileNameWithoutExtension(_currentFilename)
+                : (_handle.Title ?? "pagebound-export");
+            // Auf Safe-Zeichen reduzieren, damit der Browser-Download-Dialog
+            // den Vorschlag nicht heimlich umbenennt.
+            var safeBase = string.Concat(baseName.Select(c =>
+                char.IsLetterOrDigit(c) || c is '_' or '-' or '.' or ' ' ? c : '_'));
+            var downloadFilename = $"{safeBase}.md";
+
+            await JS.InvokeVoidAsync(
+                "pageboundShortcuts.downloadFile",
+                downloadFilename,
+                content,
+                "text/markdown");
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Markdown-Export fehlgeschlagen: {ex.Message}";
+        }
+        finally
+        {
+            _isExporting = false;
+        }
+    }
+
+    // --- Sidecar Export/Import (FA-070, FA-071, FA-073) ---------------------
+
+    private async Task ExportSidecarAsync()
+    {
+        if (_currentPdfId is null || _handle is null || _isExportingSidecar) return;
+        _isExportingSidecar = true;
+        _sidecarStatus = null;
+        try
+        {
+            var json = await BuildCurrentSidecarJsonAsync().ConfigureAwait(false);
+            if (json is null) return;
+            var sidecarFilename = BuildSidecarFilename(_currentFilename);
+            await JS.InvokeVoidAsync(
+                "pageboundShortcuts.downloadFile",
+                sidecarFilename,
+                json,
+                "application/json");
+        }
+        catch (Exception ex)
+        {
+            _sidecarStatus = L.T("reader.sidecar.importError",
+                new Dictionary<string, object> { ["message"] = ex.Message });
+            _sidecarStatusIsError = true;
+        }
+        finally
+        {
+            _isExportingSidecar = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    /// <summary>
+    /// Baut das Sidecar-JSON für die aktuell offene PDF (Annotationen + Meta).
+    /// Gemeinsam genutzt von Download-Export und Workspace-Speichern. Null, wenn
+    /// keine PDF offen ist.
+    /// </summary>
+    private async Task<string?> BuildCurrentSidecarJsonAsync()
+    {
+        if (_currentPdfId is null || _handle is null) return null;
+        var meta = new PdfMeta(
+            Filename: _currentFilename ?? "document.pdf",
+            FileHashSha256: _currentPdfId.Value.Value,
+            FileSize: _originalPdfBytes?.LongLength ?? 0,
+            PageCount: _handle.PageCount);
+        var template = await Sidecar.CreateNewAsync(_currentFilename ?? string.Empty, meta, CancellationToken.None)
+            .ConfigureAwait(false);
+        var withAnnotations = template with
+        {
+            UpdatedAt = DateTimeOffset.UtcNow,
+            Annotations = _annotations.ToList()
+        };
+        return await Sidecar.SerializeAsync(withAnnotations, CancellationToken.None).ConfigureAwait(false);
+    }
+
+    /// <summary>FA-072: das aktuelle Sidecar in den zentralen Workspace schreiben.</summary>
+    private async Task SaveToWorkspaceAsync()
+    {
+        if (_currentPdfId is null || _isSavingToWorkspace) return;
+        _isSavingToWorkspace = true;
+        _sidecarStatus = null;
+        try
+        {
+            var json = await BuildCurrentSidecarJsonAsync().ConfigureAwait(false);
+            if (json is null) return;
+            var ok = await Workspace.SaveSidecarAsync(_currentPdfId.Value.Value, json, CancellationToken.None)
+                .ConfigureAwait(false);
+            _sidecarStatus = ok
+                ? L.T("reader.workspace.saved", new Dictionary<string, object> { ["folder"] = _workspaceName ?? "" })
+                : L.T("reader.workspace.saveFailed");
+            _sidecarStatusIsError = !ok;
+        }
+        catch (Exception ex)
+        {
+            _sidecarStatus = L.T("reader.sidecar.importError",
+                new Dictionary<string, object> { ["message"] = ex.Message });
+            _sidecarStatusIsError = true;
+        }
+        finally
+        {
+            _isSavingToWorkspace = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    /// <summary>
+    /// Parst ein Sidecar-JSON und führt dessen Annotationen zusammen — überspringt
+    /// solche, deren Id bereits vorhanden ist, sodass das Workspace-Auto-Load beim
+    /// Wieder-Öffnen keine Duplikate erzeugt. Gibt die Anzahl neu übernommener
+    /// Annotationen zurück.
+    /// </summary>
+    private async Task<int> MergeSidecarJsonAsync(string json)
+    {
+        if (_currentPdfId is null || string.IsNullOrWhiteSpace(json)) return 0;
+        await using var ms = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(json));
+        var parsed = await Sidecar.ParseAsync(ms, CancellationToken.None).ConfigureAwait(false);
+        if (parsed is null) return 0;
+        var migration = await Sidecar.MigrateAsync(parsed, CancellationToken.None).ConfigureAwait(false);
+        var sidecar = migration.Result;
+        var pdfId = _currentPdfId.Value;
+        var existingIds = _annotations.Select(a => a.Id.Value).ToHashSet();
+        var added = new List<Annotation>();
+        foreach (var imported in sidecar.Annotations)
+        {
+            if (existingIds.Contains(imported.Id.Value)) continue;
+            var fresh = await Annotations.CreateAsync(
+                new NewAnnotation(pdfId, imported.Type, imported.PageNumber, imported.Payload),
+                CancellationToken.None).ConfigureAwait(false);
+            added.Add(fresh);
+        }
+        if (added.Count > 0) _annotations = _annotations.Concat(added).ToList();
+        return added.Count;
+    }
+
+    private static string BuildSidecarFilename(string? pdfFilename)
+    {
+        var baseName = string.IsNullOrWhiteSpace(pdfFilename) ? "document" : pdfFilename;
+        if (baseName.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
+        {
+            baseName = baseName.Substring(0, baseName.Length - 4);
+        }
+        // Defensive: gleicher Safe-Zeichensatz wie beim Markdown-Export.
+        var safeBase = string.Concat(baseName.Select(c =>
+            char.IsLetterOrDigit(c) || c is '_' or '-' or '.' or ' ' ? c : '_'));
+        return $"{safeBase}.pagebound.json";
+    }
+
+    private async Task HandleSidecarFileSelectedAsync(InputFileChangeEventArgs e)
+    {
+        if (_currentPdfId is null) return;
+        var file = e.File;
+        if (file is null) return;
+        _sidecarStatus = null;
+
+        try
+        {
+            const long maxBytes = 50L * 1024 * 1024; // 50 MB hardcap für JSON
+            await using var stream = file.OpenReadStream(maxBytes);
+            await using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms).ConfigureAwait(false);
+            ms.Position = 0;
+
+            var parsed = await Sidecar.ParseAsync(ms, CancellationToken.None).ConfigureAwait(false);
+            if (parsed is null)
+            {
+                _sidecarStatus = L.T("reader.sidecar.importError",
+                    new Dictionary<string, object> { ["message"] = "JSON nicht parsebar oder kein Sidecar-Format" });
+                _sidecarStatusIsError = true;
+                return;
+            }
+
+            var migration = await Sidecar.MigrateAsync(parsed, CancellationToken.None).ConfigureAwait(false);
+            var sidecar = migration.Result;
+
+            // Hash-Mismatch macht den Import nicht ungültig (User könnte z.B.
+            // dieselbe PDF nur leicht modifiziert haben), aber wir warnen
+            // sichtbar in der Status-Box.
+            var wrongPdf = !string.Equals(
+                sidecar.PdfMeta.FileHashSha256,
+                _currentPdfId.Value.Value,
+                StringComparison.OrdinalIgnoreCase);
+
+            var pdfId = _currentPdfId.Value;
+            var existingIds = _annotations.Select(a => a.Id.Value).ToHashSet();
+            var newAnnotations = new List<Annotation>();
+            foreach (var imported in sidecar.Annotations)
+            {
+                // Sidecar-Annotation gehört eigentlich zu einer anderen pdfId.
+                // Wir nehmen Type/Page/Payload und erzeugen darauf eine frische
+                // Annotation im AnnotationService (frische Id, korrekte pdfId,
+                // sofortige Persistenz via IndexedDB).
+                if (existingIds.Contains(imported.Id.Value)) continue;
+                var fresh = await Annotations.CreateAsync(
+                    new NewAnnotation(pdfId, imported.Type, imported.PageNumber, imported.Payload),
+                    CancellationToken.None).ConfigureAwait(false);
+                newAnnotations.Add(fresh);
+            }
+            _annotations = _annotations.Concat(newAnnotations).ToList();
+
+            _sidecarStatus = wrongPdf
+                ? $"{L.T("reader.sidecar.wrongPdf")} — {L.T("reader.sidecar.imported", new Dictionary<string, object> { ["added"] = newAnnotations.Count, ["filename"] = file.Name })}"
+                : L.T("reader.sidecar.imported",
+                    new Dictionary<string, object> { ["added"] = newAnnotations.Count, ["filename"] = file.Name });
+            _sidecarStatusIsError = wrongPdf;
+        }
+        catch (Exception ex)
+        {
+            _sidecarStatus = L.T("reader.sidecar.importError",
+                new Dictionary<string, object> { ["message"] = ex.Message });
+            _sidecarStatusIsError = true;
+        }
+        finally
+        {
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    // --- Text-Highlight (FA-010 + FA-018 Inline-Toolbar) --------------------
+
+    private async Task HandleCanvasMouseUpAsync(MouseEventArgs e)
+    {
+        // Im Sticky-Note-Modus übernimmt der img-Click-Handler;
+        // außerdem wollen wir keine Selection-Toolbar, wenn der Editor offen ist.
+        if (_annotationMode != AnnotationMode.Select) return;
+        if (_editingAnnotation is not null) return;
+        if (_currentPdfId is null) return;
+
+        var selection = await JS.InvokeAsync<SelectionDto?>(
+            "pageboundShortcuts.getCurrentTextSelection",
+            PageCanvasSelector);
+
+        if (selection is null || selection.Rects.Count == 0 || string.IsNullOrWhiteSpace(selection.Text))
+        {
+            _pendingSelection = null;
+            return;
+        }
+        _pendingSelection = selection;
+    }
+
+    private async Task HighlightPendingSelectionAsync(string color)
+    {
+        if (_pendingSelection is null) return;
+        if (_currentPdfId is null) return;
+
+        var newAnnotation = HighlightAnnotation.Create(
+            _currentPdfId.Value,
+            _currentPage,
+            _pendingSelection.Rects,
+            _pendingSelection.Text,
+            color);
+
+        var saved = await Annotations.CreateAsync(newAnnotation, CancellationToken.None);
+        _annotations = _annotations.Append(saved).ToList();
+        _pendingSelection = null;
+
+        // Browser-Selection aufheben, damit die Toolbar sicher verschwindet
+        // und der Highlight optisch im Vordergrund stehen kann.
+        try
+        {
+            await JS.InvokeVoidAsync("pageboundShortcuts.clearSelection");
+        }
+        catch (JSException)
+        {
+            // Ignorieren, harmlose Edge-Case bei sehr früher Tab-Disposal.
+        }
+
+        await RecomputeSignatureStatusesAsync();
+    }
+
+    private void DismissSelection()
+    {
+        _pendingSelection = null;
+    }
+
+    private void OpenHighlightEditor(Annotation highlight)
+    {
+        _editingHighlight = highlight;
+    }
+
+    private void CancelHighlightEditing()
+    {
+        _editingHighlight = null;
+    }
+
+    private async Task ChangeHighlightColorAsync(string color)
+    {
+        if (_editingHighlight is null) return;
+        var updated = HighlightAnnotation.WithColor(_editingHighlight, color);
+        var saved = await Annotations.UpdateAsync(updated, CancellationToken.None);
+        _annotations = _annotations
+            .Select(a => a.Id.Value == saved.Id.Value ? saved : a)
+            .ToList();
+        _editingHighlight = saved;
+    }
+
+    private async Task DeleteEditingHighlightAsync()
+    {
+        if (_editingHighlight is null) return;
+        var id = _editingHighlight.Id;
+        await Annotations.DeleteAsync(id, CancellationToken.None);
+        _annotations = _annotations.Where(a => a.Id.Value != id.Value).ToList();
+        _editingHighlight = null;
+        await RecomputeSignatureStatusesAsync();
+    }
+
+    // --- Tastatur-Shortcuts -------------------------------------------------
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            if (!_shortcutsRegistered)
+            {
+                _dotNetRef = DotNetObjectReference.Create(this);
+                try
+                {
+                    await JS.InvokeVoidAsync($"{ShortcutsJs}.register", _dotNetRef);
+                    _shortcutsRegistered = true;
+                }
+                catch (JSException)
+                {
+                    // shortcuts-bridge.js noch nicht geparsed — bei einem späteren
+                    // Render-Zyklus erneut versuchen.
+                    _dotNetRef.Dispose();
+                    _dotNetRef = null;
+                }
+            }
+
+            await LoadSignerFromStorageAsync();
+            StateHasChanged();
+        }
+
+        // Drawing-Capture (FA-013/014): Page-Wechsel rendert das Canvas neu —
+        // unsere pointer-Listener leben aber auf dem alten DOM-Element. Wenn ein
+        // Zeichenmodus aktiv ist und die Page wechselte, JS-Capture neu attachen.
+        if (IsDrawingMode(_annotationMode) && _captureAttachedToPage != _currentPage)
+        {
+            await SyncDrawingCaptureAsync();
+        }
+    }
+
+    [JSInvokable]
+    public async Task HandleShortcut(string shortcut)
+    {
+        switch (shortcut)
+        {
+            case "page-prev":
+                await PreviousPage();
+                break;
+            case "page-next":
+                await NextPage();
+                break;
+            case "page-first":
+                if (_handle is not null) await GoToPageAsync(1);
+                break;
+            case "page-last":
+                if (_handle is not null) await GoToPageAsync(_handle.PageCount);
+                break;
+            case "focus-search":
+                if (_handle is not null)
+                {
+                    await JS.InvokeVoidAsync($"{ShortcutsJs}.focusElement", SearchInputSelector);
+                }
+                break;
+            case "clear-search":
+                if (_pendingSelection is not null)
+                {
+                    _pendingSelection = null;
+                }
+                else if (_editingHighlight is not null)
+                {
+                    _editingHighlight = null;
+                }
+                else if (_searchHits is not null || !string.IsNullOrEmpty(_searchQuery))
+                {
+                    ClearSearchState();
+                }
+                break;
+            case "zoom-in":
+                await StepZoom(+1);
+                break;
+            case "zoom-out":
+                await StepZoom(-1);
+                break;
+            case "zoom-reset":
+                await SetZoom(1.0);
+                break;
+        }
+
+        // Blazor rendert nach JSInvokable-Methoden nicht automatisch — wir
+        // triggern einen Re-Render, damit UI-Zustand sichtbar wird.
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task StepZoom(int direction)
+    {
+        var currentIdx = Array.FindIndex(_zoomLevels, z => Math.Abs(z - _zoomFactor) < 0.001);
+        if (currentIdx < 0)
+        {
+            // Aktueller Faktor liegt nicht auf einer Stufe → finde nächstgelegene.
+            currentIdx = Array.FindIndex(_zoomLevels, z => z >= _zoomFactor);
+            if (currentIdx < 0) currentIdx = _zoomLevels.Length - 1;
+        }
+        var nextIdx = Math.Clamp(currentIdx + direction, 0, _zoomLevels.Length - 1);
+        if (nextIdx == currentIdx) return;
+        await SetZoom(_zoomLevels[nextIdx]);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_shortcutsRegistered)
+        {
+            try
+            {
+                await JS.InvokeVoidAsync($"{ShortcutsJs}.unregister");
+            }
+            catch (JSDisconnectedException)
+            {
+                // Browser-Circuit ist weg, ignorieren.
+            }
+            catch (JSException)
+            {
+                // Bridge möglicherweise nicht mehr geladen.
+            }
+            _shortcutsRegistered = false;
+        }
+        _dotNetRef?.Dispose();
+        _dotNetRef = null;
+
+        if (_handle is not null)
+        {
+            try
+            {
+                await Renderer.UnloadAsync(_handle);
+            }
+            catch
+            {
+                // Page wird entladen; ignoriere Cleanup-Fehler.
+            }
+            _handle = null;
+        }
+    }
+}

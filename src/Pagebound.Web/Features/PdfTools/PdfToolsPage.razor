@@ -1,0 +1,1061 @@
+@page "/tools"
+@using System.Globalization
+@using Microsoft.AspNetCore.Components.Forms
+@using Microsoft.JSInterop
+@inject IPdfRenderer Renderer
+@inject IPdfManipulator Manipulator
+@inject IImageToPdfConverter ImageConverter
+@inject IPdfConverter Converter
+@inject ILocalizationService L
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+<PageTitle>@L.T("tools.pageTitle")</PageTitle>
+
+<section class="mx-auto max-w-[1800px] px-4 sm:px-6 lg:px-8 py-8">
+    <header class="max-w-4xl mx-auto masthead-pg">
+        <div class="folio-line">
+            <span>@L.T("home.ed.local")</span><span class="sep">·</span>
+            <span>@L.T("tools.folio.noUpload")</span>
+        </div>
+        <h1 class="page-title">@L.T("tools.heading")</h1>
+        <p class="standfirst">@L.T("tools.subheading")</p>
+    </header>
+
+    <div class="max-w-4xl mx-auto rounded-lg pb-glass p-4">
+        <label class="flex flex-col gap-2 text-sm">
+            <span class="font-medium">@L.T("tools.choosePdf")</span>
+            <InputFile OnChange="HandleFileSelectedAsync"
+                       accept=".pdf"
+                       class="block text-sm file:mr-3 file:rounded file:border-0 file:bg-pb-accent file:px-3 file:py-1.5 file:font-semibold file:text-[var(--accent-ink)] file:cursor-pointer cursor-pointer" />
+        </label>
+        @if (_errorMessage is not null)
+        {
+            <div class="mt-3 rounded border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
+                @_errorMessage
+            </div>
+        }
+        @if (_isLoading)
+        {
+            <div class="mt-3 text-sm text-pb-fg-muted" aria-live="polite">@L.T("app.loadingShort")</div>
+        }
+        @if (_handle is not null)
+        {
+            <div class="mt-3 flex items-center gap-3 text-sm text-pb-fg-muted">
+                <span><span class="font-medium text-pb-fg">@(_currentFilename ?? L.T("tools.fallbackFilename"))</span> · @_handle.PageCount @L.T("tools.pages")</span>
+                @if (_thumbnailProgress < _handle.PageCount)
+                {
+                    <span class="text-xs">@L.T("tools.thumbnails.progress", new Dictionary<string, object> { ["current"] = _thumbnailProgress, ["total"] = _handle.PageCount })</span>
+                    <div class="flex-1 h-1 bg-pb-bg rounded overflow-hidden max-w-xs">
+                        <div class="h-full bg-pb-accent transition-all"
+                             style="@($"width:{(_thumbnailProgress * 100.0 / _handle.PageCount).ToString("F1", CultureInfo.InvariantCulture)}%")"></div>
+                    </div>
+                }
+            </div>
+        }
+    </div>
+
+    @* Bilder → PDF (FA-025) — eigenständige Erstellung, unabhängig von einer geladenen PDF. *@
+    <div class="max-w-4xl mx-auto mt-4 rounded-lg pb-glass p-4">
+        <div class="flex items-center justify-between gap-3">
+            <span class="font-medium text-sm">@L.T("tools.img2pdf.heading")</span>
+            <label class="btn primary cursor-pointer">
+                @L.T("tools.img2pdf.choose")
+                <InputFile OnChange="HandleImagesSelectedAsync"
+                           accept="image/png,image/jpeg"
+                           multiple
+                           class="hidden" />
+            </label>
+        </div>
+        <p class="mt-1 text-xs text-pb-fg-muted">@L.T("tools.img2pdf.hint")</p>
+
+        @if (_images.Count > 0)
+        {
+            <div class="mt-3 flex items-center gap-2 text-sm flex-wrap">
+                <span class="text-pb-fg-muted">@L.T("tools.img2pdf.pageSize")</span>
+                @foreach (var mode in ImagePageSizeModes)
+                {
+                    var m = mode;
+                    var active = _imgPageSize == m.Mode;
+                    <button type="button"
+                            class="@($"rounded border px-2 py-0.5 text-xs {(active ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted hover:text-pb-fg")}")"
+                            @onclick="@(() => _imgPageSize = m.Mode)">
+                        @L.T(m.LabelKey)
+                    </button>
+                }
+                <button type="button"
+                        class="btn primary sm ml-auto disabled:opacity-40"
+                        disabled="@_isBuildingImagesPdf"
+                        @onclick="BuildImagesPdfAsync">
+                    @(_isBuildingImagesPdf
+                        ? L.T("tools.img2pdf.building")
+                        : L.T("tools.img2pdf.build", new Dictionary<string, object> { ["count"] = _images.Count }))
+                </button>
+                <button type="button"
+                        class="text-xs text-pb-fg-muted hover:text-pb-fg"
+                        @onclick="@(() => _images.Clear())">
+                    @L.T("tools.img2pdf.clear")
+                </button>
+            </div>
+
+            <ul class="mt-3 grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-3">
+                @for (var i = 0; i < _images.Count; i++)
+                {
+                    var idx = i;
+                    var image = _images[idx];
+                    <li draggable="true"
+                        class="relative rounded border border-pb-border bg-pb-surface p-1 cursor-move"
+                        @ondragstart="@(() => _dragIndex = idx)"
+                        @ondragover:preventDefault="true"
+                        @ondrop="@(() => OnImageDrop(idx))"
+                        title="@image.Name">
+                        <div class="aspect-[3/4] flex items-center justify-center bg-pb-bg rounded overflow-hidden">
+                            <img src="@image.DataUrl" alt="@image.Name" draggable="false" class="max-w-full max-h-full" />
+                        </div>
+                        <div class="mt-1 flex items-center justify-between text-xs">
+                            <span class="text-pb-fg-muted tabular-nums">@(idx + 1)</span>
+                            <button type="button"
+                                    class="text-pb-fg-muted hover:text-red-400"
+                                    @onclick="@(() => _images.RemoveAt(idx))"
+                                    @onclick:stopPropagation
+                                    aria-label="@L.T("tools.img2pdf.remove")">✕</button>
+                        </div>
+                    </li>
+                }
+            </ul>
+
+            @if (_imgStatus is not null)
+            {
+                <div class="mt-3 rounded border border-green-300/40 bg-green-50/10 px-3 py-2 text-sm text-pb-fg">
+                    @_imgStatus
+                    <button type="button" class="float-right text-pb-fg-muted hover:text-pb-fg"
+                            @onclick="@(() => _imgStatus = null)" aria-label="@L.T("common.close")">✕</button>
+                </div>
+            }
+        }
+    </div>
+
+    @if (_handle is not null && _pages.Count > 0)
+    {
+        <div class="max-w-4xl mx-auto mt-4 rounded-lg pb-glass p-3 flex flex-wrap items-center gap-2 text-sm">
+            <span class="text-pb-fg-muted">@L.T("tools.selection.label")</span>
+            <button type="button"
+                    class="rounded border border-pb-border px-2 py-0.5 text-pb-fg-muted hover:text-pb-fg"
+                    @onclick="SelectAll">@L.T("tools.selection.all")</button>
+            <button type="button"
+                    class="rounded border border-pb-border px-2 py-0.5 text-pb-fg-muted hover:text-pb-fg"
+                    @onclick="DeselectAll">@L.T("tools.selection.none")</button>
+            <span class="text-xs text-pb-fg-muted">@L.T("tools.selection.count", new Dictionary<string, object> { ["selected"] = SelectedCount, ["total"] = _pages.Count(p => !p.Deleted) })</span>
+
+            <span class="ml-3 text-pb-fg-muted">@L.T("tools.action.label")</span>
+            <button type="button"
+                    class="rounded border border-pb-border bg-pb-bg px-2 py-0.5 hover:bg-pb-surface disabled:opacity-40"
+                    disabled="@(SelectedCount == 0)"
+                    @onclick="@(() => RotateSelected(-90))"
+                    title="@L.T("tools.action.rotateCcwTitle")">
+                @L.T("tools.action.rotateCcw")
+            </button>
+            <button type="button"
+                    class="rounded border border-pb-border bg-pb-bg px-2 py-0.5 hover:bg-pb-surface disabled:opacity-40"
+                    disabled="@(SelectedCount == 0)"
+                    @onclick="@(() => RotateSelected(90))"
+                    title="@L.T("tools.action.rotateCwTitle")">
+                @L.T("tools.action.rotateCw")
+            </button>
+            <button type="button"
+                    class="rounded border border-red-300/40 px-2 py-0.5 text-red-400 hover:bg-red-50/10 disabled:opacity-40"
+                    disabled="@(SelectedCount == 0 || SelectedCount == _pages.Count(p => !p.Deleted))"
+                    @onclick="DeleteSelected"
+                    title="@L.T("tools.action.deleteTitle")">
+                @L.T("tools.action.delete")
+            </button>
+
+            <label class="rounded border border-pb-border bg-pb-bg px-2 py-0.5 text-pb-fg-muted hover:text-pb-fg cursor-pointer @(HasPendingEdits ? "opacity-40 cursor-not-allowed" : "")"
+                   title="@(HasPendingEdits ? L.T("tools.action.appendBlockedTitle") : L.T("tools.action.appendTitle"))">
+                @L.T("tools.action.append")
+                <InputFile OnChange="HandleAppendFileAsync"
+                           accept=".pdf"
+                           disabled="@HasPendingEdits"
+                           class="hidden" />
+            </label>
+
+            @if (SplitPointCount > 0)
+            {
+                <span class="text-xs rounded bg-pb-accent/15 px-2 py-0.5 text-pb-accent">
+                    @L.T("tools.split.summary", new Dictionary<string, object> { ["count"] = SplitPointCount, ["parts"] = SplitPointCount + 1 })
+                </span>
+                <button type="button"
+                        class="text-xs text-pb-fg-muted hover:text-pb-fg"
+                        @onclick="ResetSplitPoints">
+                    @L.T("tools.split.reset")
+                </button>
+            }
+
+            <button type="button"
+                    class="btn primary sm ml-auto disabled:opacity-40"
+                    disabled="@(_isSaving || !HasChanges)"
+                    @onclick="SaveAsync"
+                    title="@(HasChanges ? L.T("tools.save.title") : L.T("tools.save.noChangesTitle"))">
+                @(_isSaving
+                    ? L.T("common.savingProgress")
+                    : SplitPointCount > 0
+                        ? L.T("tools.save.changesWithParts", new Dictionary<string, object> { ["parts"] = SplitPointCount + 1 })
+                        : L.T("tools.save.changes"))
+            </button>
+        </div>
+
+        @* Compress-Bar (FA-026) — eigene Reihe weil destruktiv (verliert Vektor-Text)
+           und unabhängig von den Pages-Edits oben. *@
+        <div class="max-w-4xl mx-auto mt-2 rounded-lg pb-glass p-3 flex flex-wrap items-center gap-2 text-sm">
+            <span class="text-pb-fg-muted">@L.T("tools.compress.label")</span>
+            @foreach (var preset in CompressionPresets)
+            {
+                var p = preset;
+                var isActive = _compressQuality == p.Quality;
+                <button type="button"
+                        class="@($"rounded border px-2 py-0.5 text-xs {(isActive ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted hover:text-pb-fg")}")"
+                        @onclick="@(() => _compressQuality = p.Quality)">
+                    @L.T(p.LabelKey)
+                </button>
+            }
+            <button type="button"
+                    class="ml-auto rounded border border-pb-border bg-pb-bg px-3 py-1 text-pb-fg-muted hover:text-pb-fg disabled:opacity-40"
+                    disabled="@(_isCompressing || _handle is null)"
+                    title="@L.T("tools.compress.title")"
+                    @onclick="CompressAsync">
+                @(_isCompressing ? L.T("tools.compress.running") : L.T("tools.compress.button"))
+            </button>
+        </div>
+
+        @if (_compressionResult is not null)
+        {
+            <div class="max-w-4xl mx-auto mt-2 rounded border border-green-300/40 bg-green-50/10 px-3 py-2 text-sm text-pb-fg">
+                @_compressionResult
+                <button type="button"
+                        class="float-right text-pb-fg-muted hover:text-pb-fg"
+                        @onclick="@(() => _compressionResult = null)"
+                        aria-label="@L.T("common.close")">✕</button>
+            </div>
+        }
+
+        @* Encrypt-Bar (FA-027) — bis zum WASM-Perf-Umbau (WebCrypto/qpdf) ausgeblendet. *@
+        @if (EncryptionUiEnabled)
+        {
+        <div class="max-w-4xl mx-auto mt-2 rounded-lg pb-glass p-3 flex flex-wrap items-center gap-2 text-sm">
+            <span class="text-pb-fg-muted">@L.T("tools.encrypt.label")</span>
+            <input type="password"
+                   @bind="_encryptPassword"
+                   @bind:event="oninput"
+                   class="flex-1 min-w-[12rem] rounded border border-pb-border bg-pb-bg px-3 py-1.5 text-sm"
+                   placeholder="@L.T("tools.encrypt.placeholder")"
+                   autocomplete="new-password"
+                   aria-label="@L.T("tools.encrypt.label")" />
+            <button type="button"
+                    class="ml-auto rounded border border-pb-border bg-pb-bg px-3 py-1 text-pb-fg-muted hover:text-pb-fg disabled:opacity-40"
+                    disabled="@(_isEncrypting || _handle is null || string.IsNullOrEmpty(_encryptPassword))"
+                    title="@L.T("tools.encrypt.title")"
+                    @onclick="EncryptPdfAsync">
+                @(_isEncrypting ? L.T("tools.encrypt.running") : L.T("tools.encrypt.button"))
+            </button>
+        </div>
+        @if (_encryptStatus is not null)
+        {
+            <div class="max-w-4xl mx-auto mt-2 rounded border border-green-300/40 bg-green-50/10 px-3 py-2 text-sm text-pb-fg">
+                @_encryptStatus
+                <button type="button"
+                        class="float-right text-pb-fg-muted hover:text-pb-fg"
+                        @onclick="@(() => _encryptStatus = null)"
+                        aria-label="@L.T("common.close")">✕</button>
+            </div>
+        }
+        <p class="max-w-4xl mx-auto mt-1 text-xs text-pb-fg-muted">@L.T("tools.encrypt.note")</p>
+        }
+
+        @* Konvertieren (FA-030 PNG/JPG, FA-031 Text, FA-032 HTML) *@
+        <div class="max-w-4xl mx-auto mt-2 rounded-lg pb-glass p-3 flex flex-wrap items-center gap-2 text-sm">
+            <span class="text-pb-fg-muted">@L.T("tools.convert.label")</span>
+            <select @bind="_convertFormat"
+                    class="rounded border border-pb-border bg-pb-bg px-2 py-1 text-sm"
+                    aria-label="@L.T("tools.convert.label")">
+                <option value="@ConversionFormat.Png">@L.T("tools.convert.png")</option>
+                <option value="@ConversionFormat.Jpg">@L.T("tools.convert.jpg")</option>
+                <option value="@ConversionFormat.Text">@L.T("tools.convert.text")</option>
+                <option value="@ConversionFormat.Html">@L.T("tools.convert.html")</option>
+            </select>
+            <button type="button"
+                    class="ml-auto rounded border border-pb-border bg-pb-bg px-3 py-1 text-pb-fg-muted hover:text-pb-fg disabled:opacity-40"
+                    disabled="@(_isConverting || _handle is null)"
+                    title="@L.T("tools.convert.title")"
+                    @onclick="ConvertPdfAsync">
+                @(_isConverting ? L.T("tools.convert.running") : L.T("tools.convert.button"))
+            </button>
+        </div>
+        @if (_convertStatus is not null)
+        {
+            <div class="max-w-4xl mx-auto mt-2 rounded border border-green-300/40 bg-green-50/10 px-3 py-2 text-sm text-pb-fg">
+                @_convertStatus
+                <button type="button"
+                        class="float-right text-pb-fg-muted hover:text-pb-fg"
+                        @onclick="@(() => _convertStatus = null)"
+                        aria-label="@L.T("common.close")">✕</button>
+            </div>
+        }
+        <p class="max-w-4xl mx-auto mt-1 text-xs text-pb-fg-muted">@L.T("tools.convert.note")</p>
+
+        @* Wasserzeichen + Seitenzahlen / Bates *@
+        <div class="max-w-4xl mx-auto mt-2 rounded-lg pb-glass p-3 flex flex-wrap items-center gap-2 text-sm">
+            <span class="text-pb-fg-muted">@L.T("tools.stamp.label")</span>
+            <input @bind="_watermarkText" @bind:event="oninput"
+                   class="flex-1 min-w-[10rem] rounded border border-pb-border bg-pb-bg px-3 py-1.5 text-sm"
+                   placeholder="@L.T("tools.stamp.watermarkPlaceholder")"
+                   aria-label="@L.T("tools.stamp.watermarkPlaceholder")" />
+            <label class="flex items-center gap-1.5 cursor-pointer whitespace-nowrap">
+                <input type="checkbox" @bind="_stampPageNumbers" /> @L.T("tools.stamp.pageNumbers")
+            </label>
+            <select @bind="_stampPnPosition"
+                    class="rounded border border-pb-border bg-pb-bg px-2 py-1 text-sm"
+                    aria-label="@L.T("tools.stamp.position")">
+                <option value="@PageNumberPosition.BottomCenter">@L.T("tools.stamp.pos.center")</option>
+                <option value="@PageNumberPosition.BottomRight">@L.T("tools.stamp.pos.right")</option>
+                <option value="@PageNumberPosition.BottomLeft">@L.T("tools.stamp.pos.left")</option>
+            </select>
+            <button type="button"
+                    class="ml-auto rounded border border-pb-border bg-pb-bg px-3 py-1 text-pb-fg-muted hover:text-pb-fg disabled:opacity-40"
+                    disabled="@(_isStamping || _handle is null || (string.IsNullOrWhiteSpace(_watermarkText) && !_stampPageNumbers))"
+                    title="@L.T("tools.stamp.title")"
+                    @onclick="StampPdfAsync">
+                @(_isStamping ? L.T("tools.stamp.running") : L.T("tools.stamp.button"))
+            </button>
+        </div>
+        @if (_stampStatus is not null)
+        {
+            <div class="max-w-4xl mx-auto mt-2 rounded border border-green-300/40 bg-green-50/10 px-3 py-2 text-sm text-pb-fg">
+                @_stampStatus
+                <button type="button" class="float-right text-pb-fg-muted hover:text-pb-fg"
+                        @onclick="@(() => _stampStatus = null)" aria-label="@L.T("common.close")">✕</button>
+            </div>
+        }
+        <p class="max-w-4xl mx-auto mt-1 text-xs text-pb-fg-muted">@L.T("tools.stamp.note")</p>
+
+        <div class="mt-6 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+            @{
+                var visiblePages = _pages.Where(p => !p.Deleted).ToList();
+            }
+            @for (var i = 0; i < visiblePages.Count; i++)
+            {
+                var page = visiblePages[i];
+                var pageRef = page;
+                var isFirst = i == 0;
+                var thumbnail = _thumbnails.GetValueOrDefault(pageRef.OriginalIndex);
+                var splitActive = !isFirst && pageRef.SplitBeforeThis;
+                <div class="relative @(splitActive ? "pl-3" : "")">
+                    @* Split-Indikator-Strich am linken Rand, wenn Split-Punkt vor dieser Seite aktiv *@
+                    @if (splitActive)
+                    {
+                        <div class="absolute left-0 top-2 bottom-2 w-1 rounded-full bg-pb-accent"
+                             title="@L.T("tools.split.indicatorTitle")"></div>
+                    }
+                    <button type="button"
+                            class="@($"group relative w-full rounded-lg border bg-pb-surface p-2 text-left transition-colors {(pageRef.Selected ? "border-pb-accent ring-2 ring-pb-accent/40" : "border-pb-border hover:border-pb-fg-muted")}")"
+                            @onclick="@(() => ToggleSelection(pageRef))"
+                            aria-pressed="@pageRef.Selected.ToString().ToLowerInvariant()">
+                        <div class="aspect-[3/4] flex items-center justify-center bg-pb-bg rounded overflow-hidden">
+                            @if (thumbnail is not null)
+                            {
+                                <img src="@thumbnail"
+                                     alt="@L.T("tools.page.imageAlt", new Dictionary<string, object> { ["index"] = pageRef.OriginalIndex })"
+                                     draggable="false"
+                                     style="@($"transform:rotate({pageRef.Rotation}deg)")"
+                                     class="max-w-full max-h-full transition-transform" />
+                            }
+                            else
+                            {
+                                <div class="text-xs text-pb-fg-muted animate-pulse">@L.T("app.loadingShort")</div>
+                            }
+                        </div>
+                        <div class="mt-1 flex items-center justify-between text-xs">
+                            <span class="text-pb-fg-muted">@L.T("tools.page.label", new Dictionary<string, object> { ["index"] = pageRef.OriginalIndex })</span>
+                            @if (pageRef.Rotation != 0)
+                            {
+                                <span class="rounded bg-pb-accent/15 px-1.5 py-0.5 text-pb-accent">@pageRef.Rotation°</span>
+                            }
+                        </div>
+
+                        @* Split-Toggle-Button — nur sichtbar bei Hover, außer aktiv *@
+                        @if (!isFirst)
+                        {
+                            var splitToggleTitle = splitActive ? L.T("tools.split.removeTitle") : L.T("tools.split.beforeTitle");
+                            <button type="button"
+                                    class="@($"absolute -top-2 -left-2 w-6 h-6 rounded-full shadow border text-xs flex items-center justify-center transition-opacity {(splitActive ? "bg-pb-accent text-white border-pb-accent opacity-100" : "bg-pb-surface text-pb-fg-muted border-pb-border opacity-0 group-hover:opacity-100 hover:text-pb-fg")}")"
+                                    @onclick="@(() => ToggleSplitBefore(pageRef))"
+                                    @onclick:stopPropagation
+                                    title="@splitToggleTitle"
+                                    aria-label="@splitToggleTitle"
+                                    aria-pressed="@splitActive.ToString().ToLowerInvariant()">
+                                <Icon Name="split" />
+                            </button>
+                        }
+                    </button>
+                </div>
+            }
+        </div>
+
+        @if (_pages.Any(p => p.Deleted))
+        {
+            var deletedCount = _pages.Count(p => p.Deleted);
+            <div class="max-w-4xl mx-auto mt-4 rounded-lg border border-dashed border-pb-border p-3 text-sm text-pb-fg-muted">
+                @L.T("tools.deleted.summary", new Dictionary<string, object> { ["count"] = deletedCount })
+                — <button type="button" class="text-pb-accent hover:underline" @onclick="UndoDeletes">@L.T("tools.deleted.undo")</button>
+            </div>
+        }
+    }
+    else if (_handle is null && !_isLoading)
+    {
+        <div class="max-w-4xl mx-auto mt-6 rounded-lg border border-dashed border-pb-border p-6 text-center text-sm text-pb-fg-muted">
+            @L.T("tools.empty")
+        </div>
+    }
+</section>
+
+@code {
+    private const long MaxFileSize = 200L * 1024 * 1024; // 200 MB für Editor-Modus
+
+    // FA-027: Verschlüsselung läuft über WebCrypto (Bridge encryptPdf) — ~15 ms
+    // statt ~30 s Freeze, im Browser gegen PDF.js verifiziert (öffnet mit Passwort).
+    private const bool EncryptionUiEnabled = true;
+
+    private PdfDocumentHandle? _handle;
+    private string? _currentFilename;
+    private byte[]? _originalPdfBytes;
+
+    // Wasserzeichen + Seitenzahlen (Stempeln)
+    private string _watermarkText = string.Empty;
+    private bool _stampPageNumbers = true;
+    private PageNumberPosition _stampPnPosition = PageNumberPosition.BottomCenter;
+    private bool _isStamping;
+    private string? _stampStatus;
+    private bool _isLoading;
+    private bool _isSaving;
+    private bool _isCompressing;
+    private int _compressQuality = 70;
+    private string? _compressionResult;
+    private string _encryptPassword = string.Empty;
+    private bool _isEncrypting;
+    private string? _encryptStatus;
+    private readonly List<SelectedImage> _images = new();
+    private PdfPageSizeMode _imgPageSize = PdfPageSizeMode.ImageSize;
+    private bool _isBuildingImagesPdf;
+    private string? _imgStatus;
+    private int _dragIndex = -1;
+    // FA-030/031/032: Konvertieren des geladenen PDF.
+    private bool _isConverting;
+    private ConversionFormat _convertFormat = ConversionFormat.Png;
+    private string? _convertStatus;
+
+    private static readonly (PdfPageSizeMode Mode, string LabelKey)[] ImagePageSizeModes =
+    {
+        (PdfPageSizeMode.ImageSize, "tools.img2pdf.size.image"),
+        (PdfPageSizeMode.A4, "tools.img2pdf.size.a4"),
+        (PdfPageSizeMode.Letter, "tools.img2pdf.size.letter")
+    };
+
+    private static readonly (int Quality, string LabelKey)[] CompressionPresets =
+    {
+        (40, "tools.compress.quality.low"),
+        (70, "tools.compress.quality.medium"),
+        (90, "tools.compress.quality.high")
+    };
+    private string? _errorMessage;
+    private int _thumbnailProgress;
+    private int _appendedPdfsCount;
+
+    private List<PageState> _pages = new();
+    private Dictionary<int, string> _thumbnails = new();
+    private CancellationTokenSource? _thumbnailCts;
+
+    private int SelectedCount => _pages.Count(p => p.Selected && !p.Deleted);
+
+    private int SplitPointCount => _pages.Count(p => p.SplitBeforeThis && !p.Deleted);
+
+    private bool HasPendingEdits =>
+        _pages.Any(p => p.Deleted)
+        || _pages.Any(p => p.Rotation != 0)
+        || _pages.Any(p => p.SplitBeforeThis);
+
+    private bool HasChanges => _appendedPdfsCount > 0 || HasPendingEdits;
+
+    private async Task HandleFileSelectedAsync(InputFileChangeEventArgs e)
+    {
+        _errorMessage = null;
+        _isLoading = true;
+        await UnloadCurrentAsync();
+
+        try
+        {
+            _currentFilename = e.File.Name;
+            await using var stream = e.File.OpenReadStream(MaxFileSize);
+            await using var buffer = new MemoryStream();
+            await stream.CopyToAsync(buffer);
+            _originalPdfBytes = buffer.ToArray();
+            buffer.Position = 0;
+
+            _handle = await Renderer.LoadAsync(buffer, new LoadOptions(), CancellationToken.None);
+            _pages = Enumerable.Range(1, _handle.PageCount)
+                .Select(i => new PageState { OriginalIndex = i })
+                .ToList();
+            _thumbnails = new Dictionary<int, string>(_handle.PageCount);
+            _thumbnailProgress = 0;
+
+            // Thumbnails sequenziell rendern, mit StateHasChanged zwischen
+            // den Seiten, damit das UI laufend aktualisiert wird.
+            _thumbnailCts = new CancellationTokenSource();
+            _ = RenderThumbnailsAsync(_handle, _thumbnailCts.Token);
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"PDF konnte nicht geöffnet werden: {ex.Message}";
+            _handle = null;
+            _pages.Clear();
+            _originalPdfBytes = null;
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private async Task RenderThumbnailsAsync(PdfDocumentHandle handle, CancellationToken ct)
+    {
+        try
+        {
+            for (var i = 1; i <= handle.PageCount; i++)
+            {
+                ct.ThrowIfCancellationRequested();
+                var rendered = await Renderer.RenderPageAsync(
+                    handle,
+                    i,
+                    new RenderOptions(Scale: 0.35),
+                    ct);
+                if (rendered.RasterBytes is not null && rendered.RasterFormat is not null)
+                {
+                    _thumbnails[i] = $"data:{rendered.RasterFormat};base64,{Convert.ToBase64String(rendered.RasterBytes)}";
+                }
+                _thumbnailProgress = i;
+                await InvokeAsync(StateHasChanged);
+                // Browser-Frame Zeit zum Atmen geben
+                await Task.Yield();
+            }
+        }
+        catch (OperationCanceledException) { /* erwartet bei Datei-Wechsel */ }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Thumbnail-Erzeugung abgebrochen: {ex.Message}";
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private void ToggleSelection(PageState page) => page.Selected = !page.Selected;
+
+    private void SelectAll()
+    {
+        foreach (var page in _pages.Where(p => !p.Deleted)) page.Selected = true;
+    }
+
+    private void DeselectAll()
+    {
+        foreach (var page in _pages) page.Selected = false;
+    }
+
+    private void RotateSelected(int delta)
+    {
+        foreach (var page in _pages.Where(p => p.Selected && !p.Deleted))
+        {
+            page.Rotation = (((page.Rotation + delta) % 360) + 360) % 360;
+        }
+    }
+
+    private void DeleteSelected()
+    {
+        foreach (var page in _pages.Where(p => p.Selected && !p.Deleted))
+        {
+            page.Deleted = true;
+            page.Selected = false;
+        }
+    }
+
+    private void UndoDeletes()
+    {
+        foreach (var page in _pages.Where(p => p.Deleted))
+        {
+            page.Deleted = false;
+        }
+    }
+
+    private void ToggleSplitBefore(PageState page)
+    {
+        page.SplitBeforeThis = !page.SplitBeforeThis;
+    }
+
+    private void ResetSplitPoints()
+    {
+        foreach (var page in _pages)
+        {
+            page.SplitBeforeThis = false;
+        }
+    }
+
+    private async Task HandleAppendFileAsync(InputFileChangeEventArgs e)
+    {
+        if (_originalPdfBytes is null) return;
+        if (HasPendingEdits)
+        {
+            _errorMessage = "Bitte vorher speichern oder Änderungen verwerfen, bevor du eine weitere PDF anhängst.";
+            return;
+        }
+
+        _isLoading = true;
+        _errorMessage = null;
+        try
+        {
+            var file = e.File;
+            await using var stream = file.OpenReadStream(MaxFileSize);
+            await using var newBuffer = new MemoryStream();
+            await stream.CopyToAsync(newBuffer);
+            var newBytes = newBuffer.ToArray();
+
+            using var oldMs = new MemoryStream(_originalPdfBytes);
+            using var newMs = new MemoryStream(newBytes);
+            var merged = await Manipulator.MergeAsync(
+                new Stream[] { oldMs, newMs },
+                CancellationToken.None);
+
+            // Aktuelle PDF entladen und mit den merged Bytes neu laden,
+            // damit Thumbnails und Seitenzahl konsistent sind.
+            _thumbnailCts?.Cancel();
+            _thumbnailCts?.Dispose();
+            if (_handle is not null)
+            {
+                try { await Renderer.UnloadAsync(_handle); } catch { /* ignore */ }
+                _handle = null;
+            }
+
+            _originalPdfBytes = merged;
+            using var loadMs = new MemoryStream(merged);
+            _handle = await Renderer.LoadAsync(loadMs, new LoadOptions(), CancellationToken.None);
+
+            _pages = Enumerable.Range(1, _handle.PageCount)
+                .Select(i => new PageState { OriginalIndex = i })
+                .ToList();
+            _thumbnails = new Dictionary<int, string>(_handle.PageCount);
+            _thumbnailProgress = 0;
+            _appendedPdfsCount++;
+
+            // Dateinamen anpassen — beim zweiten Append "_+2.pdf" etc.
+            var baseName = System.IO.Path.GetFileNameWithoutExtension(_currentFilename ?? "pagebound");
+            if (!baseName.EndsWith("_merged", StringComparison.Ordinal))
+            {
+                baseName += "_merged";
+            }
+            _currentFilename = $"{baseName}.pdf";
+
+            _thumbnailCts = new CancellationTokenSource();
+            _ = RenderThumbnailsAsync(_handle, _thumbnailCts.Token);
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Anhängen fehlgeschlagen: {ex.Message}";
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private List<int> ComputeSplitPointsInResult()
+    {
+        // Split-Punkte beziehen sich auf die fertige PDF nach Löschungen,
+        // also nummerieren wir die nicht-gelöschten Seiten neu durch und
+        // erfassen jede Position, vor der ein Split-Marker sitzt.
+        var splitPoints = new List<int>();
+        var newPos = 0;
+        foreach (var page in _pages.Where(p => !p.Deleted))
+        {
+            if (page.SplitBeforeThis && newPos > 0)
+            {
+                splitPoints.Add(newPos);
+            }
+            newPos++;
+        }
+        return splitPoints;
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_originalPdfBytes is null || !HasChanges) return;
+        _isSaving = true;
+        _errorMessage = null;
+        try
+        {
+            byte[] working = _originalPdfBytes;
+
+            // 1) Drehungen anwenden (auf dem Original-Seitenindex)
+            var rotations = _pages
+                .Where(p => !p.Deleted && p.Rotation != 0)
+                .ToDictionary(p => p.OriginalIndex, p => p.Rotation);
+            if (rotations.Count > 0)
+            {
+                using var ms = new MemoryStream(working);
+                working = await Manipulator.RotateAsync(ms, rotations, CancellationToken.None);
+            }
+
+            // 2) Löschungen anwenden — Indizes beziehen sich noch auf das
+            //    Original (Rotationen haben Indizes nicht verschoben).
+            var deleted = _pages.Where(p => p.Deleted).Select(p => p.OriginalIndex).ToList();
+            if (deleted.Count > 0)
+            {
+                using var ms = new MemoryStream(working);
+                working = await Manipulator.DeletePagesAsync(ms, deleted, CancellationToken.None);
+            }
+
+            var baseName = !string.IsNullOrWhiteSpace(_currentFilename)
+                ? System.IO.Path.GetFileNameWithoutExtension(_currentFilename)
+                : "pagebound";
+
+            var splitPoints = ComputeSplitPointsInResult();
+            if (splitPoints.Count > 0)
+            {
+                // Mehrere Teil-PDFs erzeugen und nacheinander herunterladen.
+                using var ms = new MemoryStream(working);
+                var parts = await Manipulator.SplitAsync(ms, splitPoints, CancellationToken.None);
+                for (var i = 0; i < parts.Count; i++)
+                {
+                    var name = $"{baseName}_part{i + 1}.pdf";
+                    var b64 = Convert.ToBase64String(parts[i]);
+                    await JS.InvokeVoidAsync(
+                        "pageboundShortcuts.downloadBytes",
+                        name,
+                        b64,
+                        "application/pdf");
+                }
+            }
+            else
+            {
+                var downloadName = $"{baseName}_edited.pdf";
+                var base64 = Convert.ToBase64String(working);
+                await JS.InvokeVoidAsync(
+                    "pageboundShortcuts.downloadBytes",
+                    downloadName,
+                    base64,
+                    "application/pdf");
+            }
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Speichern fehlgeschlagen: {ex.Message}";
+        }
+        finally
+        {
+            _isSaving = false;
+        }
+    }
+
+    private async Task CompressAsync()
+    {
+        if (_originalPdfBytes is null || _isCompressing) return;
+        _isCompressing = true;
+        _compressionResult = null;
+        _errorMessage = null;
+        try
+        {
+            var options = new CompressionOptions(ImageQuality: _compressQuality);
+            await using var stream = new MemoryStream(_originalPdfBytes);
+            var compressed = await Manipulator
+                .CompressAsync(stream, options, null, CancellationToken.None)
+                .ConfigureAwait(false);
+
+            var origSize = _originalPdfBytes.Length;
+            var newSize = compressed.Length;
+            var ratio = origSize > 0 ? (1.0 - (double)newSize / origSize) * 100.0 : 0.0;
+            _compressionResult = L.T("tools.compress.result", new Dictionary<string, object>
+            {
+                ["orig"] = FormatBytes(origSize),
+                ["compressed"] = FormatBytes(newSize),
+                ["ratio"] = ratio.ToString("F1", CultureInfo.InvariantCulture)
+            });
+
+            var filename = BuildCompressedFilename(_currentFilename);
+            var base64 = Convert.ToBase64String(compressed);
+            await JS.InvokeVoidAsync("pageboundShortcuts.downloadBytes", filename, base64, "application/pdf")
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = ex.Message;
+        }
+        finally
+        {
+            _isCompressing = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private static string FormatBytes(long bytes)
+    {
+        if (bytes < 1024) return $"{bytes} B";
+        if (bytes < 1024L * 1024) return $"{bytes / 1024.0:F0} KB";
+        if (bytes < 1024L * 1024 * 1024) return $"{bytes / (1024.0 * 1024):F1} MB";
+        return $"{bytes / (1024.0 * 1024 * 1024):F2} GB";
+    }
+
+    private static string BuildCompressedFilename(string? originalName)
+    {
+        var baseName = string.IsNullOrWhiteSpace(originalName) ? "document" : originalName;
+        if (baseName.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
+        {
+            baseName = baseName.Substring(0, baseName.Length - 4);
+        }
+        var safe = string.Concat(baseName.Select(c =>
+            char.IsLetterOrDigit(c) || c is '_' or '-' or '.' or ' ' ? c : '_'));
+        return $"{safe}.compressed.pdf";
+    }
+
+    private async Task EncryptPdfAsync()
+    {
+        if (_originalPdfBytes is null || _isEncrypting || string.IsNullOrEmpty(_encryptPassword)) return;
+        _isEncrypting = true;
+        _encryptStatus = null;
+        _errorMessage = null;
+        try
+        {
+            // Ein Passwort schützt das Öffnen: als Owner UND User setzen.
+            var options = new EncryptionOptions(OwnerPassword: _encryptPassword, UserPassword: _encryptPassword);
+            await using var stream = new MemoryStream(_originalPdfBytes);
+            var encrypted = await Manipulator.EncryptAsync(stream, options, CancellationToken.None).ConfigureAwait(false);
+
+            var filename = BuildEncryptedFilename(_currentFilename);
+            var base64 = Convert.ToBase64String(encrypted);
+            await JS.InvokeVoidAsync("pageboundShortcuts.downloadBytes", filename, base64, "application/pdf")
+                .ConfigureAwait(false);
+
+            _encryptStatus = L.T("tools.encrypt.result", new Dictionary<string, object> { ["name"] = filename });
+            _encryptPassword = string.Empty;
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = ex.Message;
+        }
+        finally
+        {
+            _isEncrypting = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private static string BuildEncryptedFilename(string? originalName)
+    {
+        var baseName = string.IsNullOrWhiteSpace(originalName) ? "document" : originalName;
+        if (baseName.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
+            baseName = baseName[..^4];
+        var safe = string.Concat(baseName.Select(c =>
+            char.IsLetterOrDigit(c) || c is '_' or '-' or '.' or ' ' ? c : '_'));
+        return $"{safe}.encrypted.pdf";
+    }
+
+    // --- Wasserzeichen + Seitenzahlen ----------------------------------------
+
+    private async Task StampPdfAsync()
+    {
+        if (_originalPdfBytes is null || _isStamping) return;
+        if (string.IsNullOrWhiteSpace(_watermarkText) && !_stampPageNumbers) return;
+        _isStamping = true;
+        _stampStatus = null;
+        _errorMessage = null;
+        try
+        {
+            var options = new StampOptions(
+                WatermarkText: string.IsNullOrWhiteSpace(_watermarkText) ? null : _watermarkText.Trim(),
+                PageNumbers: _stampPageNumbers,
+                PageNumberPosition: _stampPnPosition);
+            await using var stream = new MemoryStream(_originalPdfBytes);
+            var stamped = await Manipulator.StampAsync(stream, options, CancellationToken.None).ConfigureAwait(false);
+
+            var filename = BuildSuffixFilename(_currentFilename, "stamped");
+            await JS.InvokeVoidAsync("pageboundShortcuts.downloadBytes", filename, Convert.ToBase64String(stamped), "application/pdf")
+                .ConfigureAwait(false);
+            _stampStatus = L.T("tools.stamp.result", new Dictionary<string, object> { ["name"] = filename });
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = ex.Message;
+        }
+        finally
+        {
+            _isStamping = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private static string BuildSuffixFilename(string? originalName, string suffix)
+    {
+        var baseName = string.IsNullOrWhiteSpace(originalName) ? "document" : originalName;
+        if (baseName.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
+            baseName = baseName[..^4];
+        var safe = string.Concat(baseName.Select(c =>
+            char.IsLetterOrDigit(c) || c is '_' or '-' or '.' or ' ' ? c : '_'));
+        return $"{safe}.{suffix}.pdf";
+    }
+
+    // --- Konvertieren (FA-030/031/032) ---------------------------------------
+
+    private async Task ConvertPdfAsync()
+    {
+        if (_originalPdfBytes is null || _isConverting) return;
+        _isConverting = true;
+        _convertStatus = null;
+        _errorMessage = null;
+        try
+        {
+            var result = await Converter.ConvertAsync(_originalPdfBytes, _convertFormat, CancellationToken.None)
+                .ConfigureAwait(false);
+            var filename = BuildConvertedFilename(_currentFilename, result.FileExtension);
+            await JS.InvokeVoidAsync(
+                "pageboundShortcuts.downloadBytes",
+                filename,
+                Convert.ToBase64String(result.Bytes),
+                result.MimeType).ConfigureAwait(false);
+            _convertStatus = L.T("tools.convert.done", new Dictionary<string, object> { ["file"] = filename });
+        }
+        catch (Exception ex)
+        {
+            _convertStatus = L.T("tools.convert.error", new Dictionary<string, object> { ["message"] = ex.Message });
+        }
+        finally
+        {
+            _isConverting = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private static string BuildConvertedFilename(string? originalName, string extension)
+    {
+        var baseName = string.IsNullOrWhiteSpace(originalName) ? "dokument" : originalName;
+        if (baseName.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
+            baseName = baseName[..^4];
+        var safe = string.Concat(baseName.Select(c =>
+            char.IsLetterOrDigit(c) || c is '_' or '-' or '.' or ' ' ? c : '_'));
+        return $"{safe}.{extension}";
+    }
+
+    // --- Bilder → PDF (FA-025) -----------------------------------------------
+
+    private async Task HandleImagesSelectedAsync(InputFileChangeEventArgs e)
+    {
+        _errorMessage = null;
+        _imgStatus = null;
+        const long maxPerImage = 50L * 1024 * 1024;
+        try
+        {
+            foreach (var file in e.GetMultipleFiles(maximumFileCount: 200))
+            {
+                await using var stream = file.OpenReadStream(maxPerImage);
+                await using var ms = new MemoryStream();
+                await stream.CopyToAsync(ms);
+                var bytes = ms.ToArray();
+                var mime = string.IsNullOrWhiteSpace(file.ContentType)
+                    ? (file.Name.EndsWith(".png", StringComparison.OrdinalIgnoreCase) ? "image/png" : "image/jpeg")
+                    : file.ContentType;
+                _images.Add(new SelectedImage
+                {
+                    Name = file.Name,
+                    Mime = mime,
+                    Bytes = bytes,
+                    DataUrl = $"data:{mime};base64,{Convert.ToBase64String(bytes)}"
+                });
+            }
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Bild konnte nicht geladen werden: {ex.Message}";
+        }
+    }
+
+    private void OnImageDrop(int targetIndex)
+    {
+        if (_dragIndex < 0 || _dragIndex >= _images.Count || _dragIndex == targetIndex)
+        {
+            _dragIndex = -1;
+            return;
+        }
+        var item = _images[_dragIndex];
+        _images.RemoveAt(_dragIndex);
+        _images.Insert(targetIndex, item);
+        _dragIndex = -1;
+    }
+
+    private async Task BuildImagesPdfAsync()
+    {
+        if (_images.Count == 0 || _isBuildingImagesPdf) return;
+        _isBuildingImagesPdf = true;
+        _errorMessage = null;
+        _imgStatus = null;
+        try
+        {
+            var inputs = _images.Select(i => new PdfImageInput(i.Bytes, i.Mime)).ToList();
+            var options = new ImageToPdfOptions(_imgPageSize);
+            var pdf = await ImageConverter.ConvertAsync(inputs, options, CancellationToken.None).ConfigureAwait(false);
+
+            const string name = "bilder.pdf";
+            await JS.InvokeVoidAsync("pageboundShortcuts.downloadBytes", name, Convert.ToBase64String(pdf), "application/pdf")
+                .ConfigureAwait(false);
+            _imgStatus = L.T("tools.img2pdf.result", new Dictionary<string, object> { ["count"] = _images.Count, ["name"] = name });
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = ex.Message;
+        }
+        finally
+        {
+            _isBuildingImagesPdf = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task UnloadCurrentAsync()
+    {
+        _thumbnailCts?.Cancel();
+        _thumbnailCts?.Dispose();
+        _thumbnailCts = null;
+        if (_handle is not null)
+        {
+            try { await Renderer.UnloadAsync(_handle); } catch { /* ignore */ }
+            _handle = null;
+        }
+        _pages.Clear();
+        _thumbnails.Clear();
+        _thumbnailProgress = 0;
+        _originalPdfBytes = null;
+        _appendedPdfsCount = 0;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await UnloadCurrentAsync();
+    }
+
+    private sealed class SelectedImage
+    {
+        public required string Name { get; init; }
+        public required string Mime { get; init; }
+        public required byte[] Bytes { get; init; }
+        public required string DataUrl { get; init; }
+    }
+
+    private sealed class PageState
+    {
+        public int OriginalIndex { get; init; }
+        public bool Selected { get; set; }
+        public bool Deleted { get; set; }
+        public int Rotation { get; set; } // 0, 90, 180, 270
+        public bool SplitBeforeThis { get; set; }
+    }
+}

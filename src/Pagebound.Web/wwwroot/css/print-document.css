@@ -1,0 +1,144 @@
+/* ============================================================================
+   Pagebound — WYSIWYG-Editor: Bildschirm- & Druck-Stylesheet (PF-03)
+   ----------------------------------------------------------------------------
+   Bildschirm: papierechte Seiten-Leinwand (.pb-page) auf neutralem Hintergrund.
+   Druck (= PDF-Export): nur das Dokument, jede Seite ein Blatt, keine App-Chrome.
+   Bewusst plain CSS (kein Tailwind-Build): ein Dokument soll unabhängig vom
+   App-Theme immer schwarz-auf-weiß aussehen. 100 % lokal, keine externen Fonts.
+   ============================================================================ */
+
+/* --- Editor-Bühne (Bildschirm) ------------------------------------------- */
+.pb-doc-stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 40px;                      /* Platz für die Seiten-Kopfleiste über jedem Blatt */
+  padding: 40px 24px 24px;
+  background: #4b5563;            /* neutraler Viewer-Hintergrund */
+  overflow: auto;
+  min-height: 100%;
+}
+
+/* Ein virtuelles Blatt. Breite/Höhe/Innenrand (= Dokumentränder) kommen als
+   Inline-Style pro Layout aus C# (mm-genau), damit Bildschirm == Druck. */
+.pb-page {
+  position: relative;
+  box-sizing: border-box;
+  background: #ffffff;
+  color: #111827;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.35);
+  font-family: "Source Serif 4", Georgia, "Times New Roman", serif;
+  font-size: 11pt;
+  line-height: 1.5;
+}
+
+/* Aktuell gewählte Seite (Hintergrund-/Seiten-Werkzeuge wirken auf sie). */
+.pb-page.pb-page-selected {
+  outline: 3px solid rgba(37, 99, 235, 0.55);
+  outline-offset: 6px;
+}
+
+/* Sichtbarer Randrahmen (Satzspiegel) — nur am Bildschirm, dezent. */
+.pb-page .pb-margin-guide {
+  position: absolute;
+  inset: 0;
+  margin: var(--pb-margin, 20mm);
+  border: 1px dashed rgba(37, 99, 235, 0.25);
+  pointer-events: none;
+}
+
+/* Schnittmarken (LF-02) an den vier Ecken. */
+.pb-crop {
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  pointer-events: none;
+}
+.pb-crop::before, .pb-crop::after { content: ""; position: absolute; background: #111827; }
+.pb-crop::before { width: 16px; height: 1px; top: 0; left: 0; }
+.pb-crop::after  { width: 1px; height: 16px; top: 0; left: 0; }
+.pb-crop-tl { top: -1px; left: -1px; }
+.pb-crop-tr { top: -1px; right: -1px; transform: scaleX(-1); }
+.pb-crop-bl { bottom: -1px; left: -1px; transform: scaleY(-1); }
+.pb-crop-br { bottom: -1px; right: -1px; transform: scale(-1, -1); }
+
+/* --- Blöcke -------------------------------------------------------------- */
+.pb-block { position: relative; margin: 0 0 8px 0; }
+.pb-block:last-child { margin-bottom: 0; }
+.pb-block.pb-selected {
+  outline: 2px solid rgba(37, 99, 235, 0.5);
+  outline-offset: 4px;
+  border-radius: 3px;
+}
+
+.pb-edit { outline: none; cursor: text; }
+.pb-edit:focus, .pb-edit:focus-visible {
+  outline: 2px solid rgba(37, 99, 235, 0.45);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+.pb-edit:empty::before { content: attr(data-placeholder); color: #9ca3af; }
+
+.pb-h1 { font-size: 22pt; font-weight: 700; line-height: 1.2; margin-bottom: 10px; }
+.pb-h2 { font-size: 16pt; font-weight: 700; line-height: 1.25; margin-bottom: 8px; }
+.pb-h3 { font-size: 13pt; font-weight: 700; line-height: 1.3; margin-bottom: 6px; }
+.pb-para { font-size: 11pt; }
+.pb-para ul, .pb-para ol { margin: 0 0 0 1.4em; }
+
+.pb-img { display: block; max-width: 100%; height: auto; }
+.pb-img-wrap.align-center { text-align: center; }
+.pb-img-wrap.align-right { text-align: right; }
+
+/* Abstands-Block: leerer Weißraum. Am Bildschirm dezent gestrichelt, damit er
+   auffindbar bleibt; im Druck/Export unsichtbar (nur Höhe). */
+.pb-spacer { width: 100%; }
+.pb-block.pb-selected .pb-spacer { outline: 1px dashed rgba(37, 99, 235, 0.4); }
+
+.pb-shape-rect { width: 100%; border: 1.5px solid currentColor; }
+.pb-shape-line { width: 100%; border: none; border-top: 1.5px solid currentColor; }
+.pb-shape-divider { width: 100%; border: none; border-top: 1px solid #d1d5db; margin: 6px 0; }
+
+.pb-table { width: 100%; border-collapse: collapse; font-size: 10.5pt; }
+.pb-table td, .pb-table th { border: 1px solid #9ca3af; padding: 4px 8px; text-align: left; vertical-align: top; }
+.pb-table thead th { background: #f3f4f6; font-weight: 700; }
+
+.align-center { text-align: center; }
+.align-right { text-align: right; }
+.align-justify { text-align: justify; }
+
+/* --- Druck (PDF-Export via Browser) -------------------------------------- */
+@page { size: A4 portrait; margin: 0; }   /* von pageboundWysiwyg.setPageSize überschrieben */
+
+@media print {
+  /* App-Chrome ausblenden (AK-03: keine Navigations-Menüs im Export). */
+  .rail, .topbar, .skip-link, .no-print,
+  .pb-editor-toolbar, .pb-editor-sidebar, .pb-margin-guide { display: none !important; }
+
+  html, body, #app, .main, .pb-doc-stage {
+    background: #fff !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    width: auto !important;
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    display: block !important;
+  }
+
+  .pb-doc-stage { gap: 0 !important; }
+
+  .pb-page {
+    box-shadow: none !important;
+    margin: 0 !important;
+    page-break-after: always;
+    break-after: page;
+  }
+  .pb-page:last-child { page-break-after: auto; break-after: auto; }
+
+  /* Editier-Affordances raus, Inhalt exakt wie am Bildschirm. */
+  .pb-block.pb-selected { outline: none !important; }
+  .pb-edit:focus, .pb-edit:focus-visible { outline: none !important; }
+
+  /* Hintergrundfarben/Bilder im Druck erzwingen (Tabellenkopf, Formen). */
+  * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+}

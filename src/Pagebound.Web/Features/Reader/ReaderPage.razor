@@ -1,0 +1,70 @@
+@page "/reader"
+@inject ILocalizationService L
+@inject NavigationManager Nav
+@implements IDisposable
+
+@*
+    Single-Pane-Reader. Die eigentliche Logik steckt in <ReaderPane />,
+    weil sie auch in der SplitView (FA-090..092) wiederverwendet wird —
+    dort liegen dann zwei Panes nebeneinander, jede mit eigenem State.
+
+    `?pdf={hash}`-Parameter: kommt von der Library-Page (Klick auf einen
+    Eintrag) und triggert im Pane das Auto-Open der gespeicherten Bytes
+    aus IndexedDB. Wenn die Bytes fehlen, fällt's still auf den File-
+    Picker zurück.
+*@
+
+<PageTitle>@L.T("reader.pageTitle")</PageTitle>
+
+<ReaderPane InitialPdfHash="@_pdfHash" />
+
+@code {
+    private string? _pdfHash;
+
+    protected override void OnInitialized()
+    {
+        Nav.LocationChanged += OnLocationChanged;
+        UpdateFromQuery();
+    }
+
+    public void Dispose()
+    {
+        Nav.LocationChanged -= OnLocationChanged;
+    }
+
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs args)
+    {
+        UpdateFromQuery();
+        StateHasChanged();
+    }
+
+    /// <summary>
+    /// Liest <c>?pdf=...</c> aus der aktuellen URL — wir parsen das manuell,
+    /// statt <c>Microsoft.AspNetCore.WebUtilities</c> als Dependency zu ziehen
+    /// (würde nur diese eine Stelle rechtfertigen). Single-Param-Lookup ist
+    /// einfach genug; mehrere Werte mit gleichem Key werden nicht unterstützt.
+    /// </summary>
+    private void UpdateFromQuery()
+    {
+        _pdfHash = ExtractQueryValue(Nav.Uri, "pdf");
+    }
+
+    private static string? ExtractQueryValue(string fullUri, string key)
+    {
+        var qIdx = fullUri.IndexOf('?');
+        if (qIdx < 0) return null;
+        var query = fullUri.Substring(qIdx + 1);
+        var fragIdx = query.IndexOf('#');
+        if (fragIdx >= 0) query = query.Substring(0, fragIdx);
+
+        foreach (var pair in query.Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var eq = pair.IndexOf('=');
+            if (eq < 0) continue;
+            var k = Uri.UnescapeDataString(pair.Substring(0, eq));
+            if (!string.Equals(k, key, StringComparison.Ordinal)) continue;
+            return Uri.UnescapeDataString(pair.Substring(eq + 1));
+        }
+        return null;
+    }
+}

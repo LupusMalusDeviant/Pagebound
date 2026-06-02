@@ -1,0 +1,228 @@
+@page "/batch"
+@using Microsoft.AspNetCore.Components.Forms
+@inject IPdfManipulator Manipulator
+@inject IPdfConverter Converter
+@inject ILocalizationService L
+@inject IJSRuntime JS
+
+@*
+    Stapelverarbeitung (FA-051): mehrere PDFs wählen, eine Operation(skette)
+    auf alle anwenden, Ergebnisse als ein ZIP herunterladen. Orchestriert die
+    bestehenden Services (Manipulator: Komprimieren/Verschlüsseln; Converter:
+    → Text). Gespeicherte Regeln (FA-052) folgen später.
+*@
+
+<PageTitle>@L.T("batch.pageTitle")</PageTitle>
+
+<section class="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8 py-8">
+    <header class="masthead-pg">
+        <div class="folio-line">
+            <span>@L.T("home.ed.local")</span><span class="sep">·</span>
+            <span>@L.T("batch.folio")</span>
+        </div>
+        <h1 class="page-title">@L.T("batch.heading")</h1>
+        <p class="standfirst">@L.T("batch.subheading")</p>
+    </header>
+
+    <div class="rounded-lg pb-glass p-4 space-y-3">
+        <label class="flex flex-col gap-1 text-sm">
+            <span class="font-medium">@L.T("batch.choose")</span>
+            <InputFile OnChange="HandleFilesSelectedAsync" accept=".pdf" multiple
+                       class="block text-sm file:mr-3 file:rounded file:border-0 file:bg-pb-accent file:px-3 file:py-1.5 file:font-semibold file:text-[var(--accent-ink)] file:cursor-pointer cursor-pointer" />
+        </label>
+
+        @if (_files.Count > 0)
+        {
+            <div class="text-xs text-pb-fg-muted">@L.T("batch.fileCount", new Dictionary<string, object> { ["count"] = _files.Count })</div>
+            <ul class="text-sm divide-y divide-pb-border rounded border border-pb-border max-h-48 overflow-auto">
+                @foreach (var f in _files)
+                {
+                    <li class="px-3 py-1.5 flex items-center justify-between gap-2">
+                        <span class="truncate">@f.Name</span>
+                        <span class="shrink-0 text-xs text-pb-fg-muted tabular-nums">@FormatSize(f.Bytes.LongLength)</span>
+                    </li>
+                }
+            </ul>
+
+            <div class="flex flex-wrap items-center gap-2 text-sm">
+                <span class="text-pb-fg-muted">@L.T("batch.operation")</span>
+                <select @bind="_operation"
+                        aria-label="@L.T("batch.operation")"
+                        class="rounded border border-pb-border bg-pb-bg px-2 py-1 text-sm">
+                    <option value="@BatchOp.Compress">@L.T("batch.op.compress")</option>
+                    <option value="@BatchOp.Encrypt">@L.T("batch.op.encrypt")</option>
+                    <option value="@BatchOp.CompressEncrypt">@L.T("batch.op.compressEncrypt")</option>
+                    <option value="@BatchOp.ToText">@L.T("batch.op.toText")</option>
+                </select>
+                @if (_operation is BatchOp.Encrypt or BatchOp.CompressEncrypt)
+                {
+                    <input type="password" @bind="_password" @bind:event="oninput"
+                           class="flex-1 min-w-[10rem] rounded border border-pb-border bg-pb-bg px-3 py-1.5 text-sm"
+                           placeholder="@L.T("batch.password")"
+                           autocomplete="new-password"
+                           aria-label="@L.T("batch.password")" />
+                }
+                <button type="button"
+                        class="btn primary ml-auto disabled:opacity-40"
+                        disabled="@(_isRunning || ((_operation is BatchOp.Encrypt or BatchOp.CompressEncrypt) && string.IsNullOrEmpty(_password)))"
+                        @onclick="RunBatchAsync">
+                    @(_isRunning
+                        ? L.T("batch.running", new Dictionary<string, object> { ["done"] = _progress, ["total"] = _files.Count })
+                        : L.T("batch.run"))
+                </button>
+            </div>
+            <p class="text-xs text-pb-fg-muted">@L.T("batch.note")</p>
+        }
+
+        @if (_status is not null)
+        {
+            <div class="@($"rounded border px-3 py-2 text-sm text-pb-fg {(_statusError ? "border-red-300/40 bg-red-50/10" : "border-green-300/40 bg-green-50/10")}")">
+                @_status
+                <button type="button"
+                        class="float-right text-pb-fg-muted hover:text-pb-fg ml-2"
+                        @onclick="@(() => _status = null)"
+                        aria-label="@L.T("common.close")">✕</button>
+            </div>
+        }
+    </div>
+</section>
+
+@code {
+    private enum BatchOp { Compress, Encrypt, CompressEncrypt, ToText }
+
+    private sealed record BatchFile(string Name, byte[] Bytes);
+
+    private const long MaxPerFile = 200L * 1024 * 1024;
+    private const int MaxFiles = 50;
+
+    private readonly List<BatchFile> _files = new();
+    private BatchOp _operation = BatchOp.Compress;
+    private string _password = string.Empty;
+    private bool _isRunning;
+    private int _progress;
+    private string? _status;
+    private bool _statusError;
+
+    private async Task HandleFilesSelectedAsync(InputFileChangeEventArgs e)
+    {
+        _files.Clear();
+        _status = null;
+        try
+        {
+            foreach (var file in e.GetMultipleFiles(MaxFiles))
+            {
+                await using var ms = new MemoryStream();
+                await using var rs = file.OpenReadStream(MaxPerFile);
+                await rs.CopyToAsync(ms).ConfigureAwait(false);
+                _files.Add(new BatchFile(file.Name, ms.ToArray()));
+            }
+        }
+        catch (Exception ex)
+        {
+            _status = L.T("batch.error", new Dictionary<string, object> { ["message"] = ex.Message });
+            _statusError = true;
+        }
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task RunBatchAsync()
+    {
+        if (_isRunning || _files.Count == 0) return;
+        _isRunning = true;
+        _progress = 0;
+        _status = null;
+        try
+        {
+            var names = new List<string>();
+            var contents = new List<string>();
+            var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var f in _files)
+            {
+                var (bytes, ext) = await ApplyOpAsync(f.Bytes).ConfigureAwait(false);
+                names.Add(UniqueName(OutName(f.Name, ext), used));
+                contents.Add(Convert.ToBase64String(bytes));
+                _progress++;
+                await InvokeAsync(StateHasChanged);
+            }
+
+            var zip = await JS.InvokeAsync<byte[]>("pageboundPdf.zipFiles", names.ToArray(), contents.ToArray())
+                .ConfigureAwait(false);
+            await JS.InvokeVoidAsync(
+                "pageboundShortcuts.downloadBytes",
+                "pagebound-batch.zip",
+                Convert.ToBase64String(zip),
+                "application/zip").ConfigureAwait(false);
+
+            _status = L.T("batch.done", new Dictionary<string, object> { ["count"] = _files.Count });
+            _statusError = false;
+        }
+        catch (Exception ex)
+        {
+            _status = L.T("batch.error", new Dictionary<string, object> { ["message"] = ex.Message });
+            _statusError = true;
+        }
+        finally
+        {
+            _isRunning = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    // Wendet die gewählte Operation(skette) auf eine Datei an und liefert die
+    // Ergebnis-Bytes + Zielendung. Komprimieren → Verschlüsseln verkettet sich
+    // (beide PDF→PDF); → Text ist terminal.
+    private async Task<(byte[] Bytes, string Ext)> ApplyOpAsync(byte[] input)
+    {
+        var current = input;
+
+        if (_operation is BatchOp.Compress or BatchOp.CompressEncrypt)
+        {
+            await using var ms = new MemoryStream(current);
+            current = await Manipulator.CompressAsync(ms, new CompressionOptions(), null, CancellationToken.None)
+                .ConfigureAwait(false);
+        }
+
+        if (_operation is BatchOp.Encrypt or BatchOp.CompressEncrypt)
+        {
+            await using var ms = new MemoryStream(current);
+            current = await Manipulator.EncryptAsync(ms, new EncryptionOptions(_password, _password), CancellationToken.None)
+                .ConfigureAwait(false);
+        }
+
+        if (_operation is BatchOp.ToText)
+        {
+            var result = await Converter.ConvertAsync(current, ConversionFormat.Text, CancellationToken.None)
+                .ConfigureAwait(false);
+            return (result.Bytes, "txt");
+        }
+
+        return (current, "pdf");
+    }
+
+    private static string OutName(string original, string ext)
+    {
+        var baseName = original.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase)
+            ? original[..^4]
+            : original;
+        var safe = string.Concat(baseName.Select(c =>
+            char.IsLetterOrDigit(c) || c is '_' or '-' or '.' or ' ' ? c : '_'));
+        if (string.IsNullOrWhiteSpace(safe)) safe = "dokument";
+        return $"{safe}.{ext}";
+    }
+
+    private static string UniqueName(string name, HashSet<string> used)
+    {
+        if (used.Add(name)) return name;
+        var dot = name.LastIndexOf('.');
+        var stem = dot > 0 ? name[..dot] : name;
+        var ext = dot > 0 ? name[dot..] : string.Empty;
+        for (var i = 2; ; i++)
+        {
+            var candidate = $"{stem} ({i}){ext}";
+            if (used.Add(candidate)) return candidate;
+        }
+    }
+
+    private static string FormatSize(long bytes) =>
+        bytes < 1024L * 1024 ? $"{bytes / 1024.0:F0} KB" : $"{bytes / (1024.0 * 1024):F1} MB";
+}

@@ -1,0 +1,177 @@
+@using Microsoft.AspNetCore.Components.Web
+@using System.Globalization
+@inject IJSRuntime JS
+@inject ILocalizationService L
+
+@*
+    Settings-Bereich (M5) — repliziert das „Tweaks"-Panel als fester, eigener
+    Bereich. Schreibt über die pageboundTweaks-Bridge direkt die CSS-Variablen
+    (data-theme/--accent/--font-scale/--d/data-motion) + persistiert localStorage.
+*@
+
+@if (Open)
+{
+    <div class="fixed inset-0 z-[120]" @onclick="CloseAsync">
+        <div class="absolute inset-0" style="background: rgb(0 0 0 / 0.35)"></div>
+        <div id="settings-panel" class="absolute top-14 right-3 w-[300px] max-h-[calc(100vh-5rem)] overflow-y-auto rounded-[14px] pb-glass-strong"
+             style="box-shadow: var(--shadow-pop)"
+             role="dialog" aria-label="@L.T("settings.title")" tabindex="-1"
+             @onkeydown="HandleKeyAsync"
+             @onclick:stopPropagation="true">
+
+            <div class="flex items-center justify-between px-4 py-3" style="border-bottom: 1px solid var(--line)">
+                <b style="font-family: var(--font-display); font-size: 1.05rem; font-weight: 600;">@L.T("settings.title")</b>
+                <button type="button" class="icon-btn" style="width:2rem;height:2rem" aria-label="@L.T("common.close")" @ref="_closeBtn" @onclick="CloseAsync"><Icon Name="x" /></button>
+            </div>
+
+            <div class="px-4 py-3 flex flex-col gap-4 text-sm">
+
+                @* DARSTELLUNG *@
+                <div class="flex flex-col gap-2">
+                    <div class="eyebrow">@L.T("settings.appearance")</div>
+                    <div class="flex flex-col gap-1.5">
+                        <span class="text-pb-fg-muted text-xs">@L.T("settings.theme")</span>
+                        <div class="pb-seg" role="group" aria-label="@L.T("settings.theme")">
+                            <button type="button" class="@SegClass(_t.Theme == "dark")" @onclick='@(() => SetThemeAsync("dark"))'>@L.T("settings.theme.dark")</button>
+                            <button type="button" class="@SegClass(_t.Theme == "light")" @onclick='@(() => SetThemeAsync("light"))'>@L.T("settings.theme.light")</button>
+                        </div>
+                    </div>
+                </div>
+
+                @* AKZENTFARBE *@
+                <div class="flex flex-col gap-2">
+                    <div class="eyebrow">@L.T("settings.accent")</div>
+                    <div class="flex gap-2">
+                        @foreach (var ac in Accents)
+                        {
+                            var id = ac.Id;
+                            var active = _t.Accent == id;
+                            <button type="button"
+                                    aria-label="@L.T($"settings.accent.{id}")"
+                                    aria-pressed="@active.ToString().ToLowerInvariant()"
+                                    title="@L.T($"settings.accent.{id}")"
+                                    @onclick="@(() => SetAccentAsync(id))"
+                                    style="@($"width:34px;height:34px;border-radius:9px;background:{ac.Hex};border:2px solid {(active ? "var(--ink)" : "transparent")};{(active ? "box-shadow:0 0 0 2px var(--bg-raised) inset;" : "")}")"></button>
+                        }
+                    </div>
+                </div>
+
+                @* LESBARKEIT *@
+                <div class="flex flex-col gap-2">
+                    <div class="eyebrow">@L.T("settings.readability")</div>
+                    <div class="flex flex-col gap-1.5">
+                        <div class="flex items-baseline justify-between">
+                            <span class="text-pb-fg-muted text-xs">@L.T("settings.fontSize")</span>
+                            <span class="mono text-xs text-pb-fg-muted tabular-nums">@_t.FontScale.ToString("0.##", CultureInfo.InvariantCulture)×</span>
+                        </div>
+                        <input type="range" min="0.85" max="1.35" step="0.05" value="@_t.FontScale.ToString(CultureInfo.InvariantCulture)"
+                               class="pb-range" aria-label="@L.T("settings.fontSize")"
+                               @oninput="OnFontScaleInput" />
+                    </div>
+                    <div class="flex flex-col gap-1.5">
+                        <span class="text-pb-fg-muted text-xs">@L.T("settings.density")</span>
+                        <div class="pb-seg" role="group" aria-label="@L.T("settings.density")">
+                            @foreach (var d in Densities)
+                            {
+                                var id = d;
+                                <button type="button" class="@SegClass(_t.Density == id)" @onclick="@(() => SetDensityAsync(id))">@L.T($"settings.density.{id}")</button>
+                            }
+                        </div>
+                    </div>
+                </div>
+
+                @* BEWEGUNG *@
+                <div class="flex flex-col gap-1">
+                    <label class="flex items-center justify-between cursor-pointer">
+                        <span>@L.T("settings.motion")</span>
+                        <button type="button" class="@($"pb-switch {(_t.Motion ? "on" : "")}")" role="switch" aria-checked="@_t.Motion.ToString().ToLowerInvariant()"
+                                @onclick="@(() => SetMotionAsync(!_t.Motion))"><i></i></button>
+                    </label>
+                    <span class="text-xs text-pb-fg-muted">@L.T("settings.motion.hint")</span>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public bool Open { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private sealed record AccentDef(string Id, string Hex);
+    private static readonly AccentDef[] Accents =
+    {
+        new("teal", "#5fd3c8"), new("jade", "#5fd39a"), new("aqua", "#8fc4d8"), new("coral", "#ec9a7a"),
+        new("violet", "#b8a6f0"), new("blue", "#8fb4f2"), new("rose", "#f29db6"), new("amber", "#e7c56e"),
+    };
+    private static readonly string[] Densities = { "kompakt", "normal", "luftig" };
+
+    private sealed class TweaksState
+    {
+        public string Theme { get; set; } = "dark";
+        public string Accent { get; set; } = "teal";
+        public double FontScale { get; set; } = 1;
+        public string Density { get; set; } = "normal";
+        public bool Motion { get; set; } = true;
+    }
+
+    private TweaksState _t = new();
+    private bool _loaded;
+    private bool _wasOpen;
+    private ElementReference _closeBtn;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && !_loaded)
+        {
+            _loaded = true;
+            try
+            {
+                _t = await JS.InvokeAsync<TweaksState>("pageboundTweaks.load");
+                await InvokeAsync(StateHasChanged);
+            }
+            catch { /* Bridge noch nicht da — Defaults bleiben */ }
+        }
+
+        // Beim Öffnen Fokus in den Dialog ziehen (WCAG 2.4.3); beim Schließen
+        // setzt MainLayout den Fokus zurück auf den Zahnrad-Button.
+        if (Open && !_wasOpen)
+        {
+            _wasOpen = true;
+            try { await _closeBtn.FocusAsync(); } catch { /* noch nicht gerendert */ }
+        }
+        else if (!Open && _wasOpen)
+        {
+            _wasOpen = false;
+        }
+    }
+
+    private async Task HandleKeyAsync(KeyboardEventArgs e)
+    {
+        if (e.Key is "Escape" or "Esc") await CloseAsync();
+    }
+
+    private static string SegClass(bool active) => active ? "pb-seg-btn active" : "pb-seg-btn";
+
+    private async Task ApplyAsync(string key, object value)
+    {
+        try { _t = await JS.InvokeAsync<TweaksState>("pageboundTweaks.set", key, value); }
+        catch { /* ignore */ }
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private Task SetThemeAsync(string v) => ApplyAsync("theme", v);
+    private Task SetAccentAsync(string v) => ApplyAsync("accent", v);
+    private Task SetDensityAsync(string v) => ApplyAsync("density", v);
+    private Task SetMotionAsync(bool v) => ApplyAsync("motion", v);
+
+    private async Task OnFontScaleInput(ChangeEventArgs e)
+    {
+        if (double.TryParse(e.Value?.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var v))
+        {
+            await ApplyAsync("fontScale", v);
+        }
+    }
+
+    private Task CloseAsync() => OnClose.InvokeAsync();
+}

@@ -1,0 +1,15 @@
+# Zeilenenden konsistent halten. Shell-Skripte MÜSSEN LF behalten, sonst bricht
+# der Shebang auf Linux (\r → "bad interpreter"). Gilt u.a. für infra/deploy/deploy.sh.
+* text=auto
+
+*.sh            text eol=lf
+Caddyfile*      text eol=lf
+*.yml           text eol=lf
+*.yaml          text eol=lf
+Dockerfile      text eol=lf
+
+# Self-hosted OCR assets (Tesseract WASM core + trained language models) are
+# binary — never apply text/eol normalization to them.
+*.wasm          binary
+*.gz            binary
+*.traineddata   binary

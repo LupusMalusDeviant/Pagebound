@@ -1,0 +1,28 @@
+# Pagebound — Caddy-Site-Block (an die bestehende /home/ubuntu/lupusmalus-web/
+# Caddyfile anhängen). Bewusst OHNE `import security-headers`: Pagebounds eigenes
+# nginx liefert bereits einen Blazor-WASM-tauglichen CSP ('wasm-unsafe-eval' etc.)
+# plus X-Frame-Options/nosniff/Referrer/Permissions-Policy. Würden wir hier den
+# Marketing-CSP der Snippet-Vorlage zusätzlich setzen, kämen ZWEI CSP-Header an —
+# der Browser erzwingt die Schnittmenge und Blazor (WASM-eval) wäre blockiert.
+# Caddy ergänzt daher nur HSTS (TLS-Terminator) und versteckt den Server-Banner;
+# alle übrigen Header reicht es vom Upstream durch.
+pagebound.app.lupusmalus.dev {
+    encode zstd gzip
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        -Server
+    }
+
+    # Tokenloser MCP-Endpunkt (Streamable HTTP) für LLM-Agenten. Pfad bleibt /mcp
+    # (kein handle_path-Strip), da der Node-Server genau dort lauscht. Limits
+    # (Größe/Seiten) erzwingt der MCP-Container selbst — siehe docker-compose.
+    handle /mcp* {
+        reverse_proxy pagebound-mcp:3000
+    }
+
+    # Alles andere: die statische Blazor-WASM-App (nginx mit Blazor-CSP).
+    handle {
+        reverse_proxy pagebound:80
+    }
+}

@@ -1,0 +1,441 @@
+@page "/library"
+@using System.Globalization
+@using Microsoft.AspNetCore.Components.Web
+@inject ILibraryService Library
+@inject IFileHandleService Files
+@inject ILocalizationService L
+@inject NavigationManager Nav
+@inject IWorkspaceService Workspace
+
+<PageTitle>@L.T("library.pageTitle")</PageTitle>
+
+<section class="mx-auto max-w-[1800px] px-4 sm:px-6 lg:px-8 py-8">
+    <header class="max-w-4xl mx-auto masthead-pg">
+        <div class="folio-line">
+            <span>@L.T("home.ed.local")</span><span class="sep">·</span>
+            <span>@L.T("library.folio")</span>
+        </div>
+        <h1 class="page-title">@L.T("library.heading")</h1>
+        <p class="standfirst">@L.T("library.subheading")</p>
+    </header>
+
+    @* FA-072: zentraler Sidecar-Workspace. Nur sichtbar, wo die File-System-
+       Access-Directory-API existiert (Chromium); sonst greift der manuelle
+       Download/Upload-Flow im Reader. *@
+    @if (_workspaceSupported)
+    {
+        <div class="max-w-4xl mx-auto mb-4 rounded-lg pb-glass p-3 flex flex-wrap items-center gap-2 text-sm">
+            <span class="text-pb-fg-muted">@L.T("library.workspace.label")</span>
+            @if (_workspaceName is not null)
+            {
+                <span class="inline-flex items-center gap-1 rounded border border-pb-border bg-pb-bg px-2 py-1 font-mono text-xs"><Icon Name="folder" /> @_workspaceName</span>
+                <button type="button"
+                        class="rounded border border-pb-border px-2 py-1 text-xs text-pb-fg-muted hover:text-pb-fg"
+                        @onclick="ClearWorkspaceAsync">
+                    @L.T("library.workspace.clear")
+                </button>
+            }
+            else
+            {
+                <span class="text-xs text-pb-fg-muted">@L.T("library.workspace.none")</span>
+            }
+            <button type="button"
+                    class="btn primary sm"
+                    @onclick="PickWorkspaceAsync">
+                @(_workspaceName is null ? L.T("library.workspace.pick") : L.T("library.workspace.change"))
+            </button>
+            <span class="ml-auto text-xs text-pb-fg-muted">@L.T("library.workspace.hint")</span>
+        </div>
+    }
+
+    @if (_loading)
+    {
+        <div class="max-w-4xl mx-auto text-sm text-pb-fg-muted">@L.T("app.loadingShort")</div>
+    }
+    else if (_entries.Count == 0 && _allTags.Count == 0 && string.IsNullOrWhiteSpace(_search) && _selectedTags.Count == 0)
+    {
+        <div class="max-w-4xl mx-auto rounded-lg pb-glass p-8 text-center">
+            <p class="text-sm text-pb-fg-muted">@L.T("library.empty")</p>
+            <a href="/reader" class="btn primary mt-3">
+                @L.T("library.emptyCta")
+            </a>
+        </div>
+    }
+    else
+    {
+        <div class="max-w-4xl mx-auto rounded-lg pb-glass p-3 flex flex-wrap items-center gap-2 text-sm">
+            <input @bind="_search" @bind:event="oninput" @bind:after="RefreshAsync"
+                   type="search"
+                   class="flex-1 min-w-[16rem] rounded border border-pb-border bg-pb-bg px-3 py-1.5 text-sm"
+                   placeholder="@L.T("library.search.placeholder")"
+                   aria-label="@L.T("library.search.label")" />
+
+            <span class="text-pb-fg-muted">@L.T("library.sort.label")</span>
+            <select @bind="_sort" @bind:after="RefreshAsync"
+                    aria-label="@L.T("library.sort.label")"
+                    class="rounded border border-pb-border bg-pb-bg px-2 py-1 text-sm">
+                <option value="@LibrarySort.LastOpenedDesc">@L.T("library.sort.lastOpened")</option>
+                <option value="@LibrarySort.AddedDesc">@L.T("library.sort.added")</option>
+                <option value="@LibrarySort.TitleAsc">@L.T("library.sort.titleAsc")</option>
+                <option value="@LibrarySort.TitleDesc">@L.T("library.sort.titleDesc")</option>
+            </select>
+
+            <span class="text-pb-fg-muted">@L.T("library.view.label")</span>
+            @foreach (var (mode, labelKey) in LibraryViews)
+            {
+                var m = mode;
+                var active = _view == m;
+                <button type="button"
+                        class="@($"rounded border px-2 py-0.5 text-xs {(active ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted hover:text-pb-fg")}")"
+                        @onclick="@(() => _view = m)">
+                    @L.T(labelKey)
+                </button>
+            }
+
+            <span class="ml-auto text-xs text-pb-fg-muted">
+                @L.T("library.count", new Dictionary<string, object> { ["count"] = _entries.Count })
+            </span>
+        </div>
+
+        @if (_allTags.Count > 0)
+        {
+            <div class="max-w-4xl mx-auto mt-2 flex flex-wrap items-center gap-2 text-sm">
+                <span class="text-pb-fg-muted">@L.T("library.tags.label")</span>
+                <button type="button"
+                        class="@($"rounded-full border px-2 py-0.5 text-xs {(_selectedTags.Count == 0 ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted")}")"
+                        @onclick="ClearTagFilter">
+                    @L.T("library.tags.clear")
+                </button>
+                @foreach (var tag in _allTags)
+                {
+                    var t = tag;
+                    var active = _selectedTags.Contains(t);
+                    <button type="button"
+                            class="@($"rounded-full border px-2 py-0.5 text-xs {(active ? "border-pb-accent text-pb-accent bg-pb-accent/10" : "border-pb-border text-pb-fg-muted hover:text-pb-fg")}")"
+                            @onclick="@(() => ToggleTagFilter(t))">
+                        #@t
+                    </button>
+                }
+            </div>
+        }
+
+        @if (_view == LibraryView.Table)
+        {
+            <div class="max-w-4xl mx-auto mt-4 overflow-x-auto rounded-lg pb-glass">
+                <table class="w-full text-sm">
+                    <thead class="text-xs text-pb-fg-muted">
+                        <tr class="border-b border-pb-border text-left">
+                            <th class="px-3 py-2 font-medium">@L.T("library.col.title")</th>
+                            <th class="px-3 py-2 font-medium">@L.T("library.col.pages")</th>
+                            <th class="px-3 py-2 font-medium">@L.T("library.col.size")</th>
+                            <th class="px-3 py-2 font-medium">@L.T("library.col.tags")</th>
+                            <th class="px-3 py-2 font-medium">@L.T("library.col.added")</th>
+                            <th class="px-3 py-2 font-medium">@L.T("library.col.opened")</th>
+                            <th class="px-3 py-2"></th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-pb-border">
+                        @foreach (var item in _entries)
+                        {
+                            var entry = item;
+                            var pageCount = entry.PdfMeta?.PageCount ?? 0;
+                            <tr class="hover:bg-pb-bg/40">
+                                <td class="px-3 py-2">
+                                    <button type="button" class="text-left font-medium hover:text-pb-accent"
+                                            @onclick="@(() => OpenInReaderAsync(entry))">@entry.Title</button>
+                                </td>
+                                <td class="px-3 py-2 text-pb-fg-muted tabular-nums">@(pageCount > 0 ? pageCount.ToString() : "—")</td>
+                                <td class="px-3 py-2 text-pb-fg-muted">@(entry.PdfMeta is { } m && m.FileSize > 0 ? FormatSize(m.FileSize) : "—")</td>
+                                <td class="px-3 py-2">
+                                    <div class="flex flex-wrap gap-1">
+                                        @foreach (var tag in entry.Tags ?? Array.Empty<string>())
+                                        {
+                                            var tg = tag;
+                                            <span class="inline-flex items-center gap-1 rounded-full border border-pb-border bg-pb-bg px-2 py-0.5 text-xs text-pb-fg-muted">#@tg<button type="button" class="hover:text-red-500" aria-label="@L.T("library.entry.removeTag.aria", new Dictionary<string, object> { ["tag"] = tg })" @onclick="@(() => RemoveTagAsync(entry, tg))">×</button></span>
+                                        }
+                                    </div>
+                                </td>
+                                <td class="px-3 py-2 text-pb-fg-muted tabular-nums">@FormatDate(entry.AddedAt)</td>
+                                <td class="px-3 py-2 text-pb-fg-muted tabular-nums">@(entry.LastOpenedAt is { } lo ? FormatDate(lo) : "—")</td>
+                                <td class="px-3 py-2 text-right">
+                                    <button type="button" class="text-pb-fg-muted hover:text-red-500"
+                                            title="@L.T("library.entry.removeTitle")"
+                                            @onclick="@(() => RemoveEntryAsync(entry))"><Icon Name="trash" /></button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+        else if (_view == LibraryView.Grid)
+        {
+            <div class="lib-grid max-w-4xl mx-auto mt-4">
+                @foreach (var item in _entries)
+                {
+                    var entry = item;
+                    var pageCount = entry.PdfMeta?.PageCount ?? 0;
+                    var hash = ShortHash(entry);
+                    <div class="doc">
+                        <button type="button" class="doc-cover" title="@L.T("library.entry.openTitle")"
+                                aria-label="@entry.Title" @onclick="@(() => OpenInReaderAsync(entry))">
+                            <span class="glyphbg"><Icon Name="doc" /></span>
+                            <span class="pages"><i></i><i></i><i></i></span>
+                            @if (!string.IsNullOrEmpty(hash))
+                            {
+                                <span class="sidecar" title="SHA-256"><Icon Name="shield" /></span>
+                            }
+                        </button>
+                        <div class="doc-body">
+                            <button type="button" class="title" @onclick="@(() => OpenInReaderAsync(entry))">@entry.Title</button>
+                            <div class="doc-meta">
+                                @if (pageCount > 0)
+                                {
+                                    <span><Icon Name="doc" /> @pageCount</span>
+                                }
+                                @if (entry.PdfMeta is { } m && m.FileSize > 0)
+                                {
+                                    <span>@FormatSize(m.FileSize)</span>
+                                }
+                                <span><Icon Name="clock" /> @FormatDate(entry.AddedAt)</span>
+                                @if (!string.IsNullOrEmpty(hash))
+                                {
+                                    <span class="hash">@hash</span>
+                                }
+                            </div>
+                            @if ((entry.Tags ?? Array.Empty<string>()).Any())
+                            {
+                                <div class="doc-tags">
+                                    @foreach (var tag in entry.Tags!)
+                                    {
+                                        <span class="t">#@tag</span>
+                                    }
+                                </div>
+                            }
+                            <div class="flex items-center justify-end pt-1 mt-auto">
+                                <button type="button" class="text-pb-fg-muted hover:text-red-500"
+                                        title="@L.T("library.entry.removeTitle")"
+                                        @onclick="@(() => RemoveEntryAsync(entry))"><Icon Name="trash" /></button>
+                            </div>
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+        else
+        {
+        <ul class="max-w-4xl mx-auto mt-4 divide-y divide-pb-border rounded-lg pb-glass">
+            @foreach (var item in _entries)
+            {
+                var entry = item;
+                var pageCount = entry.PdfMeta?.PageCount ?? 0;
+                <li class="p-4 hover:bg-pb-bg/40">
+                    <div class="flex items-start gap-3">
+                        <div class="flex-1 min-w-0">
+                            <button type="button"
+                                    class="text-left font-medium text-pb-fg hover:text-pb-accent truncate block w-full"
+                                    title="@L.T("library.entry.openTitle")"
+                                    @onclick="@(() => OpenInReaderAsync(entry))">
+                                @entry.Title
+                            </button>
+                            <div class="mt-1 flex flex-wrap items-center gap-3 text-xs text-pb-fg-muted">
+                                @if (pageCount > 0)
+                                {
+                                    <span>@L.T("library.entry.pageCount", new Dictionary<string, object> { ["count"] = pageCount })</span>
+                                }
+                                @if (entry.PdfMeta is { } meta && meta.FileSize > 0)
+                                {
+                                    <span>@L.T("library.entry.fileSize", new Dictionary<string, object> { ["size"] = FormatSize(meta.FileSize) })</span>
+                                }
+                                <span>@L.T("library.entry.addedAt", new Dictionary<string, object> { ["date"] = FormatDate(entry.AddedAt) })</span>
+                                <span>
+                                    @(entry.LastOpenedAt is { } lo
+                                        ? L.T("library.entry.lastOpenedAt", new Dictionary<string, object> { ["date"] = FormatDate(lo) })
+                                        : L.T("library.entry.neverOpened"))
+                                </span>
+                            </div>
+                            <div class="mt-2 flex flex-wrap items-center gap-1">
+                                @foreach (var tag in entry.Tags ?? Array.Empty<string>())
+                                {
+                                    var tg = tag;
+                                    <span class="inline-flex items-center gap-1 rounded-full border border-pb-border bg-pb-bg px-2 py-0.5 text-xs text-pb-fg-muted">
+                                        #@tg
+                                        <button type="button"
+                                                class="text-pb-fg-muted hover:text-red-500"
+                                                aria-label="@L.T("library.entry.removeTag.aria", new Dictionary<string, object> { ["tag"] = tg })"
+                                                @onclick="@(() => RemoveTagAsync(entry, tg))">
+                                            ×
+                                        </button>
+                                    </span>
+                                }
+                                <input type="text"
+                                       class="rounded border border-pb-border bg-pb-bg px-2 py-0.5 text-xs w-40"
+                                       placeholder="@L.T("library.entry.addTag.placeholder")"
+                                       aria-label="@L.T("library.entry.addTag.aria")"
+                                       value="@_tagDraft.GetValueOrDefault(entry.Id.Value, string.Empty)"
+                                       @oninput="@(e => _tagDraft[entry.Id.Value] = e.Value?.ToString() ?? string.Empty)"
+                                       @onkeydown="@(e => OnTagKeydownAsync(e, entry))" />
+                            </div>
+                        </div>
+                        <button type="button"
+                                class="text-pb-fg-muted hover:text-red-500"
+                                title="@L.T("library.entry.removeTitle")"
+                                @onclick="@(() => RemoveEntryAsync(entry))">
+                            <Icon Name="trash" />
+                        </button>
+                    </div>
+                </li>
+            }
+        </ul>
+        }
+    }
+</section>
+
+@code {
+    private List<LibraryEntry> _entries = new();
+    private List<string> _allTags = new();
+    private HashSet<string> _selectedTags = new(StringComparer.OrdinalIgnoreCase);
+    private string _search = string.Empty;
+    private LibrarySort _sort = LibrarySort.LastOpenedDesc;
+    private bool _loading = true;
+    private LibraryView _view = LibraryView.List;
+
+    // Die drei Library-Ansichten (FA-061/062). Reihenfolge = Reihenfolge der Umschalt-Buttons.
+    private enum LibraryView { List, Table, Grid }
+
+    private static readonly (LibraryView Mode, string LabelKey)[] LibraryViews =
+    {
+        (LibraryView.List, "library.view.list"),
+        (LibraryView.Table, "library.view.table"),
+        (LibraryView.Grid, "library.view.grid"),
+    };
+    // Pro Eintrag-Id hält dieser Cache den aktuell getippten Tag-Entwurf,
+    // damit der Input nicht bei jedem Re-Render geleert wird.
+    private readonly Dictionary<string, string> _tagDraft = new();
+
+    // FA-072: zentraler Sidecar-Workspace-Ordner (Chromium-only).
+    private bool _workspaceSupported;
+    private string? _workspaceName;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await RefreshAsync();
+        _workspaceSupported = await Workspace.IsSupportedAsync(CancellationToken.None);
+        if (_workspaceSupported)
+        {
+            _workspaceName = await Workspace.GetWorkspaceNameAsync(CancellationToken.None);
+        }
+    }
+
+    private async Task PickWorkspaceAsync()
+    {
+        var name = await Workspace.PickWorkspaceAsync(CancellationToken.None);
+        if (name is not null) _workspaceName = name;
+        StateHasChanged();
+    }
+
+    private async Task ClearWorkspaceAsync()
+    {
+        await Workspace.ClearWorkspaceAsync(CancellationToken.None);
+        _workspaceName = null;
+        StateHasChanged();
+    }
+
+    private async Task RefreshAsync()
+    {
+        _loading = true;
+        var query = new LibraryQuery(
+            FullTextSearch: string.IsNullOrWhiteSpace(_search) ? null : _search,
+            Tags: _selectedTags.Count > 0 ? _selectedTags.ToList() : null,
+            Sort: _sort);
+        _entries = (await Library.QueryAsync(query, CancellationToken.None)).ToList();
+        _allTags = (await Library.GetAllTagsAsync(CancellationToken.None)).ToList();
+        _loading = false;
+        StateHasChanged();
+    }
+
+    private void ToggleTagFilter(string tag)
+    {
+        if (_selectedTags.Contains(tag)) _selectedTags.Remove(tag);
+        else _selectedTags.Add(tag);
+        _ = RefreshAsync();
+    }
+
+    private void ClearTagFilter()
+    {
+        if (_selectedTags.Count == 0) return;
+        _selectedTags.Clear();
+        _ = RefreshAsync();
+    }
+
+    private void OpenInReaderAsync(LibraryEntry entry)
+    {
+        // Wenn der Eintrag einen Hash kennt, geben wir ihn dem Reader via
+        // ?pdf=-Query mit — er versucht dann die Bytes aus dem IndexedDB-Cache
+        // wiederherzustellen (Auto-Open, FA-060). Wenn die Bytes nicht (mehr)
+        // gespeichert sind, fällt's still auf den normalen File-Picker zurück.
+        var hash = entry.PdfMeta?.FileHashSha256;
+        if (!string.IsNullOrWhiteSpace(hash))
+        {
+            Nav.NavigateTo($"/reader?pdf={Uri.EscapeDataString(hash)}");
+        }
+        else
+        {
+            Nav.NavigateTo("/reader");
+        }
+    }
+
+    private async Task OnTagKeydownAsync(KeyboardEventArgs e, LibraryEntry entry)
+    {
+        if (e.Key != "Enter") return;
+        var draft = _tagDraft.GetValueOrDefault(entry.Id.Value, string.Empty).Trim();
+        if (string.IsNullOrEmpty(draft)) return;
+        var existing = entry.Tags ?? Array.Empty<string>();
+        if (existing.Any(t => string.Equals(t, draft, StringComparison.OrdinalIgnoreCase))) return;
+        var newTags = existing.Concat(new[] { draft }).ToList();
+        await Library.AddOrUpdateAsync(entry with { Tags = newTags }, CancellationToken.None);
+        _tagDraft[entry.Id.Value] = string.Empty;
+        await RefreshAsync();
+    }
+
+    private async Task RemoveTagAsync(LibraryEntry entry, string tag)
+    {
+        var newTags = (entry.Tags ?? Array.Empty<string>())
+            .Where(t => !string.Equals(t, tag, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        await Library.AddOrUpdateAsync(entry with { Tags = newTags }, CancellationToken.None);
+        await RefreshAsync();
+    }
+
+    private async Task RemoveEntryAsync(LibraryEntry entry)
+    {
+        // Confirm-Dialog später als eigene UI-Komponente; aktuell direkt löschen.
+        await Library.RemoveAsync(entry.Id, CancellationToken.None);
+        // Auch das persistierte FSA-File-Handle aufräumen (Chromium-only,
+        // sonst no-op). Sonst hängen Handles in IndexedDB obwohl der Eintrag
+        // schon weg ist.
+        var hash = entry.PdfMeta?.FileHashSha256;
+        if (!string.IsNullOrEmpty(hash))
+        {
+            await Files.ClearHandleAsync(hash, CancellationToken.None);
+        }
+        await RefreshAsync();
+    }
+
+    private static string ShortHash(LibraryEntry e)
+    {
+        var h = e.PdfMeta?.FileHashSha256;
+        return string.IsNullOrEmpty(h) ? "" : h[..Math.Min(4, h.Length)];
+    }
+
+    private static string FormatDate(DateTimeOffset dt) =>
+        dt.ToLocalTime().ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+
+    private static string FormatSize(long bytes)
+    {
+        if (bytes < 1024) return $"{bytes} B";
+        if (bytes < 1024L * 1024) return $"{bytes / 1024.0:F0} KB";
+        if (bytes < 1024L * 1024 * 1024) return $"{bytes / (1024.0 * 1024):F1} MB";
+        return $"{bytes / (1024.0 * 1024 * 1024):F1} GB";
+    }
+}

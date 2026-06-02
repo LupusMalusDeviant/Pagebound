@@ -1,0 +1,40 @@
+# =============================================================================
+# Pagebound — Deploy auf dem LupusMalus-Host (Infomaniak), neben lupusmalus.dev.
+# Eigenes Compose-Projekt, hängt an dasselbe externe Netz `lupusmalus-net` wie
+# der bestehende Caddy-Reverse-Proxy. Caddy erreicht den Container intern unter
+# `pagebound:80` — kein Host-Port nötig, TLS macht Caddy automatisch.
+# =============================================================================
+services:
+  pagebound:
+    image: ghcr.io/lupusmalusdeviant/pagebound:latest
+    container_name: pagebound
+    restart: unless-stopped
+    # nginx im Image liefert die statische WASM-App auf Port 80 (siehe Dockerfile
+    # + infra/docker/nginx.conf mit Blazor-tauglichem CSP). Keine ports:-Map —
+    # nur Caddy spricht den Container über das Docker-Netz an.
+    networks:
+      - lupusmalus-net
+
+  # Tokenloser MCP-Endpunkt für LLM-Agenten (Streamable HTTP), unter …/mcp.
+  # „Tokenlos + Limits": kein Auth-Token, aber harte Größen-/Seiten-Schranken.
+  # Caddy erreicht den Container intern unter pagebound-mcp:3000 (kein Host-Port).
+  pagebound-mcp:
+    image: ghcr.io/lupusmalusdeviant/pagebound-mcp:latest
+    container_name: pagebound-mcp
+    restart: unless-stopped
+    environment:
+      MCP_TRANSPORT: http
+      PORT: "3000"
+      MCP_MAX_PDF_BYTES: "26214400" # 25 MB pro PDF
+      MCP_MAX_PAGES: "1000"
+    # Read-only Rootfs + No-new-privileges: der Server schreibt nur nach base64
+    # (kein Datei-I/O im HTTP-Modus), braucht also kein beschreibbares FS.
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - lupusmalus-net
+
+networks:
+  lupusmalus-net:
+    external: true

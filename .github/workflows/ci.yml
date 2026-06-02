@@ -1,0 +1,185 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  DOTNET_VERSION: '10.0.x'
+  NODE_VERSION: '20.x'
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  build-and-test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: src/Pagebound.Web/package-lock.json
+
+      - name: Restore .NET packages
+        run: dotnet restore
+
+      - name: Install npm packages
+        working-directory: src/Pagebound.Web
+        run: npm ci
+
+      - name: Build CSS + JS bridges
+        working-directory: src/Pagebound.Web
+        run: npm run build
+
+      - name: Build solution
+        run: dotnet build --configuration Release --no-restore
+
+      - name: Run unit & component tests
+        # E2E (Playwright) laufen im dedizierten e2e-tests-Job mit echtem Server —
+        # hier ausschließen, sonst würden sie mangels Server nur (grün) übersprungen.
+        run: dotnet test --configuration Release --no-build --filter "FullyQualifiedName!~E2ETests" --settings coverlet.runsettings --collect:"XPlat Code Coverage" --logger "trx;LogFileName=test-results.trx"
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: '**/test-results.trx'
+
+      - name: Upload coverage to Codecov
+        if: success()
+        uses: codecov/codecov-action@v4
+        with:
+          files: '**/coverage.cobertura.xml'
+
+  e2e-tests:
+    name: E2E Tests (Playwright)
+    runs-on: ubuntu-latest
+    needs: build-and-test
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Restore .NET packages
+        run: dotnet restore
+
+      - name: Build CSS + JS bridges
+        working-directory: src/Pagebound.Web
+        run: |
+          npm ci
+          npm run build
+
+      - name: Publish Blazor WASM
+        run: dotnet publish src/Pagebound.Web --configuration Release --output ./publish
+
+      - name: Build E2E test project
+        run: dotnet build tests/Pagebound.E2ETests --configuration Release
+
+      - name: Install Playwright browsers
+        run: pwsh tests/Pagebound.E2ETests/bin/Release/net10.0/playwright.ps1 install --with-deps chromium
+
+      - name: Serve app in background
+        run: |
+          npm install -g serve@latest
+          serve -s ./publish/wwwroot -l 5000 &
+          echo "App server started on port 5000"
+          # Wait for the server to be ready
+          for i in $(seq 1 30); do
+            if nc -z localhost 5000; then break; fi
+            sleep 1
+          done
+
+      - name: Run E2E tests
+        env:
+          PAGEBOUND_URL: http://localhost:5000
+        run: dotnet test tests/Pagebound.E2ETests --configuration Release --no-build
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: tests/Pagebound.E2ETests/playwright-report
+
+  lighthouse:
+    name: Lighthouse A11y Audit
+    runs-on: ubuntu-latest
+    needs: build-and-test
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Build & publish
+        run: |
+          cd src/Pagebound.Web
+          npm ci
+          npm run build
+          cd ../..
+          dotnet publish src/Pagebound.Web --configuration Release --output ./publish
+
+      - name: Run Lighthouse CI
+        run: |
+          npm install -g @lhci/cli@latest
+          # Reines ACCESSIBILITY-Gate: nur die Accessibility-Kategorie asserten,
+          # KEIN lighthouse-Preset. Das Preset prüft die komplette Performance-
+          # Kategorie als Fehler (max-potential-fid, render-blocking, TBT …), die
+          # eine Blazor-WASM-Standalone-App prinzipiell nicht erfüllt — der WASM-
+          # Boot blockiert den Main-Thread. Hier zählt Barrierefreiheit, nicht Perf.
+          lhci autorun --collect.staticDistDir=./publish/wwwroot --assert.assertions.categories:accessibility=">=0.9"
+
+  mcp-server:
+    name: MCP server (build + smoke)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: mcp/package-lock.json
+
+      - name: Build + smoke (pagebound-pdf-mcp-server)
+        working-directory: mcp
+        run: |
+          npm ci
+          npm run build
+          npm run smoke

@@ -1,0 +1,44 @@
+@*
+    Ein Knoten im PDF-Inhaltsverzeichnis (FA-006). Rendert sich rekursiv über
+    seine Kinder. Einträge ohne aufgelöste PageNumber werden als nicht-klickbare
+    Section-Headings dargestellt.
+*@
+
+@{
+    var hasPage = Entry.PageNumber.HasValue;
+}
+
+<li class="py-0.5">
+    <button type="button"
+            class="@($"w-full text-left rounded px-1 py-0.5 text-sm flex items-baseline gap-2 {(hasPage ? "hover:bg-pb-bg" : "text-pb-fg-muted italic cursor-default")}")"
+            disabled="@(!hasPage)"
+            @onclick="HandleClickAsync">
+        <span class="truncate flex-1" title="@Entry.Title">@Entry.Title</span>
+        @if (hasPage)
+        {
+            <span class="text-xs text-pb-fg-muted tabular-nums">@Entry.PageNumber</span>
+        }
+    </button>
+    @if (Entry.Children.Count > 0)
+    {
+        <ul class="pl-3 border-l border-pb-border ml-1.5">
+            @foreach (var child in Entry.Children)
+            {
+                <OutlineNode Entry="child" OnNavigate="OnNavigate" />
+            }
+        </ul>
+    }
+</li>
+
+@code {
+    [Parameter, EditorRequired] public PdfOutlineEntry Entry { get; set; } = default!;
+    [Parameter, EditorRequired] public EventCallback<int> OnNavigate { get; set; }
+
+    private async Task HandleClickAsync()
+    {
+        if (Entry.PageNumber.HasValue)
+        {
+            await OnNavigate.InvokeAsync(Entry.PageNumber.Value);
+        }
+    }
+}
