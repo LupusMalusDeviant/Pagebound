@@ -464,6 +464,89 @@ export async function extractText(bytes: Uint8Array, pages?: string): Promise<{ 
   }
 }
 
+// --- Table extraction (Best-Effort, Heuristik auf Text-Positionen) -----------
+// Spiegelt die Bridge-Heuristik der Web-App: Items zeilenweise über y clustern,
+// innerhalb der Zeile über horizontale Lücken in Zellen trennen. Kein OCR/ML.
+
+interface TblItem { str: string; x: number; y: number; w: number; h: number; }
+
+function csvEscapeCell(s: string): string {
+  const v = s.trim();
+  return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+}
+
+function pageItemsToCsv(items: TblItem[]): string[] {
+  if (items.length === 0) return [];
+  const heights = items.map((i) => i.h).filter((h) => h > 0).sort((a, b) => a - b);
+  const medH = heights.length ? heights[Math.floor(heights.length / 2)] : 10;
+  const rowTol = Math.max(2, medH * 0.6);
+  const colGap = Math.max(4, medH * 1.2);
+
+  const byY = [...items].sort((a, b) => a.y - b.y || a.x - b.x);
+  const rows: TblItem[][] = [];
+  let cur: TblItem[] = [];
+  let curY = byY[0].y;
+  for (const it of byY) {
+    if (cur.length && Math.abs(it.y - curY) > rowTol) { rows.push(cur); cur = []; }
+    if (!cur.length) curY = it.y;
+    cur.push(it);
+  }
+  if (cur.length) rows.push(cur);
+
+  return rows.map((row) => {
+    const sorted = row.sort((a, b) => a.x - b.x);
+    const cells: string[] = [];
+    let cell = sorted[0].str;
+    let prevRight = sorted[0].x + sorted[0].w;
+    for (let i = 1; i < sorted.length; i++) {
+      const it = sorted[i];
+      if (it.x - prevRight > colGap) { cells.push(cell); cell = it.str; }
+      else cell += (cell.endsWith(" ") || it.str.startsWith(" ") ? "" : " ") + it.str;
+      prevRight = it.x + it.w;
+    }
+    cells.push(cell);
+    return cells.map(csvEscapeCell).join(",");
+  });
+}
+
+export async function extractTablesCsv(bytes: Uint8Array, pages?: string): Promise<{ pageCount: number; csv: string }> {
+  const pdfjs = await getPdfjs();
+  let doc;
+  try {
+    doc = await pdfjs.getDocument({ data: bytes, isEvalSupported: false, verbosity: 0 }).promise;
+  } catch (e) {
+    throw new ToolError(`Tabellen-Extraktion fehlgeschlagen (${errMsg(e)}).`);
+  }
+  try {
+    const total = doc.numPages;
+    enforcePages(total);
+    const want = pages
+      ? [...new Set(parsePageSpec(pages, total))].sort((a, b) => a - b)
+      : Array.from({ length: total }, (_, i) => i + 1);
+    const out: string[] = [];
+    for (const p of want) {
+      const page = await doc.getPage(p);
+      const content = await page.getTextContent();
+      const vp = page.getViewport({ scale: 1 });
+      const items: TblItem[] = (content.items as Array<{ str?: string; transform?: number[]; width?: number; height?: number }>)
+        .filter((it) => typeof it.str === "string" && it.str.trim().length > 0)
+        .map((it) => ({
+          str: it.str as string,
+          x: it.transform ? it.transform[4] : 0,
+          y: vp.height - (it.transform ? it.transform[5] : 0),
+          w: it.width ?? 0,
+          h: it.height ?? 0,
+        }));
+      const rows = pageItemsToCsv(items);
+      if (rows.length) out.push(rows.join("\n"));
+      page.cleanup();
+    }
+    return { pageCount: total, csv: out.join("\n\n") };
+  } finally {
+    await doc.destroy();
+  }
+}
+
 // --- Metadata ----------------------------------------------------------------
 
 export interface PdfMetadataInput {

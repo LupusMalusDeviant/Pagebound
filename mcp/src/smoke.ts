@@ -35,6 +35,18 @@ async function makeFormSample(): Promise<Uint8Array> {
   return doc.save();
 }
 
+// Mini-Tabelle: 2 Spalten (x=40, x=240), 2 Zeilen (y=150, y=120).
+async function makeTableSample(): Promise<Uint8Array> {
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const p = doc.addPage([400, 200]);
+  p.drawText("Name", { x: 40, y: 150, size: 12, font, color: rgb(0, 0, 0) });
+  p.drawText("Preis", { x: 240, y: 150, size: 12, font, color: rgb(0, 0, 0) });
+  p.drawText("Apfel", { x: 40, y: 120, size: 12, font, color: rgb(0, 0, 0) });
+  p.drawText("1.50", { x: 240, y: 120, size: 12, font, color: rgb(0, 0, 0) });
+  return doc.save();
+}
+
 // 1x1 transparent PNG
 const PNG_1x1 = new Uint8Array(Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
@@ -85,6 +97,17 @@ async function main() {
     check("pdf_extract_text finds drawn text", has, JSON.stringify(t.pages[0]?.text?.slice(0, 60)));
   } catch (err) {
     check("pdf_extract_text runs without throwing", false, String(err));
+  }
+
+  // table extraction (Best-Effort-Heuristik) — fresh sample (pdfjs detaches buffers)
+  try {
+    const tbl = await pdf.extractTablesCsv(await makeTableSample(), "1");
+    const lines = tbl.csv.split("\n");
+    check("pdf_extract_tables → 2 rows", lines.length === 2, JSON.stringify(tbl.csv));
+    check("pdf_extract_tables header row 'Name,Preis'", lines[0] === "Name,Preis", JSON.stringify(lines[0]));
+    check("pdf_extract_tables data row 'Apfel,1.50'", lines[1] === "Apfel,1.50", JSON.stringify(lines[1]));
+  } catch (err) {
+    check("pdf_extract_tables runs without throwing", false, String(err));
   }
 
   // NB: pdfjs (extractText above) detaches its input buffer, so reuse a fresh sample.

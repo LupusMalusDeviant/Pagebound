@@ -164,6 +164,20 @@ Returns: { pageCount, totalChars, pages: [{ page, text }] }. Text wird bei ~25k 
     return ok({ pageCount: res.pageCount, totalChars: res.totalChars, truncated, pages: res.pages }, text || "(kein extrahierbarer Text — evtl. Scan ohne Text-Layer)");
   }));
 
+  server.registerTool("pdf_extract_tables", {
+    title: "Tabellen als CSV extrahieren",
+    description: `Best-Effort-Tabellen-Extraktion (Heuristik auf Text-Positionen, KEIN OCR/ML): Zeilen über y-Cluster, Spalten über horizontale Lücken. Gut bei tabellarischen Layouts, bei Fließtext erwartungsgemäß grob.
+Eingabe: 'path'/'dataBase64', optional 'pages' (z. B. "1-3,5"). Returns: { pageCount, csv }. CSV wird bei ~25k Zeichen gekürzt.`,
+    inputSchema: { ...srcIn, pages: z.string().optional().describe('Seitenauswahl, z. B. "1-3,5" (Default: alle).') },
+    annotations: readAnn,
+  }, guard(async (a: { path?: string; dataBase64?: string; pages?: string }) => {
+    const res = await pdf.extractTablesCsv(await loadPdf(a), a.pages);
+    let csv = res.csv;
+    let truncated = false;
+    if (csv.length > CHARACTER_LIMIT) { csv = csv.slice(0, CHARACTER_LIMIT) + `\n[gekürzt — 'pages' einschränken]`; truncated = true; }
+    return ok({ pageCount: res.pageCount, truncated, csv }, csv || "(keine Tabellendaten erkannt)");
+  }));
+
   server.registerTool("pdf_merge", {
     title: "PDFs zusammenführen",
     description: `Fügt mehrere PDFs in Reihenfolge zu einer zusammen.
