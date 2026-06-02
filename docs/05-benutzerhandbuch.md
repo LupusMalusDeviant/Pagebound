@@ -96,9 +96,9 @@ Browser/​die Suche findet ihn.
 
 **Kein Text-Layer?** Manche PDFs (z. B. Scans oder rein vektorisierte Design-PDFs)
 enthalten keinen durchsuchbaren Text. Dann bietet Pagebound **OCR** (Texterkennung
-per Tesseract.js) an. Beim ersten OCR-Klick wird einmalig ein Sprachmodell aus dem
-Netz nachgeladen (siehe [Datenschutz](#16-datenschutz--sicherheit)); danach ist die
-Seite durchsuchbar.
+per Tesseract.js) an. Beim ersten OCR-Klick werden die Sprachmodelle einmalig
+**lokal** geladen (sie werden mit der App ausgeliefert, kein Download aus dem Netz —
+siehe [Datenschutz](#16-datenschutz--sicherheit)); danach ist die Seite durchsuchbar.
 
 ---
 
@@ -338,9 +338,10 @@ Pagebound ist **konsequent lokal**:
 - **Kein Backend, keine Konten, keine Cookies, keine Telemetrie.** Es gibt nichts,
   wohin Daten gesendet werden könnten.
 - **Schriften sind selbst gehostet** — kein Google-Fonts-Request beim Laden.
-- **Einzige Ausnahme:** Beim ausdrücklichen Klick auf **OCR** wird ein Tesseract-
-  Sprachmodell aus dem Netz geladen. Ohne OCR-Klick gibt es keinen externen
-  Request.
+- **Keinerlei externe Requests** — auch die **OCR** ist vollständig self-hosted:
+  Tesseract-Worker, WASM-Core und die Sprachmodelle (eng/deu) werden mit der App
+  ausgeliefert und lokal geladen. Es gibt **keine Außenverbindung** (technisch durch
+  die CSP `connect-src 'self'` erzwungen); OCR funktioniert deshalb auch offline.
 - Deine Dokumente, Annotationen und Einstellungen liegen im **Browser-Speicher**
   (IndexedDB / localStorage) und optional als **lokale Dateien** (Sidecar,
   Workspace), die du selbst kontrollierst.

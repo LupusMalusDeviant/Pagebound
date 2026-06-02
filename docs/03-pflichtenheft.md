@@ -398,7 +398,7 @@ public sealed record OcrOptions(
     bool EmbedAsHiddenTextLayer = true);
 ```
 
-**Default-Implementierung:** `TesseractOcrService` via Tesseract.js. Sprach-Modelle (eng.traineddata, deu.traineddata) werden lazy aus dem CDN nachgeladen und gecached.
+**Default-Implementierung:** `TesseractOcrService` via Tesseract.js. Worker, WASM-Core und die Sprach-Modelle (eng.traineddata, deu.traineddata) werden **self-hosted** aus `wwwroot/tesseract/` bzw. `wwwroot/tessdata/` geladen — kein CDN, keine externe Verbindung (CSP `connect-src 'self'`), OCR funktioniert offline.
 
 ### 4.10 `IBatchProcessor` – Stapelverarbeitung
 Erfüllt FA-051, FA-052.

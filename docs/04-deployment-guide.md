@@ -235,9 +235,9 @@ Pagebound ist eine rein clientseitige Anwendung ohne Backend — es gibt **keine
 |---|---|---|
 | Blazor-Basis-URL | `<base href="/">` in `index.html` | `/` |
 | API-Basis (nicht vorhanden) | n/a — kein Backend | — |
-| Tesseract.js CDN | `TesseractService.cs` Konstante | offizielles Tesseract-CDN |
+| Tesseract-OCR-Assets | self-hosted: `wwwroot/tesseract/` (Worker + WASM-Core), `wwwroot/tessdata/` (eng/deu) | lokal, kein CDN |
 
-Für eigengehostete Instanzen ohne Internetzugang muss das Tesseract.js-Sprachmodell lokal bereitgestellt und die CDN-URL angepasst werden.
+Die OCR-Assets werden **mit ausgeliefert** (Pfade fest in `wwwroot/js/ocr-bridge.ts`). Es gibt **keine externe URL**, die angepasst werden müsste — OCR läuft auch ohne Internetzugang vollständig offline.
 
 ---
 
@@ -306,8 +306,8 @@ Lösung: Cache-Control-Header für `service-worker.js` auf `no-cache` setzen (in
 
 ### Tesseract.js lädt Sprachmodelle nicht
 
-Ursache: Kein Internetzugang oder CDN geblockt.  
-Lösung: Sprach-Modelle lokal hosten und `TesseractService.cs`-Konstante anpassen.
+Ursache: Die self-hosted OCR-Assets fehlen im Deploy oder werden mit falschem MIME-Typ/Encoding ausgeliefert.  
+Lösung: Sicherstellen, dass `wwwroot/tesseract/` (Worker + `*.wasm`/`*.wasm.js`) und `wwwroot/tessdata/` (`eng.traineddata.gz`, `deu.traineddata.gz`) mit ausgeliefert werden. `*.wasm` als `application/wasm` servieren und die `*.traineddata.gz` **nicht** zusätzlich serverseitig gzippen / mit `Content-Encoding: gzip` ausliefern (Tesseract entpackt sie selbst). Die mitgelieferte `nginx.conf` erfüllt das bereits.
 
 ### Docker-Build schlägt fehl: „npm: not found"
 

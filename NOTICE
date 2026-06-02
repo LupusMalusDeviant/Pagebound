@@ -35,6 +35,25 @@ Licensed under Apache License, Version 2.0
 https://github.com/naptha/tesseract.js
 
 --------------------------------------------------------------------------------
+Tesseract.js-core (WebAssembly OCR engine)
+--------------------------------------------------------------------------------
+Copyright project-naptha and Tesseract.js contributors
+Licensed under Apache License, Version 2.0
+https://github.com/naptha/tesseract.js-core
+Bundled self-hosted under wwwroot/tesseract/ (tesseract-core-simd-lstm.wasm[.js],
+worker.min.js) so OCR runs fully offline with no external/CDN requests.
+
+--------------------------------------------------------------------------------
+Tesseract OCR — Trained Language Data (tessdata)
+--------------------------------------------------------------------------------
+Copyright Google Inc. and the Tesseract OCR contributors
+Licensed under Apache License, Version 2.0
+https://github.com/tesseract-ocr/tessdata
+The eng/deu LSTM models (4.0.0 best, integerized) are bundled self-hosted under
+wwwroot/tessdata/ (eng.traineddata.gz, deu.traineddata.gz), distributed via the
+@tesseract.js-data packages, so OCR loads its models locally without a CDN.
+
+--------------------------------------------------------------------------------
 Markdig
 --------------------------------------------------------------------------------
 Copyright Alexandre Mutel

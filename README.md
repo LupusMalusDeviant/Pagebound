@@ -120,7 +120,7 @@ Details: [docs/02-lastenheft.md](docs/02-lastenheft.md) Abschnitt 6.
 
 ## Anti-Tracking
 
-Pagebound enthält **keine Telemetrie und keinen externen Code, der ohne ausdrückliche Aktion lädt**. Tesseract.js zieht beim ersten OCR-Klick seine Sprach-Modelle aus dem offiziellen Project-CDN — alles andere läuft lokal im Browser. Kein Backend, keine Cookies, keine User-Konten.
+Pagebound enthält **keine Telemetrie und keinen externen Code** — und macht **keinerlei externe Requests**. Auch die OCR ist vollständig **self-hosted**: Tesseract.js-Worker, WASM-Core (`wwwroot/tesseract/`) und die Sprach-Modelle eng/deu (`wwwroot/tessdata/`) werden mit ausgeliefert, nichts kommt von einem CDN. Damit funktioniert OCR auch komplett offline. Kein Backend, keine Cookies, keine User-Konten. (Die CSP `connect-src 'self'` erzwingt das technisch.)
 
 ## Mitwirken
 

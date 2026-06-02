@@ -2,13 +2,26 @@
 // Pagebound — OCR-Bridge (Tesseract.js)
 // ----------------------------------------------------------------------------
 // Wird von Blazor WASM via IJSRuntime.InvokeAsync("pageboundOcr.<fn>", ...) genutzt.
-// Tesseract.js läuft im eigenen Web-Worker (kein UI-Block), das Sprach-Bundle
-// (~10 MB pro Sprache) wird einmal pro Session lazy geladen und wiederverwendet.
+// Tesseract.js läuft im eigenen Web-Worker (kein UI-Block).
+//
+// 100 % LOKAL / KEINE TELEMETRIE: Worker-Skript, WASM-Core und die Sprach-
+// Modelle (eng/deu) werden **self-hosted** aus `wwwroot/` geladen — kein CDN,
+// kein externer Request. Ohne diese Pfade würde Tesseract.js die Assets vom
+// jsDelivr-/Projekt-CDN ziehen (das war die einzige verbliebene Außenverbindung).
 //
 // Entsprechende C#-Klasse: Pagebound.Infrastructure.Ocr.TesseractOcrService.
 // =============================================================================
 
 import { createWorker, type Worker } from "tesseract.js";
+
+// Self-hosted Asset-Pfade (siehe wwwroot/tesseract + wwwroot/tessdata).
+// corePath ist bewusst auf die konkrete SIMD-LSTM-Variante gepinnt, damit nur
+// genau diese eine Core-Datei ausgeliefert werden muss (statt aller Build-
+// Varianten). SIMD wird von allen Zielbrowsern der App unterstützt.
+const TESS_WORKER_PATH = "/tesseract/worker.min.js";
+const TESS_CORE_PATH = "/tesseract/tesseract-core-simd-lstm.wasm.js";
+const TESS_LANG_PATH = "/tessdata"; // enthält eng.traineddata.gz, deu.traineddata.gz
+const OEM_LSTM_ONLY = 1;
 
 let cachedWorker: Worker | null = null;
 let cachedLangs: string | null = null;
@@ -26,7 +39,12 @@ async function ensureWorker(languages: string): Promise<Worker> {
     }
     cachedWorker = null;
   }
-  cachedWorker = await createWorker(languages);
+  cachedWorker = await createWorker(languages, OEM_LSTM_ONLY, {
+    workerPath: TESS_WORKER_PATH,
+    corePath: TESS_CORE_PATH,
+    langPath: TESS_LANG_PATH,
+    // gzip bleibt Default true → lädt "<lang>.traineddata.gz" und entpackt lokal.
+  });
   cachedLangs = languages;
   return cachedWorker;
 }

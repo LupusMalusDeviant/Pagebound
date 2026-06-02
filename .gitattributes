@@ -7,3 +7,9 @@ Caddyfile*      text eol=lf
 *.yml           text eol=lf
 *.yaml          text eol=lf
 Dockerfile      text eol=lf
+
+# Self-hosted OCR assets (Tesseract WASM core + trained language models) are
+# binary — never apply text/eol normalization to them.
+*.wasm          binary
+*.gz            binary
+*.traineddata   binary
