@@ -29,7 +29,7 @@ Pagebound ist ein quelloffenes PDF-Werkzeug, das den Adobe Acrobat Reader im All
 - **Annotationen einbrennen (Flatten)** — Highlights, Notizen, Stift, Formen und Signaturen fest in die PDF brennen → eigenständige „flache" Datei
 - **Schwärzen / Redaktion** — Bereiche dauerhaft schwärzen; der Inhalt darunter wird **entfernt** (echte Redaktion, nicht nur überdeckt), optional mit **Audit-Report** (SHA-256 vorher/nachher + Resttext-Prüfung)
 - **Signieren** — PNG-Signatur platzieren (Drag/Resize) + Signer-Daten + Hash-Integritäts-Badge
-- **Formulare** — AcroForms ausfüllen (Text/Checkbox/Radio/Dropdown/Listbox), editierbar oder geflattet speichern
+- **Formulare** — AcroForms ausfüllen (Text/Checkbox/Radio/Dropdown/Listbox), editierbar oder geflattet speichern; **Formularfelder anlegen** (Text/Checkbox) in /tools
 - **Seiten-Werkzeuge** — Merge, Split, Neu-Sortieren, Löschen, Drehen, JPEG-Komprimierung
 - **Stempeln** — diagonales Text-Wasserzeichen und/oder Seitenzahlen (Bates) auf jede Seite
 - **Bilder → PDF** — PNG/JPG zu PDF (Seitengröße wählbar, Reihenfolge per Drag & Drop)
@@ -72,7 +72,7 @@ Erfordert .NET 10 SDK und Node 20+.
 
 ### Geplant
 
-- **Formular-Builder** im Designer (Feld-Anlegen via MCP `pdf_create_field` ist bereits da)
+- **Formular-Builder im Designer** (visuelles Drag-Platzieren) — das Anlegen von Feldern in `/tools` ist bereits da
 - **PDF/A-Export** + **A11y-Tagging** (PDF/UA) für Archivierung & Barrierefreiheit
 - **Digitale Signaturen** (PAdES/eIDAS, zertifikatsbasiert) als Ergänzung zur Bild-+-Hash-Signatur
 - **Mobile-/Touch-Politur** und **Streaming-Rendering** für sehr große Dateien

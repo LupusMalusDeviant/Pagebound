@@ -21,7 +21,7 @@ Liste fasst den aktuellen Funktionsumfang zusammen.
 
 ### Werkzeuge
 - Seiten-Operationen: Merge, Split, Reorder, Delete, Rotate, JPEG-Komprimierung
-- AcroForms ausfüllen (alle Standard-Feldtypen), Stempeln (Wasserzeichen / Bates-Seitenzahlen)
+- AcroForms ausfüllen (alle Standard-Feldtypen) + Formularfelder anlegen (Text/Checkbox, in /tools), Stempeln (Wasserzeichen / Bates-Seitenzahlen)
 - Bilder → PDF, Konvertierung PDF → PNG/JPG/Text/HTML/CSV (Best-Effort-Tabellen-Extraktion), Stapelverarbeitung (ZIP) mit gespeicherten Regeln
 - AES-256-Verschlüsselung (WebCrypto, gegen PDF.js verifiziert)
 - OCR (Tesseract.js, 100 % self-hosted — kein CDN)
