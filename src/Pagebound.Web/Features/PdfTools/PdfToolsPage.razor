@@ -342,6 +342,25 @@
             <p class="text-xs text-pb-fg-muted">@L.T("tools.formfields.note")</p>
         </div>
 
+        @* Metadaten bearbeiten (MCP↔PWA-Parität: pdf_set_metadata) *@
+        <div class="max-w-4xl mx-auto mt-2 rounded-lg pb-glass p-3 space-y-2 text-sm">
+            <div class="flex flex-wrap items-center gap-2">
+                <span class="text-pb-fg-muted">@L.T("tools.metadata.label")</span>
+                <button type="button" class="rounded border border-pb-border px-2 py-0.5 text-pb-fg-muted hover:text-pb-fg disabled:opacity-40"
+                        disabled="@_isSettingMeta" @onclick="LoadMetadataAsync">@L.T("tools.metadata.load")</button>
+            </div>
+            <div class="grid gap-2 sm:grid-cols-2">
+                <input @bind="_metaTitle" placeholder="@L.T("tools.metadata.title")" class="rounded border border-pb-border bg-pb-bg px-2 py-1 text-sm" aria-label="@L.T("tools.metadata.title")" />
+                <input @bind="_metaAuthor" placeholder="@L.T("tools.metadata.author")" class="rounded border border-pb-border bg-pb-bg px-2 py-1 text-sm" aria-label="@L.T("tools.metadata.author")" />
+                <input @bind="_metaSubject" placeholder="@L.T("tools.metadata.subject")" class="rounded border border-pb-border bg-pb-bg px-2 py-1 text-sm" aria-label="@L.T("tools.metadata.subject")" />
+                <input @bind="_metaKeywords" placeholder="@L.T("tools.metadata.keywords")" class="rounded border border-pb-border bg-pb-bg px-2 py-1 text-sm" aria-label="@L.T("tools.metadata.keywords")" />
+            </div>
+            <button type="button" class="btn primary disabled:opacity-40" disabled="@_isSettingMeta" @onclick="ApplyMetadataAsync">
+                @(_isSettingMeta ? L.T("tools.metadata.running") : L.T("tools.metadata.apply"))
+            </button>
+            <p class="text-xs text-pb-fg-muted">@L.T("tools.metadata.note")</p>
+        </div>
+
         @* Wasserzeichen + Seitenzahlen / Bates *@
         <div class="max-w-4xl mx-auto mt-2 rounded-lg pb-glass p-3 flex flex-wrap items-center gap-2 text-sm">
             <span class="text-pb-fg-muted">@L.T("tools.stamp.label")</span>
@@ -1033,6 +1052,63 @@
         finally
         {
             _isCreatingFields = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    // --- Metadaten bearbeiten (MCP↔PWA-Parität für pdf_set_metadata) ----------
+    private string _metaTitle = string.Empty;
+    private string _metaAuthor = string.Empty;
+    private string _metaSubject = string.Empty;
+    private string _metaKeywords = string.Empty;
+    private bool _isSettingMeta;
+
+    private async Task LoadMetadataAsync()
+    {
+        if (_originalPdfBytes is null || _isSettingMeta) return;
+        _isSettingMeta = true;
+        try
+        {
+            await using var stream = new MemoryStream(_originalPdfBytes);
+            var m = await Manipulator.GetMetadataAsync(stream, CancellationToken.None).ConfigureAwait(false);
+            _metaTitle = m.Title ?? string.Empty;
+            _metaAuthor = m.Author ?? string.Empty;
+            _metaSubject = m.Subject ?? string.Empty;
+            _metaKeywords = m.Keywords ?? string.Empty;
+        }
+        catch (Exception ex)
+        {
+            _convertStatus = L.T("tools.convert.error", new Dictionary<string, object> { ["message"] = ex.Message });
+        }
+        finally
+        {
+            _isSettingMeta = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task ApplyMetadataAsync()
+    {
+        if (_originalPdfBytes is null || _isSettingMeta) return;
+        _isSettingMeta = true;
+        _convertStatus = null;
+        try
+        {
+            var meta = new PdfMetadata(_metaTitle, _metaAuthor, _metaSubject, _metaKeywords);
+            await using var stream = new MemoryStream(_originalPdfBytes);
+            var result = await Manipulator.SetMetadataAsync(stream, meta, CancellationToken.None).ConfigureAwait(false);
+            var filename = BuildConvertedFilename(_currentFilename, "metadata.pdf");
+            await JS.InvokeVoidAsync(
+                "pageboundShortcuts.downloadBytes", filename, Convert.ToBase64String(result), "application/pdf").ConfigureAwait(false);
+            _convertStatus = L.T("tools.metadata.done");
+        }
+        catch (Exception ex)
+        {
+            _convertStatus = L.T("tools.convert.error", new Dictionary<string, object> { ["message"] = ex.Message });
+        }
+        finally
+        {
+            _isSettingMeta = false;
             await InvokeAsync(StateHasChanged);
         }
     }

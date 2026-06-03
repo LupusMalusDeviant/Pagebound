@@ -102,6 +102,12 @@ public interface IPdfManipulator
         Stream pdf,
         IReadOnlyList<FormFieldRegion> fields,
         CancellationToken cancellationToken);
+
+    /// <summary>Setzt Dokument-Metadaten (Titel/Autor/Betreff/Keywords) im Info-Dictionary.</summary>
+    Task<byte[]> SetMetadataAsync(Stream pdf, PdfMetadata metadata, CancellationToken cancellationToken);
+
+    /// <summary>Liest die aktuellen Dokument-Metadaten (für „bearbeiten" / Vorbelegung).</summary>
+    Task<PdfMetadata> GetMetadataAsync(Stream pdf, CancellationToken cancellationToken);
 }
 
 /// <summary>
@@ -127,6 +133,14 @@ public sealed record FormFieldRegion(
     double Height,
     string Name,
     string FieldType);
+
+/// <summary>Dokument-Metadaten (MCP↔PWA-Parität für <c>pdf_set_metadata</c>).
+/// <see cref="Keywords"/> als kommaseparierter String.</summary>
+public sealed record PdfMetadata(
+    string? Title,
+    string? Author,
+    string? Subject,
+    string? Keywords);
 
 /// <summary>
 /// Eine Signatur, wie sie der <see cref="IPdfManipulator"/> in eine PDF einbetten soll.

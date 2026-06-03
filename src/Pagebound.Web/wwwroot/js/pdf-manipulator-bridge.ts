@@ -677,6 +677,35 @@ export async function createFormFields(pdfBytes: Uint8Array, fields: NewFormFiel
   return doc.save();
 }
 
+// Metadaten lesen/setzen (MCP↔PWA-Parität für pdf_set_metadata) — pdf-lib Info-Dict.
+interface DocMeta {
+  title?: string;
+  author?: string;
+  subject?: string;
+  keywords?: string;
+}
+
+export async function setMetadata(pdfBytes: Uint8Array, meta: DocMeta): Promise<Uint8Array> {
+  const doc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
+  if (meta.title != null) doc.setTitle(meta.title);
+  if (meta.author != null) doc.setAuthor(meta.author);
+  if (meta.subject != null) doc.setSubject(meta.subject);
+  if (meta.keywords != null) {
+    doc.setKeywords(meta.keywords.split(",").map((k) => k.trim()).filter(Boolean));
+  }
+  return doc.save();
+}
+
+export async function getMetadata(pdfBytes: Uint8Array): Promise<DocMeta> {
+  const doc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
+  return {
+    title: doc.getTitle() ?? "",
+    author: doc.getAuthor() ?? "",
+    subject: doc.getSubject() ?? "",
+    keywords: doc.getKeywords() ?? "",
+  };
+}
+
 export async function stampPdf(pdfBytes: Uint8Array, opts: StampOptions): Promise<Uint8Array> {
   const doc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
   const font = await doc.embedFont(StandardFonts.Helvetica);

@@ -372,6 +372,40 @@ public sealed class JsPdfLibManipulator : IPdfManipulator
         }
     }
 
+    public async Task<byte[]> SetMetadataAsync(Stream pdf, PdfMetadata metadata, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(pdf);
+        ArgumentNullException.ThrowIfNull(metadata);
+        var bytes = await ReadAllAsync(pdf, cancellationToken).ConfigureAwait(false);
+        var payload = new { title = metadata.Title, author = metadata.Author, subject = metadata.Subject, keywords = metadata.Keywords };
+        try
+        {
+            var result = await _js.InvokeAsync<byte[]>(
+                "pageboundPdfManipulator.setMetadata", cancellationToken, bytes, payload).ConfigureAwait(false);
+            return result ?? bytes;
+        }
+        catch (JSException jsex)
+        {
+            throw new InvalidOperationException($"[stage:setMetadata] pdf-lib setMetadata fehlgeschlagen: {jsex.Message}", jsex);
+        }
+    }
+
+    public async Task<PdfMetadata> GetMetadataAsync(Stream pdf, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(pdf);
+        var bytes = await ReadAllAsync(pdf, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var m = await _js.InvokeAsync<PdfMetadata?>(
+                "pageboundPdfManipulator.getMetadata", cancellationToken, bytes).ConfigureAwait(false);
+            return m ?? new PdfMetadata(null, null, null, null);
+        }
+        catch (JSException jsex)
+        {
+            throw new InvalidOperationException($"[stage:getMetadata] pdf-lib getMetadata fehlgeschlagen: {jsex.Message}", jsex);
+        }
+    }
+
     private static async Task<byte[]> ReadAllAsync(Stream pdf, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(pdf);
