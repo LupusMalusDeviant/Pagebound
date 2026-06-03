@@ -61,7 +61,6 @@ export async function loadPdf(
   const task = pdfjsLib.getDocument({
     data,
     password: password ?? undefined,
-    isEvalSupported: false,
     disableAutoFetch: true,
     disableStream: false
   });
@@ -177,7 +176,7 @@ export async function unload(handleId: string): Promise<void> {
   if (!doc) return;
   documents.delete(handleId);
   try {
-    await doc.destroy();
+    await doc.loadingTask.destroy();
   } catch {
     /* ignore */
   }
@@ -326,14 +325,13 @@ async function withTransientDoc<T>(
 ): Promise<T> {
   const task = pdfjsLib.getDocument({
     data,
-    isEvalSupported: false,
     disableAutoFetch: true
   });
   const doc = await task.promise;
   try {
     return await fn(doc);
   } finally {
-    try { await doc.cleanup(); await doc.destroy(); } catch { /* ignore */ }
+    try { await doc.loadingTask.destroy(); } catch { /* ignore */ }
   }
 }
 

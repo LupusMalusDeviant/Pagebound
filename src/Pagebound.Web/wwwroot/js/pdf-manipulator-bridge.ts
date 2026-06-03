@@ -171,7 +171,7 @@ export async function compressPdf(
       });
     }
   } finally {
-    srcDoc.destroy();
+    srcDoc.loadingTask.destroy();
   }
 
   outDoc.setCreator("Pagebound");
@@ -249,7 +249,7 @@ export async function redactPdf(pdfBytes: Uint8Array, regions: RedactionRegion[]
       pdfPage.drawImage(img, { x: 0, y: 0, width: origViewport.width, height: origViewport.height });
     }
   } finally {
-    srcDoc.destroy();
+    srcDoc.loadingTask.destroy();
   }
 
   out.setCreator("Pagebound");
@@ -1284,9 +1284,9 @@ export async function encryptVerify(): Promise<any> {
   const txt = latin1Decode(enc);
   const encLen = enc.length;
   let pages = -1, opensWithPw = false, openError: string | null = null, wrongRejected = false;
-  try { const d = await pdfjsLib.getDocument({ data: enc.slice(), password: "open-me" }).promise; pages = d.numPages; opensWithPw = true; await d.destroy(); }
+  try { const d = await pdfjsLib.getDocument({ data: enc.slice(), password: "open-me" }).promise; pages = d.numPages; opensWithPw = true; await d.loadingTask.destroy(); }
   catch (e: any) { openError = (e && e.name ? e.name : "?") + ": " + (e && e.message ? e.message : String(e)); }
-  try { const d = await pdfjsLib.getDocument({ data: enc.slice(), password: "falsch" }).promise; await d.destroy(); }
+  try { const d = await pdfjsLib.getDocument({ data: enc.slice(), password: "falsch" }).promise; await d.loadingTask.destroy(); }
   catch (e: any) { wrongRejected = !!e && e.name === "PasswordException"; }
   const di = txt.indexOf("/Filter /Standard");
   return { ms, encLen, pages, opensWithPw, openError, wrongRejected, encryptDict: di >= 0 ? txt.slice(di, di + 360) : null };

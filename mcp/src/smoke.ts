@@ -151,7 +151,7 @@ async function main() {
     const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
     const okDoc = await pdfjs.getDocument({ data: enc.slice(), password: "open-me", verbosity: 0 }).promise;
     check("pdf_encrypt opens with correct password → 3 pages", okDoc.numPages === 3, JSON.stringify(okDoc.numPages));
-    await okDoc.destroy();
+    await okDoc.loadingTask.destroy();
     let wrongRejected = false;
     try { await pdfjs.getDocument({ data: enc.slice(), password: "wrong", verbosity: 0 }).promise; }
     catch (e: any) { wrongRejected = e?.name === "PasswordException"; }

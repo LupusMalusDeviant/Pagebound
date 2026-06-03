@@ -434,7 +434,7 @@ export async function extractText(bytes: Uint8Array, pages?: string): Promise<{ 
   const pdfjs = await getPdfjs();
   let doc;
   try {
-    doc = await pdfjs.getDocument({ data: bytes, isEvalSupported: false, verbosity: 0 }).promise;
+    doc = await pdfjs.getDocument({ data: bytes, verbosity: 0 }).promise;
   } catch (e) {
     throw new ToolError(`Text-Extraktion fehlgeschlagen (${errMsg(e)}).`);
   }
@@ -460,7 +460,7 @@ export async function extractText(bytes: Uint8Array, pages?: string): Promise<{ 
     }
     return { pageCount: total, pages: result, totalChars };
   } finally {
-    await doc.destroy();
+    await doc.loadingTask.destroy();
   }
 }
 
@@ -513,7 +513,7 @@ export async function extractTablesCsv(bytes: Uint8Array, pages?: string): Promi
   const pdfjs = await getPdfjs();
   let doc;
   try {
-    doc = await pdfjs.getDocument({ data: bytes, isEvalSupported: false, verbosity: 0 }).promise;
+    doc = await pdfjs.getDocument({ data: bytes, verbosity: 0 }).promise;
   } catch (e) {
     throw new ToolError(`Tabellen-Extraktion fehlgeschlagen (${errMsg(e)}).`);
   }
@@ -543,7 +543,7 @@ export async function extractTablesCsv(bytes: Uint8Array, pages?: string): Promi
     }
     return { pageCount: total, csv: out.join("\n\n") };
   } finally {
-    await doc.destroy();
+    await doc.loadingTask.destroy();
   }
 }
 
