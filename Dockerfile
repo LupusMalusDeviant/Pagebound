@@ -1,7 +1,7 @@
 # =============================================================================
 # Pagebound — Multi-stage Dockerfile
 # ----------------------------------------------------------------------------
-# Stage 1: Build CSS (Tailwind) + JS-Interop bridges (esbuild) with Node 20
+# Stage 1: Build CSS (Tailwind) + JS-Interop bridges (esbuild) with Node 24
 # Stage 2: dotnet publish Blazor WASM with .NET 10 SDK
 # Stage 3: Static hosting via nginx:alpine
 # =============================================================================
@@ -9,7 +9,7 @@
 # -----------------------------------------------------------------------------
 # Stage 1: Node — build CSS and JS bridges
 # -----------------------------------------------------------------------------
-FROM node:20-alpine AS jsbuild
+FROM node:24-alpine AS jsbuild
 WORKDIR /web
 
 # Copy lockfile first for layer caching

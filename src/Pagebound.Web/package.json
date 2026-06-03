@@ -2,6 +2,9 @@
   "name": "pagebound-web",
   "version": "0.0.0-pre",
   "private": true,
+  "engines": {
+    "node": ">=22"
+  },
   "description": "Tailwind/CSS + JavaScript-Interop build pipeline für Pagebound.Web (Blazor WASM frontend liegt im .NET-Projekt).",
   "scripts": {
     "build": "npm run build:css && npm run build:js",
