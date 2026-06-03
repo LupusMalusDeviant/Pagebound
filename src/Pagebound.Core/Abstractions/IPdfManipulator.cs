@@ -92,6 +92,16 @@ public interface IPdfManipulator
         Stream pdf,
         IReadOnlyList<RedactionRegion> regions,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Legt AcroForm-Felder (Text/Checkbox) an den angegebenen Positionen an
+    /// (Formular-Erstellung, Roadmap D1). Position in 0..1-Page-Fractions
+    /// (Ursprung oben-links, wie im UI). Leere Liste → PDF unverändert.
+    /// </summary>
+    Task<byte[]> CreateFormFieldsAsync(
+        Stream pdf,
+        IReadOnlyList<FormFieldRegion> fields,
+        CancellationToken cancellationToken);
 }
 
 /// <summary>
@@ -104,6 +114,19 @@ public sealed record RedactionRegion(
     double Y,
     double Width,
     double Height);
+
+/// <summary>
+/// Ein neu anzulegendes Formularfeld (Roadmap D1). Position in 0..1-Page-Fractions
+/// (Ursprung oben-links). <see cref="FieldType"/>: "text" oder "checkbox".
+/// </summary>
+public sealed record FormFieldRegion(
+    int PageNumber,
+    double X,
+    double Y,
+    double Width,
+    double Height,
+    string Name,
+    string FieldType);
 
 /// <summary>
 /// Eine Signatur, wie sie der <see cref="IPdfManipulator"/> in eine PDF einbetten soll.

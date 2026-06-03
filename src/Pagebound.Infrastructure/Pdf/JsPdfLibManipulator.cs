@@ -350,6 +350,28 @@ public sealed class JsPdfLibManipulator : IPdfManipulator
         }
     }
 
+    public async Task<byte[]> CreateFormFieldsAsync(Stream pdf, IReadOnlyList<FormFieldRegion> fields, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(pdf);
+        ArgumentNullException.ThrowIfNull(fields);
+        var bytes = await ReadAllAsync(pdf, cancellationToken).ConfigureAwait(false);
+        if (fields.Count == 0) return bytes;
+
+        var payload = fields
+            .Select(f => new { pageNumber = f.PageNumber, x = f.X, y = f.Y, width = f.Width, height = f.Height, name = f.Name, fieldType = f.FieldType })
+            .ToArray();
+        try
+        {
+            var result = await _js.InvokeAsync<byte[]>(
+                "pageboundPdfManipulator.createFormFields", cancellationToken, bytes, payload).ConfigureAwait(false);
+            return result ?? bytes;
+        }
+        catch (JSException jsex)
+        {
+            throw new InvalidOperationException($"[stage:createFields] pdf-lib createFormFields fehlgeschlagen: {jsex.Message}", jsex);
+        }
+    }
+
     private static async Task<byte[]> ReadAllAsync(Stream pdf, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(pdf);

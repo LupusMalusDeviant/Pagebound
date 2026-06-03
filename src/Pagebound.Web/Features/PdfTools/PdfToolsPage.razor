@@ -303,6 +303,45 @@
         }
         <p class="max-w-4xl mx-auto mt-1 text-xs text-pb-fg-muted">@L.T("tools.convert.note")</p>
 
+        @* Formularfelder anlegen (Roadmap D1) *@
+        <div class="max-w-4xl mx-auto mt-2 rounded-lg pb-glass p-3 space-y-2 text-sm">
+            <div class="flex flex-wrap items-center gap-2">
+                <span class="text-pb-fg-muted">@L.T("tools.formfields.label")</span>
+                <input @bind="_ffName" @bind:event="oninput" placeholder="@L.T("tools.formfields.name")"
+                       class="rounded border border-pb-border bg-pb-bg px-2 py-1 text-sm" aria-label="@L.T("tools.formfields.name")" />
+                <select @bind="_ffType" class="rounded border border-pb-border bg-pb-bg px-2 py-1 text-sm" aria-label="@L.T("tools.formfields.type")">
+                    <option value="text">@L.T("tools.formfields.type.text")</option>
+                    <option value="checkbox">@L.T("tools.formfields.type.checkbox")</option>
+                </select>
+                <input type="number" min="1" @bind="_ffPage" class="w-16 rounded border border-pb-border bg-pb-bg px-2 py-1 text-sm" aria-label="@L.T("tools.formfields.page")" />
+                <select @bind="_ffAnchor" class="rounded border border-pb-border bg-pb-bg px-2 py-1 text-sm" aria-label="@L.T("tools.formfields.anchor")">
+                    <option value="tl">@L.T("tools.formfields.anchor.tl")</option>
+                    <option value="tr">@L.T("tools.formfields.anchor.tr")</option>
+                    <option value="mc">@L.T("tools.formfields.anchor.mc")</option>
+                    <option value="bl">@L.T("tools.formfields.anchor.bl")</option>
+                    <option value="br">@L.T("tools.formfields.anchor.br")</option>
+                </select>
+                <button type="button" class="rounded border border-pb-border px-2 py-0.5 text-pb-fg-muted hover:text-pb-fg disabled:opacity-40"
+                        disabled="@string.IsNullOrWhiteSpace(_ffName)" @onclick="AddFormField">@L.T("tools.formfields.add")</button>
+            </div>
+            @if (_formFields.Count > 0)
+            {
+                <ul class="text-xs text-pb-fg-muted rounded border border-pb-border divide-y divide-pb-border max-h-32 overflow-auto">
+                    @foreach (var f in _formFields)
+                    {
+                        <li class="px-2 py-1">@f.Name · @(f.FieldType == "checkbox" ? L.T("tools.formfields.type.checkbox") : L.T("tools.formfields.type.text")) · @L.T("tools.pages") @f.PageNumber</li>
+                    }
+                </ul>
+                <div class="flex items-center gap-2">
+                    <button type="button" class="btn primary disabled:opacity-40" disabled="@_isCreatingFields" @onclick="ApplyFormFieldsAsync">
+                        @(_isCreatingFields ? L.T("tools.formfields.running") : L.T("tools.formfields.apply"))
+                    </button>
+                    <button type="button" class="rounded border border-pb-border px-2 py-0.5 text-pb-fg-muted hover:text-pb-fg" @onclick="@(() => _formFields.Clear())">@L.T("tools.formfields.clear")</button>
+                </div>
+            }
+            <p class="text-xs text-pb-fg-muted">@L.T("tools.formfields.note")</p>
+        </div>
+
         @* Wasserzeichen + Seitenzahlen / Bates *@
         <div class="max-w-4xl mx-auto mt-2 rounded-lg pb-glass p-3 flex flex-wrap items-center gap-2 text-sm">
             <span class="text-pb-fg-muted">@L.T("tools.stamp.label")</span>
@@ -945,6 +984,57 @@
         var safe = string.Concat(baseName.Select(c =>
             char.IsLetterOrDigit(c) || c is '_' or '-' or '.' or ' ' ? c : '_'));
         return $"{safe}.{extension}";
+    }
+
+    // --- Formularfelder anlegen (Roadmap D1) ---------------------------------
+    private string _ffName = string.Empty;
+    private string _ffType = "text";
+    private int _ffPage = 1;
+    private string _ffAnchor = "tl";
+    private bool _isCreatingFields;
+    private readonly List<FormFieldRegion> _formFields = new();
+
+    private void AddFormField()
+    {
+        if (_handle is null || string.IsNullOrWhiteSpace(_ffName)) return;
+        var page = Math.Clamp(_ffPage, 1, _handle.PageCount);
+        var isCheck = _ffType == "checkbox";
+        double w = isCheck ? 0.03 : 0.28;
+        double h = isCheck ? 0.03 : 0.035;
+        var a = (string.IsNullOrEmpty(_ffAnchor) ? "tl" : _ffAnchor).PadRight(2, 'l');
+        double x = a[1] switch { 'c' => 0.5 - w / 2, 'r' => 0.92 - w, _ => 0.08 };
+        double y = a[0] switch { 'm' => 0.5 - h / 2, 'b' => 0.90 - h, _ => 0.08 };
+        _formFields.Add(new FormFieldRegion(page, x, y, w, h, _ffName.Trim(), isCheck ? "checkbox" : "text"));
+        _ffName = string.Empty;
+    }
+
+    private async Task ApplyFormFieldsAsync()
+    {
+        if (_originalPdfBytes is null || _formFields.Count == 0 || _isCreatingFields) return;
+        _isCreatingFields = true;
+        _convertStatus = null;
+        try
+        {
+            await using var stream = new MemoryStream(_originalPdfBytes);
+            var result = await Manipulator.CreateFormFieldsAsync(stream, _formFields, CancellationToken.None).ConfigureAwait(false);
+            var filename = BuildConvertedFilename(_currentFilename, "formfields.pdf");
+            await JS.InvokeVoidAsync(
+                "pageboundShortcuts.downloadBytes",
+                filename,
+                Convert.ToBase64String(result),
+                "application/pdf").ConfigureAwait(false);
+            _convertStatus = L.T("tools.formfields.done", new Dictionary<string, object> { ["count"] = _formFields.Count });
+            _formFields.Clear();
+        }
+        catch (Exception ex)
+        {
+            _convertStatus = L.T("tools.convert.error", new Dictionary<string, object> { ["message"] = ex.Message });
+        }
+        finally
+        {
+            _isCreatingFields = false;
+            await InvokeAsync(StateHasChanged);
+        }
     }
 
     // --- Bilder → PDF (FA-025) -----------------------------------------------

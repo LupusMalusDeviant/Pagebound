@@ -637,6 +637,46 @@ export interface StampOptions {
 
 const clampNum = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
+// Formular-Erstellung (Roadmap D1): legt AcroForm-Felder (Text/Checkbox) an.
+// Positionen kommen als 0..1-Page-Fractions (oben-links, wie im UI) und werden in
+// pdf-lib-Punkte (unten-links) umgerechnet. Spiegelt die MCP-Engine `createFields`.
+interface NewFormField {
+  pageNumber: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  name: string;
+  fieldType: string;
+}
+
+export async function createFormFields(pdfBytes: Uint8Array, fields: NewFormField[]): Promise<Uint8Array> {
+  const doc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
+  const form = doc.getForm();
+  const pages = doc.getPages();
+  for (const f of fields ?? []) {
+    const page = pages[f.pageNumber - 1];
+    if (!page || !f.name) continue;
+    const pw = page.getWidth();
+    const ph = page.getHeight();
+    const w = f.width * pw;
+    const h = f.height * ph;
+    const x = f.x * pw;
+    const y = ph - f.y * ph - h; // oben-links-Fraction → unten-links-Punkte
+    const rect = { x, y, width: w, height: h };
+    try {
+      if (f.fieldType === "checkbox") {
+        form.createCheckBox(f.name).addToPage(page, rect);
+      } else {
+        form.createTextField(f.name).addToPage(page, rect);
+      }
+    } catch {
+      // Name evtl. schon vergeben — Feld überspringen statt alles abzubrechen.
+    }
+  }
+  return doc.save();
+}
+
 export async function stampPdf(pdfBytes: Uint8Array, opts: StampOptions): Promise<Uint8Array> {
   const doc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
   const font = await doc.embedFont(StandardFonts.Helvetica);
