@@ -2,6 +2,7 @@
 @implements IAsyncDisposable
 @inject ILocalizationService L
 @inject IJSRuntime JS
+@inject NavigationManager Nav
 
 @*
     Split-View (FA-090, FA-091, FA-092): zwei <ReaderPane>-Instanzen nebeneinander.
@@ -11,9 +12,11 @@
     document-spezifisch arbeiten.
 
     Resize + Sync-Scroll (FA-092) laufen über die `pageboundSplit`-Bridge.
-    Vergleich (B1): Button diff't die beiden geladenen PDFs auf Text-Ebene über
-    `pageboundPdf.diffPdfText` (dieselbe Engine wie /compare) und zeigt das
-    Ergebnis in einem Overlay — 100 % lokal, kein OCR.
+    Vergleich (B1, konsolidiert): Button diff't die beiden geladenen PDFs auf
+    Text-Ebene über die gemeinsame Engine (PdfTextDiff → pageboundPdf.diffPdfText)
+    und zeigt das Ergebnis in einem Overlay — 100 % lokal, kein OCR.
+    Die frühere eigenständige /compare-Seite leitet hierher um (?compare=1);
+    der Query-Parameter blendet eine kurze Anleitung für den Vergleichsmodus ein.
 *@
 
 <PageTitle>@L.T("split.pageTitle")</PageTitle>
@@ -37,6 +40,13 @@
             </label>
         </div>
     </header>
+    @if (_compareMode && _diff is null && _diffError is null)
+    {
+        <div class="border-b border-pb-border bg-pb-surface px-4 py-2 text-xs text-pb-fg-muted" role="status">
+            @L.T("split.compare.modeHint")
+            <span class="block">@L.T("compare.hint")</span>
+        </div>
+    }
     <div @ref="_container" class="flex-1 min-h-0 flex">
         <div @ref="_leftPane" class="overflow-auto min-w-0 basis-1/2" aria-label="@L.T("split.pane.left")">
             <ReaderPane @ref="_leftReader" />
@@ -64,31 +74,9 @@
             {
                 <div class="rounded border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">@_diffError</div>
             }
-            else if (_diff is not null && !_diff.Changed)
+            else
             {
-                <div class="rounded border border-green-300/40 bg-green-50/10 px-3 py-2 text-sm text-pb-fg">@L.T("compare.identical")</div>
-            }
-            else if (_diff is not null)
-            {
-                <p class="mb-1 text-xs text-pb-fg-muted">
-                    @L.T("compare.summary", new Dictionary<string, object> { ["pages"] = _diff.Pages.Count, ["added"] = _diff.Pages.Sum(p => p.Added.Count), ["removed"] = _diff.Pages.Sum(p => p.Removed.Count) })
-                </p>
-                @foreach (var pg in _diff.Pages)
-                {
-                    <div class="mt-3 rounded border border-pb-border p-2">
-                        <div class="mb-1 text-xs font-medium">@L.T("compare.page", new Dictionary<string, object> { ["n"] = pg.Page })</div>
-                        <div class="grid gap-2 sm:grid-cols-2">
-                            <div>
-                                <div class="text-xs text-pb-fg-muted">− @L.T("compare.removed")</div>
-                                <p class="text-sm leading-relaxed" style="color:#dc2626">@(pg.Removed.Count == 0 ? "—" : string.Join(" ", pg.Removed))</p>
-                            </div>
-                            <div>
-                                <div class="text-xs text-pb-fg-muted">+ @L.T("compare.added")</div>
-                                <p class="text-sm leading-relaxed" style="color:#16a34a">@(pg.Added.Count == 0 ? "—" : string.Join(" ", pg.Added))</p>
-                            </div>
-                        </div>
-                    </div>
-                }
+                <PdfDiffResultView Result="_diff" />
             }
         </div>
     </div>
@@ -103,9 +91,18 @@
 
     private ReaderPane? _leftReader;
     private ReaderPane? _rightReader;
-    private DiffResult? _diff;
+    private PdfTextDiffResult? _diff;
     private bool _diffBusy;
     private string? _diffError;
+    private bool _compareMode;
+
+    protected override void OnInitialized()
+    {
+        // ?compare=1 kommt vom /compare-Redirect (Konsolidierung): gleicher
+        // Screen, nur mit eingeblendeter Vergleichs-Anleitung.
+        var uri = Nav.ToAbsoluteUri(Nav.Uri);
+        _compareMode = uri.Query.Contains("compare=1", StringComparison.OrdinalIgnoreCase);
+    }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -122,7 +119,8 @@
         await JS.InvokeVoidAsync("pageboundSplit.setSyncScroll", _leftPane, _rightPane, _syncScroll);
     }
 
-    // B1: Text-Vergleich der beiden geladenen PDFs (gleiche Engine wie /compare).
+    // B1 (konsolidiert): Text-Vergleich der beiden geladenen PDFs über die
+    // gemeinsame Engine PdfTextDiff — eine Implementierung für /split & /compare.
     private async Task CompareAsync()
     {
         if (_diffBusy) return;
@@ -138,8 +136,7 @@
         _diffBusy = true;
         try
         {
-            _diff = await JS.InvokeAsync<DiffResult>(
-                "pageboundPdf.diffPdfText", Convert.ToBase64String(a), Convert.ToBase64String(b));
+            _diff = await PdfTextDiff.RunAsync(JS, a, b);
         }
         catch (Exception ex)
         {
@@ -169,22 +166,5 @@
         {
             // Navigation/Teardown — ignorieren.
         }
-    }
-
-    // Spiegelt das von pageboundPdf.diffPdfText gelieferte Objekt (camelCase,
-    // case-insensitiv via Blazor-JS-Interop-Serializer).
-    private sealed class DiffResult
-    {
-        public int PageCountA { get; set; }
-        public int PageCountB { get; set; }
-        public bool Changed { get; set; }
-        public List<DiffPage> Pages { get; set; } = new();
-    }
-
-    private sealed class DiffPage
-    {
-        public int Page { get; set; }
-        public List<string> Added { get; set; } = new();
-        public List<string> Removed { get; set; } = new();
     }
 }

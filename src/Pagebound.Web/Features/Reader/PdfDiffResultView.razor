@@ -1,0 +1,49 @@
+@inject ILocalizationService L
+
+@*
+    Gemeinsame Anzeige eines Text-Diff-Ergebnisses (PdfTextDiffResult).
+    Wird vom Vergleichs-Overlay der Split-View genutzt — die frühere
+    /compare-Seite hatte eine fast identische Markup-Kopie; die ist
+    im Zuge der Konsolidierung (eine Implementierung) hier aufgegangen.
+*@
+
+@if (Result is not null)
+{
+    @if (!Result.Changed)
+    {
+        <div class="rounded border border-green-300/40 bg-green-50/10 px-3 py-2 text-sm text-pb-fg">
+            @L.T("compare.identical")
+        </div>
+    }
+    else
+    {
+        <p class="mb-1 text-xs text-pb-fg-muted">
+            @L.T("compare.summary", new Dictionary<string, object>
+            {
+                ["pages"] = Result.Pages.Count,
+                ["added"] = Result.Pages.Sum(p => p.Added.Count),
+                ["removed"] = Result.Pages.Sum(p => p.Removed.Count)
+            })
+        </p>
+        @foreach (var pg in Result.Pages)
+        {
+            <div class="mt-3 rounded border border-pb-border p-2">
+                <div class="mb-1 text-xs font-medium">@L.T("compare.page", new Dictionary<string, object> { ["n"] = pg.Page })</div>
+                <div class="grid gap-2 sm:grid-cols-2">
+                    <div>
+                        <div class="text-xs text-pb-fg-muted">− @L.T("compare.removed")</div>
+                        <p class="text-sm leading-relaxed" style="color:#dc2626">@(pg.Removed.Count == 0 ? "—" : string.Join(" ", pg.Removed))</p>
+                    </div>
+                    <div>
+                        <div class="text-xs text-pb-fg-muted">+ @L.T("compare.added")</div>
+                        <p class="text-sm leading-relaxed" style="color:#16a34a">@(pg.Added.Count == 0 ? "—" : string.Join(" ", pg.Added))</p>
+                    </div>
+                </div>
+            </div>
+        }
+    }
+}
+
+@code {
+    [Parameter] public PdfTextDiffResult? Result { get; set; }
+}

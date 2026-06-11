@@ -1,4 +1,5 @@
 @page "/reader"
+@using Pagebound.Web.Features.PdfTools
 @inject ILocalizationService L
 @inject NavigationManager Nav
 @implements IDisposable
@@ -12,14 +13,82 @@
     Eintrag) und triggert im Pane das Auto-Open der gespeicherten Bytes
     aus IndexedDB. Wenn die Bytes fehlen, fällt's still auf den File-
     Picker zurück.
+
+    Subtabs „Dokument" | „Werkzeuge" (UI-Konsolidierung): der Werkzeuge-Tab
+    rendert <PdfToolsPanel /> direkt im Reader — mit den Bytes des aktuell
+    geöffneten PDFs vorbefüllt (kein erneutes Laden nötig). Die ReaderPane
+    bleibt dabei im DOM (nur per CSS versteckt), damit Scroll-Position,
+    Suche und Annotations-State beim Tab-Wechsel erhalten bleiben.
 *@
 
 <PageTitle>@L.T("reader.pageTitle")</PageTitle>
 
-<ReaderPane InitialPdfHash="@_pdfHash" />
+<div class="border-b border-pb-border px-4 sm:px-6 lg:px-8 py-2 flex items-center gap-2"
+     role="tablist" aria-label="@L.T("reader.tabs.aria")">
+    <button type="button" role="tab" id="reader-tab-doc"
+            aria-selected="@((!_toolsTabActive).ToString().ToLowerInvariant())"
+            aria-controls="reader-tabpanel-doc"
+            class="@TabClass(!_toolsTabActive)"
+            @onclick="ShowDocumentTab">
+        @L.T("reader.tab.document")
+    </button>
+    <button type="button" role="tab" id="reader-tab-tools"
+            aria-selected="@(_toolsTabActive.ToString().ToLowerInvariant())"
+            aria-controls="reader-tabpanel-tools"
+            class="@TabClass(_toolsTabActive)"
+            @onclick="ShowToolsTab">
+        @L.T("reader.tab.tools")
+    </button>
+</div>
+
+<div id="reader-tabpanel-doc" role="tabpanel" aria-labelledby="reader-tab-doc"
+     class="@(_toolsTabActive ? "hidden" : null)">
+    <ReaderPane @ref="_pane" InitialPdfHash="@_pdfHash" />
+</div>
+
+@if (_toolsTabEverOpened)
+{
+    <div id="reader-tabpanel-tools" role="tabpanel" aria-labelledby="reader-tab-tools"
+         class="@(_toolsTabActive ? "mx-auto max-w-[1800px] px-4 sm:px-6 lg:px-8 py-8" : "hidden")">
+        <PdfToolsPanel @key="_toolsPanelKey"
+                       Embedded="true"
+                       InitialPdfBytes="@_toolsBytes"
+                       InitialPdfName="@_toolsName" />
+    </div>
+}
 
 @code {
     private string? _pdfHash;
+    private ReaderPane? _pane;
+
+    // Werkzeuge-Subtab: Panel wird beim ersten Öffnen erzeugt und danach nur
+    // versteckt; wechselt im Reader das Dokument, erzwingt @key eine frische
+    // Instanz mit den neuen Bytes.
+    private bool _toolsTabActive;
+    private bool _toolsTabEverOpened;
+    private byte[]? _toolsBytes;
+    private string? _toolsName;
+    private int _toolsPanelKey;
+
+    private static string TabClass(bool active) =>
+        active
+            ? "rounded border border-pb-accent px-3 py-1 text-sm text-pb-accent font-medium"
+            : "rounded border border-pb-border px-3 py-1 text-sm text-pb-fg-muted hover:text-pb-fg";
+
+    private void ShowDocumentTab() => _toolsTabActive = false;
+
+    private void ShowToolsTab()
+    {
+        var bytes = _pane?.LoadedPdfBytes;
+        if (!_toolsTabEverOpened || !ReferenceEquals(bytes, _toolsBytes))
+        {
+            _toolsBytes = bytes;
+            _toolsName = _pane?.LoadedTitle;
+            _toolsPanelKey++;
+        }
+        _toolsTabEverOpened = true;
+        _toolsTabActive = true;
+    }
 
     protected override void OnInitialized()
     {

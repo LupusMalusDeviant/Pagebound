@@ -138,12 +138,13 @@
     private sealed record NavDef(string Ix, string Route, string LabelKey);
 
     // Subtabs der „PDF"-Gruppe. Start + Designer stehen separat als Top-Level.
+    // „Vergleich" ist in der Split-View aufgegangen (Konsolidierung) —
+    // die Route /compare existiert weiter und leitet auf /split?compare=1 um.
     private static readonly NavDef[] PdfGroup =
     {
         new("", "reader",  "nav.reader"),
         new("", "tools",   "nav.tools"),
         new("", "split",   "nav.split"),
-        new("", "compare", "nav.compare"),
         new("", "batch",   "nav.batch"),
     };
 

@@ -1,179 +1,19 @@
 @page "/compare"
-@using Microsoft.AspNetCore.Components.Forms
-@inject IJSRuntime JS
+@inject NavigationManager Nav
 @inject ILocalizationService L
+
+@*
+    Konsolidierung (UI): Der eigenständige PDF-Vergleich ist in der Split-View
+    aufgegangen — dort gibt es Datei-Auswahl pro Pane plus den „Vergleichen"-
+    Button (gemeinsame Engine: PdfTextDiff / PdfDiffResultView).
+    Die Route /compare bleibt für Bookmarks erhalten und leitet nur noch um.
+*@
 
 <PageTitle>@L.T("compare.pageTitle")</PageTitle>
 
-<section class="mx-auto max-w-[1100px] px-4 sm:px-6 lg:px-8 py-8">
-    <header class="masthead-pg">
-        <div class="folio-line">
-            <span>@L.T("home.ed.local")</span><span class="sep">·</span>
-            <span>@L.T("compare.folio")</span>
-        </div>
-        <h1 class="page-title">@L.T("compare.heading")</h1>
-        <p class="standfirst">@L.T("compare.subheading")</p>
-    </header>
-
-    <div class="grid gap-4 sm:grid-cols-2">
-        <div class="rounded-lg pb-glass p-4">
-            <label class="flex flex-col gap-2 text-sm">
-                <span class="font-medium">@L.T("compare.fileA")</span>
-                <InputFile OnChange="@(e => OnFileSelectedAsync(e, true))" accept=".pdf"
-                           class="block text-sm file:mr-3 file:rounded file:border-0 file:bg-pb-accent file:px-3 file:py-1.5 file:font-semibold file:text-[var(--accent-ink)] file:cursor-pointer cursor-pointer" />
-            </label>
-            @if (_nameA is not null)
-            {
-                <p class="mt-2 truncate text-xs text-pb-fg-muted" title="@_nameA">@_nameA</p>
-            }
-        </div>
-        <div class="rounded-lg pb-glass p-4">
-            <label class="flex flex-col gap-2 text-sm">
-                <span class="font-medium">@L.T("compare.fileB")</span>
-                <InputFile OnChange="@(e => OnFileSelectedAsync(e, false))" accept=".pdf"
-                           class="block text-sm file:mr-3 file:rounded file:border-0 file:bg-pb-accent file:px-3 file:py-1.5 file:font-semibold file:text-[var(--accent-ink)] file:cursor-pointer cursor-pointer" />
-            </label>
-            @if (_nameB is not null)
-            {
-                <p class="mt-2 truncate text-xs text-pb-fg-muted" title="@_nameB">@_nameB</p>
-            }
-        </div>
-    </div>
-
-    @if (_error is not null)
-    {
-        <div class="mt-3 rounded border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">@_error</div>
-    }
-
-    <div class="mt-4 flex flex-wrap items-center gap-3">
-        <button type="button" class="btn primary disabled:opacity-40"
-                disabled="@(_base64A is null || _base64B is null || _busy)"
-                @onclick="CompareAsync">
-            @(_busy ? L.T("compare.running") : L.T("compare.button"))
-        </button>
-        @if (_result is not null && _result.Changed)
-        {
-            <span class="text-sm text-pb-fg-muted">
-                @L.T("compare.summary", new Dictionary<string, object> { ["pages"] = _result.Pages.Count, ["added"] = TotalAdded, ["removed"] = TotalRemoved })
-            </span>
-        }
-    </div>
-
-    <p class="mt-2 text-xs text-pb-fg-muted">@L.T("compare.hint")</p>
-
-    @if (_result is not null)
-    {
-        @if (!_result.Changed)
-        {
-            <div class="mt-4 rounded-lg border border-green-300/40 bg-green-50/10 px-3 py-2 text-sm text-pb-fg">
-                @L.T("compare.identical")
-            </div>
-        }
-        else
-        {
-            @foreach (var pg in _result.Pages)
-            {
-                <div class="mt-4 rounded-lg border border-pb-border p-3">
-                    <div class="mb-2 text-sm font-medium">@L.T("compare.page", new Dictionary<string, object> { ["n"] = pg.Page })</div>
-                    <div class="grid gap-3 sm:grid-cols-2">
-                        <div>
-                            <div class="mb-1 text-xs font-medium text-pb-fg-muted">− @L.T("compare.removed")</div>
-                            @if (pg.Removed.Count == 0)
-                            {
-                                <p class="text-xs italic text-pb-fg-muted">—</p>
-                            }
-                            else
-                            {
-                                <p class="text-sm leading-relaxed" style="color:#dc2626">@string.Join(" ", pg.Removed)</p>
-                            }
-                        </div>
-                        <div>
-                            <div class="mb-1 text-xs font-medium text-pb-fg-muted">+ @L.T("compare.added")</div>
-                            @if (pg.Added.Count == 0)
-                            {
-                                <p class="text-xs italic text-pb-fg-muted">—</p>
-                            }
-                            else
-                            {
-                                <p class="text-sm leading-relaxed" style="color:#16a34a">@string.Join(" ", pg.Added)</p>
-                            }
-                        </div>
-                    </div>
-                </div>
-            }
-        }
-    }
-</section>
+<p class="px-4 py-8 text-sm text-pb-fg-muted">@L.T("app.loadingShort")</p>
 
 @code {
-    private const long MaxFileSize = 100L * 1024 * 1024;
-
-    private string? _base64A;
-    private string? _base64B;
-    private string? _nameA;
-    private string? _nameB;
-    private string? _error;
-    private bool _busy;
-    private DiffResult? _result;
-
-    private int TotalAdded => _result?.Pages.Sum(p => p.Added.Count) ?? 0;
-    private int TotalRemoved => _result?.Pages.Sum(p => p.Removed.Count) ?? 0;
-
-    private async Task OnFileSelectedAsync(InputFileChangeEventArgs e, bool isA)
-    {
-        _error = null;
-        _result = null;
-        try
-        {
-            var file = e.File;
-            if (file is null) return;
-            await using var stream = file.OpenReadStream(MaxFileSize);
-            using var ms = new MemoryStream();
-            await stream.CopyToAsync(ms);
-            var b64 = Convert.ToBase64String(ms.ToArray());
-            if (isA) { _base64A = b64; _nameA = file.Name; }
-            else { _base64B = b64; _nameB = file.Name; }
-        }
-        catch (Exception ex)
-        {
-            _error = L.T("compare.error", new Dictionary<string, object> { ["message"] = ex.Message });
-        }
-    }
-
-    private async Task CompareAsync()
-    {
-        if (_base64A is null || _base64B is null || _busy) return;
-        _busy = true;
-        _error = null;
-        _result = null;
-        try
-        {
-            _result = await JS.InvokeAsync<DiffResult>("pageboundPdf.diffPdfText", _base64A, _base64B);
-        }
-        catch (Exception ex)
-        {
-            _error = L.T("compare.error", new Dictionary<string, object> { ["message"] = ex.Message });
-        }
-        finally
-        {
-            _busy = false;
-        }
-    }
-
-    // Spiegelt das von pageboundPdf.diffPdfText gelieferte Objekt (camelCase,
-    // case-insensitiv via Blazor-JS-Interop-Serializer).
-    private sealed class DiffResult
-    {
-        public int PageCountA { get; set; }
-        public int PageCountB { get; set; }
-        public bool Changed { get; set; }
-        public List<DiffPage> Pages { get; set; } = new();
-    }
-
-    private sealed class DiffPage
-    {
-        public int Page { get; set; }
-        public List<string> Added { get; set; } = new();
-        public List<string> Removed { get; set; } = new();
-    }
+    protected override void OnInitialized()
+        => Nav.NavigateTo("split?compare=1", replace: true);
 }

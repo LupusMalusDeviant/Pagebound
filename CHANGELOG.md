@@ -45,6 +45,16 @@ Liste fasst den aktuellen Funktionsumfang zusammen.
 - **UI-Redesign der Bedienflächen**: alle Emojis durch stroke-basierte Inline-SVG-Icons ersetzt (folgen `currentColor`/Theme), konsistente Button-Höhen, Hover-/Fokus-/Disabled-Zustände
 - **Mobile-Tauglichkeit**: Werkzeug-Seitenleiste als einblendbarer Drawer (mit Backdrop), Zoom der Seiten-Leinwand mit **Auto-Fit** (Seite passt sich der Viewport-Breite an; Druck bleibt unverändert in Originalgröße), kompaktere Bühne auf kleinen Screens
 - **Drag & Drop**: Blöcke per Grip-Handle umsortieren (auch seitenübergreifend, mit Einfüge-Indikator), Seiten in der Seitenliste per Drag sortieren, Bilder direkt auf die Leinwand ziehen (werden Bild-Blöcke auf der Zielseite), JSON-/Design-Dateien per Drop importieren
+- **Frei platzierbare Overlays** (Text/Bild/Fläche): Position/Größe in % der Seite, Pointer-Drag & -Resize (Maus, **Touch**, Stift), Drehung, Deckkraft, Stapel-Reihenfolge, Ellipsen — Flyer-Gestaltung über dem Block-Fluss
+- **Spalten-Block** (2–4 Rich-Text-Spalten, Abstand einstellbar) und **QR-Code-Block** (lokal generiert, kein Netz)
+- **Bild-Werkzeuge**: Eckenradius, Rahmen, Schatten; Bilder werden beim Einbetten automatisch komprimiert (max. 2000 px, JPEG-Re-Encode — kleinere Entwürfe/Sidecars)
+- **Tastatur-Shortcuts**: Strg+S (Entwurf speichern), Strg+Z/Y (Struktur-Undo/Redo außerhalb der Textbearbeitung), Entf (Block/Overlay löschen)
+- **Serie aus CSV**: Platzhalter wie `{{name}}` werden je CSV-Zeile ersetzt (Kopfzeile = Feldnamen, `,`/`;` automatisch erkannt, Werte HTML-encodiert) — Serienbriefe/-flyer als ein Mehrseiten-Dokument
+- **PWA-File-Handler**: `.pbdesign.json`-Dateien lassen sich per Doppelklick direkt im Designer öffnen (installierte PWA, Chromium)
+
+### UI-Konsolidierung
+- **Split-View & Vergleich zusammengeführt**: `/compare` leitet auf die Split-View im Vergleichsmodus um (`/split?compare=1`); eine gemeinsame Diff-Engine/-Anzeige statt zweier Implementierungen, ein Navigationseintrag statt zwei
+- **PDF-Werkzeuge im Reader**: Tab-Leiste „Dokument | Werkzeuge" direkt im Reader-Fenster — das geöffnete PDF wird in die Werkzeuge übernommen (kein erneutes Laden); `/tools` bleibt als eigenständige Seite erhalten (gleiche Komponente)
 
 ### MCP-Server
 - Tokenloser MCP-Server für LLM-Agenten (stdio + Streamable HTTP), 21 Tools (inkl. `pdf_extract_tables`), gehostet unter `…/mcp` mit Größen-/Seiten-Limits
