@@ -52,10 +52,17 @@ Eingaben bleiben stets unangetastet (neue Datei/neue Bytes).
 | `pdf_create_field` | AcroForm-Felder (Text/Checkbox) **anlegen** — Einstieg Formular-Erstellung |
 | `pdf_set_metadata` | Metadaten setzen (Titel/Autor/Betreff/Schlagwörter/Ersteller/Producer) |
 | `images_to_pdf` | PNG/JPG-Bilder zu einer PDF (`imagePaths` / `imagesBase64`) |
+| `design_catalog` | Designer-Bausteine auflisten: Themes, Schriften, Layouts, Vorlagen (read-only) |
+| `design_create` | Pagebound-Design (`*.pbdesign.json`) aus Vorlage erzeugen — Titel/Theme/Layout überschreibbar |
+| `design_validate` | Design-JSON validieren/normalisieren (Farben, data-URLs, HTML); meldet `issues` (read-only) |
+| `design_render_html` | Design als eigenständiges HTML rendern (Druck-CSS → „Als PDF speichern“) (read-only) |
 
 Damit deckt der Server die PDF-Operationen der Web-App ab, die ohne Browser-
 Canvas auskommen — Seiten-Werkzeuge (Merge/Split/Extract/Delete/Rotate/Reorder),
-Stempeln, Verschlüsseln, Bilder→PDF, Formulare und Text-Extraktion.
+Stempeln, Verschlüsseln, Bilder→PDF, Formulare und Text-Extraktion — sowie die
+Dokument-Seite des WYSIWYG-Designers: Die `design_*`-Tools sprechen dasselbe
+JSON-Format wie der Design-Ordner/JSON-Import der PWA, Agenten können Designs
+also erzeugen, prüfen und als druckbares HTML ausgeben.
 
 `pdf_split` schreibt mit `outputDir` die Teile als `<baseName>-partN.pdf` (stdio)
 oder liefert sie als `parts[].dataBase64` (remote).

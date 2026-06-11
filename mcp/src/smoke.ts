@@ -2,6 +2,7 @@
 // Bytes-in/bytes-out — no temp files; exercises every operation end-to-end.
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import * as pdf from "./pdf.js";
+import * as design from "./design.js";
 import { encryptPdf } from "./encrypt.js";
 
 let failures = 0;
@@ -187,6 +188,48 @@ async function main() {
   const cb = cfFields.find((f) => f.name === "agree");
   check("pdf_create_field fields readable + typed", tf?.type === "Text" && cb?.type === "Checkbox", JSON.stringify(cfFields.map((f) => `${f.name}:${f.type}`)));
   check("pdf_create_field text value set", tf?.value[0] === "Ada Lovelace", JSON.stringify(tf?.value));
+
+  // --- Designer-Tools ---------------------------------------------------------
+  const cat = design.catalog();
+  check("design_catalog lists 6 themes", cat.themes.length === 6, String(cat.themes.length));
+  check("design_catalog lists 7 layouts", cat.layouts.length === 7, String(cat.layouts.length));
+  check("design_catalog lists >= 10 designs", cat.designs.length >= 10, String(cat.designs.length));
+
+  const created = design.createDesign("party-flyer-dunkel", { title: "Smoke-Party", layout: "DinLong" });
+  check("design_create applies overrides", created.title === "Smoke-Party" && created.layout === "DinLong" && created.theme?.name === "Dunkel");
+  check("design_create uses PascalCase block types", created.pages[0].blocks.every((b) => /^[A-Z]/.test(b.type)));
+
+  const roundtrip = design.validateDesign(JSON.stringify(created));
+  check("design_validate roundtrip is clean", roundtrip.issues.length === 0, JSON.stringify(roundtrip.issues));
+
+  const hostile = design.validateDesign(JSON.stringify({
+    title: "Böse",
+    layout: "Quark",
+    pages: [{
+      background: "url(javascript:1)",
+      backgroundImage: "https://evil/bg.png",
+      blocks: [
+        { type: "paragraph", text: "<b>ok</b><script>alert(1)</script>", align: "diagonal" },
+        { type: "Image", src: "https://evil/x.png", widthPercent: 999 },
+        { type: "Raumschiff" },
+      ],
+    }],
+    theme: { name: "X", headingFont: "comic", headingColor: "red", bodyColor: "#111827", accentColor: "#abc", bodyFont: "georgia" },
+  }));
+  const hostileDoc = hostile.doc;
+  check("design_validate fixes layout+align+colors", hostileDoc.layout === "A4Portrait" && hostileDoc.pages[0].blocks[0].align === "left" && hostileDoc.pages[0].background === "#ffffff",
+    JSON.stringify({ layout: hostileDoc.layout, align: hostileDoc.pages[0].blocks[0].align, bg: hostileDoc.pages[0].background }));
+  check("design_validate strips script html", !(hostileDoc.pages[0].blocks[0].text ?? "").includes("script"), hostileDoc.pages[0].blocks[0].text ?? "");
+  check("design_validate drops non-data image src", hostileDoc.pages[0].blocks[1].src === undefined && hostileDoc.pages[0].blocks[1].widthPercent === 100);
+  check("design_validate removes unknown block type", hostileDoc.pages[0].blocks.length === 2, String(hostileDoc.pages[0].blocks.length));
+  check("design_validate sanitizes theme", hostileDoc.theme?.headingFont === "georgia" && hostileDoc.theme?.headingColor === "#111827" && hostileDoc.theme?.accentColor === "#abc");
+  check("design_validate reports issues", hostile.issues.length >= 4, JSON.stringify(hostile.issues));
+
+  const html = design.renderHtml(roundtrip.doc);
+  check("design_render_html contains @page size", html.includes("@page{size:105mm 210mm"), html.slice(0, 120));
+  check("design_render_html applies theme vars", html.includes("--doc-color-accent:#f59e0b"));
+  check("design_render_html renders filled rect + pages", html.includes("is-filled") && html.split("pb-page\"").length - 1 === created.pages.length);
+  check("design_render_html escapes title", design.renderHtml(design.validateDesign(JSON.stringify({ title: "<x>&", layout: "A4Portrait", pages: [{ blocks: [] }] })).doc).includes("<title>&lt;x&gt;&amp;</title>"));
 
   process.stdout.write(failures === 0 ? "\nALL PASS\n" : `\n${failures} FAILURE(S)\n`);
   process.exit(failures === 0 ? 0 : 1);

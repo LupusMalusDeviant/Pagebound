@@ -25,6 +25,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
 import * as pdf from "./pdf.js";
+import * as design from "./design.js";
 import { encryptPdf } from "./encrypt.js";
 
 const CHARACTER_LIMIT = 25_000;
@@ -424,10 +425,96 @@ Eingabe: 'path'/'dataBase64', 'fields'. Ausgabe: 'outputPath' oder 'dataBase64'.
     const r = await pdf.createFields(await loadPdf(a), a.fields);
     return ok({ created: r.created, ...(await emitPdf(r.bytes, a.outputPath)) }, `${r.created} Feld(er) angelegt.`);
   }));
+
+  // --- Designer-Tools (WYSIWYG-Designs der PWA, *.pbdesign.json) ---------------
+
+  // Design-JSON kommt als Inline-String ('json') oder lokaler Pfad ('path').
+  const designSrcIn = {
+    path: z.string().optional().describe("Lokaler Pfad zur Design-Datei (*.pbdesign.json, stdio-Modus)."),
+    json: z.string().optional().describe("Design-Dokument als JSON-String (remote/HTTP-Modus)."),
+  };
+  const loadDesignJson = async (a: { path?: string; json?: string }): Promise<string> => {
+    if (a.path && a.json) throw new pdf.ToolError("Bitte entweder 'path' ODER 'json' angeben, nicht beide.");
+    if (a.json) return a.json;
+    if (a.path) {
+      try { return await readFile(a.path, "utf8"); }
+      catch (e) { throw new pdf.ToolError(`Datei nicht lesbar: '${a.path}' (${e instanceof Error ? e.message : String(e)}).`); }
+    }
+    throw new pdf.ToolError("Eingabe fehlt: 'path' (lokal) oder 'json' (remote) angeben.");
+  };
+  const emitText = async (text: string, outputPath?: string): Promise<Record<string, unknown>> => {
+    if (outputPath) {
+      try { await writeFile(outputPath, text, "utf8"); }
+      catch (e) { throw new pdf.ToolError(`Ausgabe nicht schreibbar: '${outputPath}' (${e instanceof Error ? e.message : String(e)}).`); }
+      return { outputPath, bytes: Buffer.byteLength(text, "utf8") };
+    }
+    return { text, bytes: Buffer.byteLength(text, "utf8") };
+  };
+
+  server.registerTool("design_catalog", {
+    title: "Designer-Katalog",
+    description: `Listet die Bausteine des Pagebound-WYSIWYG-Designers: 6 Theme-Presets (Schriften/Farben), erlaubte Schrift-Schlüssel, Seitenlayouts (inkl. DIN lang & A6 quer) und alle verfügbaren Vorlagen/Standard-Designs ('kind' für design_create). Read-only, keine Eingabe.`,
+    inputSchema: {},
+    annotations: readAnn,
+  }, guard(async () => {
+    const c = design.catalog();
+    return ok(c as unknown as Record<string, unknown>,
+      `${c.themes.length} Themes, ${c.layouts.length} Layouts, ${c.designs.length} Vorlagen/Designs.`);
+  }));
+
+  server.registerTool("design_create", {
+    title: "Design erzeugen",
+    description: `Erzeugt ein Pagebound-Design-Dokument (Schablone) aus einer Vorlage — als JSON, das die PWA direkt importieren kann (Design-Ordner: '*.pbdesign.json' oder „Import (JSON-Dokument)").
+'kind' aus design_catalog (z. B. 'flyer', 'party-flyer-dunkel', 'speisekarte', 'blank'); optional 'title', 'theme' (Preset-Name) und 'layout' überschreiben die Vorlage.
+Ausgabe: 'outputPath' (geschrieben) ODER 'text' (JSON inline).`,
+    inputSchema: {
+      kind: z.string().describe("Vorlagen-Schlüssel aus design_catalog (z. B. 'flyer', 'blank')."),
+      title: z.string().optional().describe("Dokumenttitel (überschreibt den Vorlagen-Titel)."),
+      theme: z.string().optional().describe("Theme-Preset-Name (z. B. 'Dunkel') — überschreibt das Vorlagen-Theme."),
+      layout: z.string().optional().describe("Seitenlayout (z. B. 'DinLong') — überschreibt das Vorlagen-Layout."),
+      ...outOpt,
+    },
+    annotations: writeAnn,
+  }, guard(async (a: { kind: string; title?: string; theme?: string; layout?: string; outputPath?: string }) => {
+    const docObj = design.createDesign(a.kind, { title: a.title, theme: a.theme, layout: a.layout });
+    const json = JSON.stringify(docObj, null, 2);
+    return ok(
+      { title: docObj.title, layout: docObj.layout, theme: docObj.theme?.name ?? null, pageCount: docObj.pages.length, ...(await emitText(json, a.outputPath)) },
+      `Design '${docObj.title}' (${docObj.layout}, ${docObj.pages.length} Seite(n)) erzeugt.`);
+  }));
+
+  server.registerTool("design_validate", {
+    title: "Design prüfen/normalisieren",
+    description: `Validiert und normalisiert ein Design-Dokument (*.pbdesign.json): nur Hex-Farben und data:image-URLs, Wertebereiche begrenzt, aktives HTML (Script/Event-Handler) entfernt, Legacy-Dokumente migriert. Meldet alle Korrekturen als 'issues'.
+Eingabe: 'path' oder 'json'. Ausgabe: normalisiertes JSON ('outputPath' oder 'text') + 'issues'.`,
+    inputSchema: { ...designSrcIn, ...outOpt },
+    annotations: readAnn,
+  }, guard(async (a: { path?: string; json?: string; outputPath?: string }) => {
+    const { doc: normalized, issues } = design.validateDesign(await loadDesignJson(a));
+    const json = JSON.stringify(normalized, null, 2);
+    return ok(
+      { title: normalized.title, layout: normalized.layout, pageCount: normalized.pages.length, issues, ...(await emitText(json, a.outputPath)) },
+      issues.length === 0 ? "Design ist gültig — keine Korrekturen nötig." : `Design normalisiert, ${issues.length} Korrektur(en).`);
+  }));
+
+  server.registerTool("design_render_html", {
+    title: "Design → HTML",
+    description: `Rendert ein Design-Dokument als eigenständiges HTML (gleiche Druck-CSS wie der PWA-Export: @page-Größe, Theme-Variablen, Hintergrund-Ebenen). Im Browser geöffnet ergibt „Drucken → Als PDF speichern" das fertige PDF.
+Die Eingabe wird vor dem Rendern automatisch validiert/normalisiert (wie design_validate).
+Eingabe: 'path' oder 'json'. Ausgabe: 'outputPath' (geschrieben) ODER 'text' (HTML inline).`,
+    inputSchema: { ...designSrcIn, ...outOpt },
+    annotations: readAnn,
+  }, guard(async (a: { path?: string; json?: string; outputPath?: string }) => {
+    const { doc: normalized, issues } = design.validateDesign(await loadDesignJson(a));
+    const html = design.renderHtml(normalized);
+    return ok(
+      { title: normalized.title, layout: normalized.layout, pageCount: normalized.pages.length, issues, ...(await emitText(html, a.outputPath)) },
+      `HTML für '${normalized.title}' gerendert (${normalized.pages.length} Seite(n)).`);
+  }));
 }
 
 function buildServer(): McpServer {
-  const server = new McpServer({ name: "pagebound-pdf-mcp-server", version: "1.3.0" });
+  const server = new McpServer({ name: "pagebound-pdf-mcp-server", version: "1.4.0" });
   registerTools(server);
   return server;
 }
