@@ -89,6 +89,12 @@ const builds = [
     globalName: "pageboundWysiwyg",
     entryPoints: [resolve(__dirname, "wwwroot/js/wysiwyg-editor.ts")],
     outfile: resolve(__dirname, "wwwroot/js/wysiwyg-editor.js")
+  },
+  {
+    ...sharedOptions,
+    globalName: "pageboundDesigns",
+    entryPoints: [resolve(__dirname, "wwwroot/js/designs-bridge.ts")],
+    outfile: resolve(__dirname, "wwwroot/js/designs-bridge.js")
   }
 ];
 

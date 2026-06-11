@@ -9,7 +9,9 @@ public enum PageLayout
     A4Landscape,
     A5Portrait,
     Letter,
-    Slide16x9
+    Slide16x9,
+    DinLong,
+    A6Landscape
 }
 
 /// <summary>Block-Typen des WYSIWYG-Editors (LF-03).</summary>
@@ -53,13 +55,21 @@ public sealed class EditorBlock
     // Optionale Hintergrundfarbe des Blocks (null = transparent).
     public string? Background { get; set; }
 
+    // Optionale Schriftgröße in pt (null = automatisch je Block-Typ/Theme).
+    public int? FontSizePt { get; set; }
+
     // Table (Zeilen × Zellen; erste Zeile optional als Kopf)
     public List<List<string>>? Rows { get; set; }
     public bool HeaderRow { get; set; } = true;
 
-    public EditorBlock Clone() => new()
+    public EditorBlock Clone() => CloneCore(Guid.NewGuid().ToString("N"));
+
+    /// <summary>Exakte Kopie inkl. Id — für Undo-Schnappschüsse (kein Duplizieren).</summary>
+    public EditorBlock Snapshot() => CloneCore(Id);
+
+    private EditorBlock CloneCore(string id) => new()
     {
-        Id = Guid.NewGuid().ToString("N"),
+        Id = id,
         Type = Type,
         Text = Text,
         Level = Level,
@@ -72,6 +82,7 @@ public sealed class EditorBlock
         HeightPx = HeightPx,
         Fill = Fill,
         Background = Background,
+        FontSizePt = FontSizePt,
         Rows = Rows?.Select(r => new List<string>(r)).ToList(),
         HeaderRow = HeaderRow
     };
@@ -96,6 +107,15 @@ public sealed class EditorPage
     /// <summary>Einpassung des Hintergrundbilds: <c>cover</c> | <c>contain</c>.</summary>
     public string BackgroundSize { get; set; } = "cover";
 
+    /// <summary>Deckkraft des Hintergrundbilds in Prozent (100 = voll sichtbar).</summary>
+    public int BackgroundOpacityPercent { get; set; } = 100;
+
+    /// <summary>Vertikale Ausrichtung des Hintergrundbilds: <c>top</c> | <c>center</c> | <c>bottom</c>.</summary>
+    public string BackgroundPosition { get; set; } = "center";
+
+    /// <summary>Hintergrundbild kacheln (für Muster-Grafiken). Ignoriert <see cref="BackgroundSize"/>.</summary>
+    public bool BackgroundRepeat { get; set; }
+
     public List<EditorBlock> Blocks { get; set; } = new();
 
     public EditorPage Clone() => new()
@@ -103,7 +123,23 @@ public sealed class EditorPage
         Background = Background,
         BackgroundImage = BackgroundImage,
         BackgroundSize = BackgroundSize,
+        BackgroundOpacityPercent = BackgroundOpacityPercent,
+        BackgroundPosition = BackgroundPosition,
+        BackgroundRepeat = BackgroundRepeat,
         Blocks = Blocks.Select(b => b.Clone()).ToList()
+    };
+
+    /// <summary>Exakte Kopie inkl. Ids — für Undo-Schnappschüsse.</summary>
+    public EditorPage Snapshot() => new()
+    {
+        Id = Id,
+        Background = Background,
+        BackgroundImage = BackgroundImage,
+        BackgroundSize = BackgroundSize,
+        BackgroundOpacityPercent = BackgroundOpacityPercent,
+        BackgroundPosition = BackgroundPosition,
+        BackgroundRepeat = BackgroundRepeat,
+        Blocks = Blocks.Select(b => b.Snapshot()).ToList()
     };
 }
 
@@ -117,6 +153,9 @@ public sealed class EditorDocument
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
     public string Title { get; set; } = string.Empty;
     public PageLayout Layout { get; set; } = PageLayout.A4Portrait;
+
+    /// <summary>Optionales Gestaltungs-Theme (Schriften/Farben, dokumentweit). Null = Standard.</summary>
+    public EditorTheme? Theme { get; set; }
 
     public List<EditorPage> Pages { get; set; } = new();
 
@@ -160,6 +199,22 @@ public sealed class EditorDocument
         LegacyBackground = null;
         return this;
     }
+
+    /// <summary>
+    /// Exakte Tiefenkopie inkl. aller Ids — Grundlage des Undo/Redo-Verlaufs.
+    /// Günstig trotz eingebetteter Bilder: Strings (Data-URLs) werden als
+    /// Referenzen geteilt, nicht kopiert.
+    /// </summary>
+    public EditorDocument Snapshot() => new()
+    {
+        Id = Id,
+        Title = Title,
+        Layout = Layout,
+        Theme = Theme?.Clone(),
+        Pages = Pages.Select(p => p.Snapshot()).ToList(),
+        CreatedAt = CreatedAt,
+        UpdatedAt = UpdatedAt
+    };
 }
 
 /// <summary>Kurzinfo eines gespeicherten Entwurfs für Listen (ohne Block-Inhalt).</summary>

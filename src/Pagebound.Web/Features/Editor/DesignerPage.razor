@@ -1,21 +1,35 @@
 @page "/editor"
 @page "/editor/{Id}"
 @using Microsoft.AspNetCore.Components.Forms
+@using System.Globalization
 @using System.Text
 @using System.Text.Json
 @using System.Text.Json.Serialization
 @using Pagebound.Core.Abstractions
 @using Pagebound.Core.Domain
+@implements IDisposable
 @inject IEditorDraftService Drafts
+@inject IDesignFolderService Designs
 @inject ILocalizationService L
 @inject IJSRuntime JS
 
 <PageTitle>@L.T("editor.pageTitle")</PageTitle>
 
 <div class="flex h-full min-h-0">
-    @* ---- Seitenleiste (Werkzeuge) ------------------------------------- *@
-    <aside class="pb-editor-sidebar no-print w-72 shrink-0 overflow-y-auto border-r border-pb-border bg-pb-bg p-3 text-sm text-pb-fg">
-        <h1 class="mb-1 text-base font-semibold">@L.T("editor.heading")</h1>
+    @* Backdrop hinter der mobilen Sidebar (Drawer) *@
+    @if (_sidebarOpen)
+    {
+        <div class="no-print fixed inset-0 z-30 bg-black/50 lg:hidden" @onclick="@(() => _sidebarOpen = false)"></div>
+    }
+
+    @* ---- Seitenleiste (Werkzeuge); auf Mobile als einblendbarer Drawer ---- *@
+    <aside class="pb-editor-sidebar no-print w-72 shrink-0 overflow-y-auto border-r border-pb-border bg-pb-bg p-3 text-sm text-pb-fg
+                  max-lg:fixed max-lg:inset-y-0 max-lg:left-0 max-lg:z-40 max-lg:w-80 max-lg:max-w-[85vw] max-lg:shadow-2xl
+                  max-lg:transition-transform max-lg:duration-200 @(_sidebarOpen ? "max-lg:translate-x-0" : "max-lg:-translate-x-full")">
+        <div class="mb-1 flex items-start justify-between gap-2">
+            <h1 class="text-base font-semibold">@L.T("editor.heading")</h1>
+            <button class="btn-fmt pb-mobile-only" title="@L.T("editor.sidebar.close")" @onclick="@(() => _sidebarOpen = false)">@Ic("x")</button>
+        </div>
         <p class="mb-3 text-xs text-pb-fg-muted">@L.T("editor.subtitle")</p>
 
         <label class="mb-1 block text-xs font-medium text-pb-fg-muted">@L.T("editor.doc.title")</label>
@@ -30,11 +44,59 @@
             <option value="@PageLayout.A5Portrait">@L.T("editor.layout.a5")</option>
             <option value="@PageLayout.Letter">@L.T("editor.layout.letter")</option>
             <option value="@PageLayout.Slide16x9">@L.T("editor.layout.slide")</option>
+            <option value="@PageLayout.DinLong">@L.T("editor.layout.dinlong")</option>
+            <option value="@PageLayout.A6Landscape">@L.T("editor.layout.a6l")</option>
         </select>
 
         <label class="mb-3 flex items-center gap-2 text-xs">
             <input type="checkbox" @bind="_showCrops" /> @L.T("editor.crops")
         </label>
+
+        @* ---- Design (Theme): Schriften + Farben dokumentweit ---- *@
+        <label class="mb-1 block text-xs font-medium text-pb-fg-muted">@L.T("editor.theme.label")</label>
+        <select class="mb-2 w-full rounded border border-pb-border bg-pb-bg px-2 py-1" value="@(_doc.Theme?.Name ?? "")" @onchange="OnThemePresetChange">
+            <option value="">@L.T("editor.theme.none")</option>
+            @if (_doc.Theme is not null && EditorThemes.Presets.All(p => p.Name != _doc.Theme.Name))
+            {
+                <option value="@_doc.Theme.Name">@_doc.Theme.Name</option>
+            }
+            @foreach (var preset in EditorThemes.Presets)
+            {
+                <option value="@preset.Name">@preset.Name</option>
+            }
+        </select>
+        @if (_doc.Theme is not null)
+        {
+            <div class="mb-2 rounded border border-pb-border p-2">
+                <label class="mb-1 block text-xs">@L.T("editor.theme.headingFont")</label>
+                <select class="mb-2 w-full rounded border border-pb-border bg-pb-bg px-2 py-1 text-xs" @bind="_doc.Theme.HeadingFont">
+                    @foreach (var key in EditorThemes.FontStacks.Keys)
+                    {
+                        <option value="@key">@L.T($"editor.font.{key}")</option>
+                    }
+                </select>
+                <label class="mb-1 block text-xs">@L.T("editor.theme.bodyFont")</label>
+                <select class="mb-2 w-full rounded border border-pb-border bg-pb-bg px-2 py-1 text-xs" @bind="_doc.Theme.BodyFont">
+                    @foreach (var key in EditorThemes.FontStacks.Keys)
+                    {
+                        <option value="@key">@L.T($"editor.font.{key}")</option>
+                    }
+                </select>
+                <div class="mb-2 grid grid-cols-2 gap-1 text-xs">
+                    <label class="flex items-center gap-1"><input type="color" @bind="_doc.Theme.HeadingColor" /> @L.T("editor.theme.headingColor")</label>
+                    <label class="flex items-center gap-1"><input type="color" @bind="_doc.Theme.BodyColor" /> @L.T("editor.theme.textColor")</label>
+                    <label class="flex items-center gap-1"><input type="color" @bind="_doc.Theme.AccentColor" /> @L.T("editor.theme.accentColor")</label>
+                    <label class="flex items-center gap-1">
+                        <input type="color" value="@(_doc.Theme.PageBackground ?? "#ffffff")"
+                               @onchange="@(e => { if (_doc.Theme is not null) _doc.Theme.PageBackground = EditorThemes.SanitizeColorOrNull(e.Value?.ToString()); })" />
+                        @L.T("editor.theme.pageColor")
+                    </label>
+                </div>
+                <button class="btn-side w-full" @onclick="ExportTheme">@L.T("editor.theme.export")</button>
+            </div>
+        }
+        <label class="mb-1 block text-xs text-pb-fg-muted">@L.T("editor.theme.import")</label>
+        <InputFile class="mb-3 w-full text-xs" OnChange="OnImportTheme" accept="application/json,.json" />
 
         @* ---- Seiten (Multi-Page) ---- *@
         <div class="mb-1 text-xs font-medium text-pb-fg-muted">@L.T("editor.page.label")</div>
@@ -43,14 +105,21 @@
             {
                 var page = _doc.Pages[pi];
                 var idx = pi;
-                <li class="flex items-center gap-0.5">
+                <li class="flex cursor-move items-center gap-0.5 @(_dropPageIdx == idx && _dragPageIdx >= 0 && _dragPageIdx != idx ? "border-t-2 border-pb-accent" : "")"
+                    draggable="true"
+                    @ondragstart="@(() => _dragPageIdx = idx)"
+                    @ondragend="@(() => { _dragPageIdx = -1; _dropPageIdx = -1; })"
+                    @ondragenter="@(() => { if (_dragPageIdx >= 0) _dropPageIdx = idx; })"
+                    @ondragover:preventDefault="true"
+                    @ondrop:preventDefault="true"
+                    @ondrop="@(() => OnPageListDrop(idx))">
                     <button class="flex-1 truncate rounded px-1 py-0.5 text-left hover:bg-pb-surface @(_selectedPage == page ? "text-pb-accent" : "")"
                             @onclick="@(() => SelectPage(page))">@PageLabel(idx)</button>
-                    <button class="btn-side px-1" title="@L.T("editor.page.up")" @onclick="@(() => MovePage(page, -1))">↑</button>
-                    <button class="btn-side px-1" title="@L.T("editor.page.down")" @onclick="@(() => MovePage(page, 1))">↓</button>
-                    <button class="btn-side px-1" title="@L.T("editor.page.duplicate")" @onclick="@(() => DuplicatePage(page))">⧉</button>
+                    <button class="btn-side px-1" title="@L.T("editor.page.up")" @onclick="@(() => MovePage(page, -1))">@Ic("up")</button>
+                    <button class="btn-side px-1" title="@L.T("editor.page.down")" @onclick="@(() => MovePage(page, 1))">@Ic("down")</button>
+                    <button class="btn-side px-1" title="@L.T("editor.page.duplicate")" @onclick="@(() => DuplicatePage(page))">@Ic("copy")</button>
                     <button class="btn-side px-1 text-[#dc2626]" title="@L.T("editor.page.delete")"
-                            disabled="@(_doc.Pages.Count <= 1)" @onclick="@(() => DeletePage(page))">✕</button>
+                            disabled="@(_doc.Pages.Count <= 1)" @onclick="@(() => DeletePage(page))">@Ic("x")</button>
                 </li>
             }
         </ul>
@@ -68,17 +137,37 @@
                 </div>
 
                 <label class="mb-1 block text-xs">@L.T("editor.doc.bgImage")</label>
-                <InputFile class="mb-2 w-full text-xs" OnChange="OnPageBgSelected" accept="image/png,image/jpeg" />
+                <InputFile class="mb-2 w-full text-xs" OnChange="OnPageBgSelected" accept="image/png,image/jpeg,image/webp" />
                 @if (!string.IsNullOrEmpty(_selectedPage.BackgroundImage))
                 {
                     <div class="mb-2 flex items-center gap-2">
-                        <select class="flex-1 rounded border border-pb-border bg-pb-bg px-2 py-1 text-xs"
+                        <select class="flex-1 rounded border border-pb-border bg-pb-bg px-2 py-1 text-xs" disabled="@_selectedPage.BackgroundRepeat"
                                 @onchange="@(e => { if (_selectedPage is not null) _selectedPage.BackgroundSize = e.Value?.ToString() ?? "cover"; })">
                             <option value="cover" selected="@(_selectedPage.BackgroundSize == "cover")">@L.T("editor.doc.bgCover")</option>
                             <option value="contain" selected="@(_selectedPage.BackgroundSize == "contain")">@L.T("editor.doc.bgContain")</option>
                         </select>
                         <button class="btn-side text-[#dc2626]" @onclick="@(() => { if (_selectedPage is not null) _selectedPage.BackgroundImage = null; })">@L.T("editor.doc.bgImageNone")</button>
                     </div>
+                    <label class="mb-1 block text-xs">@L.T("editor.doc.bgPosition")</label>
+                    <select class="mb-2 w-full rounded border border-pb-border bg-pb-bg px-2 py-1 text-xs" disabled="@_selectedPage.BackgroundRepeat"
+                            @onchange="@(e => { if (_selectedPage is not null) _selectedPage.BackgroundPosition = e.Value?.ToString() ?? "center"; })">
+                        <option value="top" selected="@(_selectedPage.BackgroundPosition == "top")">@L.T("editor.doc.bgPos.top")</option>
+                        <option value="center" selected="@(_selectedPage.BackgroundPosition == "center")">@L.T("editor.doc.bgPos.center")</option>
+                        <option value="bottom" selected="@(_selectedPage.BackgroundPosition == "bottom")">@L.T("editor.doc.bgPos.bottom")</option>
+                    </select>
+                    <label class="mb-1 block text-xs">@L.T("editor.doc.bgOpacity"): @_selectedPage.BackgroundOpacityPercent%</label>
+                    <input type="range" min="10" max="100" step="5" class="mb-2 w-full"
+                           value="@_selectedPage.BackgroundOpacityPercent"
+                           @oninput="@(e => { if (_selectedPage is not null && int.TryParse(e.Value?.ToString(), out var v)) _selectedPage.BackgroundOpacityPercent = Math.Clamp(v, 10, 100); })" />
+                    <label class="mb-2 flex items-center gap-2 text-xs">
+                        <input type="checkbox" checked="@_selectedPage.BackgroundRepeat"
+                               @onchange="@(e => { if (_selectedPage is not null) _selectedPage.BackgroundRepeat = e.Value is true; })" />
+                        @L.T("editor.doc.bgRepeat")
+                    </label>
+                }
+                @if (_doc.Pages.Count > 1 && (!string.IsNullOrEmpty(_selectedPage.BackgroundImage) || !string.IsNullOrEmpty(_selectedPage.Background)))
+                {
+                    <button class="btn-side w-full" @onclick="ApplyBackgroundToAllPages">@L.T("editor.doc.bgAllPages")</button>
                 }
             </div>
         }
@@ -119,16 +208,23 @@
                 @if (_selected.Type is EditorBlockType.Heading or EditorBlockType.Paragraph or EditorBlockType.Image)
                 {
                     <div class="mb-2 flex gap-1">
-                        <button class="btn-side flex-1 @(_selected.Align=="left"?"is-on":"")" @onclick="@(() => SetAlign("left"))">⯇</button>
-                        <button class="btn-side flex-1 @(_selected.Align=="center"?"is-on":"")" @onclick="@(() => SetAlign("center"))">≡</button>
-                        <button class="btn-side flex-1 @(_selected.Align=="right"?"is-on":"")" @onclick="@(() => SetAlign("right"))">⯈</button>
+                        <button class="btn-side flex-1 @(_selected.Align=="left"?"is-on":"")" title="@L.T("editor.fmt.alignLeft")" @onclick="@(() => SetAlign("left"))">@Ic("align-left")</button>
+                        <button class="btn-side flex-1 @(_selected.Align=="center"?"is-on":"")" title="@L.T("editor.fmt.alignCenter")" @onclick="@(() => SetAlign("center"))">@Ic("align-center")</button>
+                        <button class="btn-side flex-1 @(_selected.Align=="right"?"is-on":"")" title="@L.T("editor.fmt.alignRight")" @onclick="@(() => SetAlign("right"))">@Ic("align-right")</button>
                     </div>
+                }
+
+                @if (_selected.Type is EditorBlockType.Heading or EditorBlockType.Paragraph or EditorBlockType.Table)
+                {
+                    <label class="mb-1 block text-xs">@L.T("editor.props.fontSize")</label>
+                    <input type="number" min="6" max="120" placeholder="@L.T("editor.props.fontSizeAuto")"
+                           class="mb-2 w-full rounded border border-pb-border bg-pb-bg px-2 py-1" @bind="_selected.FontSizePt" />
                 }
 
                 @if (_selected.Type is EditorBlockType.Image)
                 {
                     <label class="mb-1 block text-xs">@L.T("editor.props.chooseImage")</label>
-                    <InputFile class="mb-2 w-full text-xs" OnChange="OnImageSelected" accept="image/png,image/jpeg" />
+                    <InputFile class="mb-2 w-full text-xs" OnChange="OnImageSelected" accept="image/png,image/jpeg,image/webp" />
                     <label class="mb-1 block text-xs">@L.T("editor.props.imageWidth"): @_selected.WidthPercent%</label>
                     <input type="range" min="10" max="100" step="5" class="mb-1 w-full" @bind="_selected.WidthPercent" @bind:event="oninput" />
                 }
@@ -146,6 +242,10 @@
                         <input type="number" min="1" max="400" class="w-20 rounded border border-pb-border bg-pb-bg px-1 py-0.5" @bind="_selected.HeightPx" />
                         <span class="text-xs text-pb-fg-muted">px</span>
                     </div>
+                    @if (_selected.Shape == "rectangle")
+                    {
+                        <label class="mb-2 flex items-center gap-2 text-xs"><input type="checkbox" @bind="_selected.Fill" /> @L.T("editor.props.fill")</label>
+                    }
                 }
 
                 @if (_selected.Type is EditorBlockType.Spacer)
@@ -175,10 +275,10 @@
                 }
 
                 <div class="mt-2 flex gap-1">
-                    <button class="btn-side flex-1" title="@L.T("editor.block.up")" @onclick="@(() => MoveBlock(_selected, -1))">↑</button>
-                    <button class="btn-side flex-1" title="@L.T("editor.block.down")" @onclick="@(() => MoveBlock(_selected, 1))">↓</button>
-                    <button class="btn-side flex-1" title="@L.T("editor.block.duplicate")" @onclick="@(() => DuplicateBlock(_selected))">⧉</button>
-                    <button class="btn-side flex-1 text-[#dc2626]" title="@L.T("editor.block.delete")" @onclick="@(() => DeleteBlock(_selected))">🗑</button>
+                    <button class="btn-side flex-1" title="@L.T("editor.block.up")" @onclick="@(() => MoveBlock(_selected, -1))">@Ic("up")</button>
+                    <button class="btn-side flex-1" title="@L.T("editor.block.down")" @onclick="@(() => MoveBlock(_selected, 1))">@Ic("down")</button>
+                    <button class="btn-side flex-1" title="@L.T("editor.block.duplicate")" @onclick="@(() => DuplicateBlock(_selected))">@Ic("copy")</button>
+                    <button class="btn-side flex-1 text-[#dc2626]" title="@L.T("editor.block.delete")" @onclick="@(() => DeleteBlock(_selected))">@Ic("trash")</button>
                 </div>
             </div>
         }
@@ -205,34 +305,99 @@
                             @(string.IsNullOrWhiteSpace(d.Title) ? L.T("common.untitled") : d.Title)
                         </button>
                         <button class="rounded px-1 text-pb-fg-muted hover:text-[#dc2626]" title="@L.T("editor.draft.delete")"
-                                @onclick="@(() => DeleteDraft(d.Id))">✕</button>
+                                @onclick="@(() => DeleteDraft(d.Id))">@Ic("x")</button>
                     </li>
                 }
             </ul>
         }
 
+        @* ---- Design-Ordner (Dateisystem): Designs als Schablonen ---- *@
+        <div class="mb-1 text-xs font-medium text-pb-fg-muted">@L.T("editor.designs.label")</div>
+        @if (!_designsSupported)
+        {
+            <p class="mb-3 text-xs text-pb-fg-muted">@L.T("editor.designs.unsupported")</p>
+        }
+        else if (_designFolder is null)
+        {
+            <button class="btn-side mb-1 w-full" @onclick="PickDesignFolder">@L.T("editor.designs.pick")</button>
+            <p class="mb-3 text-xs text-pb-fg-muted">@L.T("editor.designs.hint")</p>
+        }
+        else
+        {
+            <div class="mb-2 flex items-center gap-1 text-xs">
+                <span class="flex min-w-0 flex-1 items-center gap-1.5" title="@_designFolder">@Ic("folder") <span class="truncate">@_designFolder</span></span>
+                <button class="btn-side px-1" title="@L.T("editor.designs.refresh")" @onclick="RefreshDesignsAsync">@Ic("refresh")</button>
+                <button class="btn-side px-1" title="@L.T("editor.designs.change")" @onclick="PickDesignFolder">@Ic("swap")</button>
+                <button class="btn-side px-1" title="@L.T("editor.designs.disconnect")" @onclick="DisconnectDesignFolder">@Ic("x")</button>
+            </div>
+            <div class="mb-2 grid grid-cols-1 gap-1">
+                <button class="btn-side" @onclick="SaveAsDesign">@L.T("editor.designs.saveCurrent")</button>
+                <button class="btn-side" @onclick="SeedDefaultDesigns">@L.T("editor.designs.seed")</button>
+            </div>
+            @if (_templateFile is not null)
+            {
+                <div class="mb-2 rounded border border-pb-border p-2 text-xs">
+                    <div class="mb-1 flex items-center gap-1.5 truncate text-pb-accent">@Ic("pen") @L.T("editor.designs.editing"): <strong class="truncate">@_templateFile</strong></div>
+                    <div class="flex gap-1">
+                        <button class="btn-side flex-1 is-primary" @onclick="SaveTemplate">@L.T("editor.designs.saveTemplate")</button>
+                        <button class="btn-side" @onclick="@(() => _templateFile = null)">@L.T("editor.designs.endEditing")</button>
+                    </div>
+                </div>
+            }
+            @if (!string.IsNullOrEmpty(_designStatus))
+            {
+                <div class="mb-2 text-xs text-pb-accent">@_designStatus</div>
+            }
+            @if (_designs.Count == 0)
+            {
+                <div class="mb-3 text-xs text-pb-fg-muted">@L.T("editor.designs.none")</div>
+            }
+            else
+            {
+                <ul class="mb-3 space-y-1">
+                    @foreach (var d in _designs)
+                    {
+                        var design = d;
+                        <li class="flex items-center gap-0.5 text-xs">
+                            <button class="flex-1 truncate rounded px-1 py-0.5 text-left hover:bg-pb-surface @(_templateFile == design.FileName ? "text-pb-accent" : "")"
+                                    title="@L.T("editor.designs.use")" @onclick="@(() => UseDesignAsync(design.FileName))">@design.Title</button>
+                            <button class="btn-side px-1" title="@L.T("editor.designs.edit")" @onclick="@(() => EditTemplateAsync(design.FileName))">@Ic("pen")</button>
+                            <button class="btn-side px-1 text-[#dc2626]" title="@L.T("editor.designs.delete")" @onclick="@(() => DeleteDesignAsync(design.FileName))">@Ic("x")</button>
+                        </li>
+                    }
+                </ul>
+            }
+        }
+
         <div class="mb-1 text-xs font-medium text-pb-fg-muted">@L.T("editor.export.label")</div>
-        <div class="grid grid-cols-3 gap-1">
+        <div class="mb-3 grid grid-cols-3 gap-1">
             <button class="btn-side is-primary" @onclick="ExportPdf">@L.T("editor.export.pdf")</button>
             <button class="btn-side" @onclick="ExportHtml">@L.T("editor.export.html")</button>
             <button class="btn-side" @onclick="ExportJson">@L.T("editor.export.json")</button>
         </div>
+
+        <label class="mb-1 block text-xs font-medium text-pb-fg-muted">@L.T("editor.import.label")</label>
+        <InputFile class="mb-3 w-full text-xs" OnChange="OnImportDocument" accept="application/json,.json" />
     </aside>
 
     @* ---- Hauptbereich: Rich-Text-Leiste + Seiten-Leinwand ------------- *@
     <div class="flex min-w-0 flex-1 flex-col">
         <div class="pb-editor-toolbar no-print flex flex-wrap items-center gap-1 border-b border-pb-border bg-pb-bg p-2 text-sm">
+            <button class="btn-fmt pb-mobile-only" @onclick="@(() => _sidebarOpen = !_sidebarOpen)" title="@L.T("editor.heading")">@Ic("menu")</button>
+            <button class="btn-fmt" disabled="@(_undoList.Count == 0)" @onclick="UndoAsync" title="@L.T("editor.undo")">@Ic("undo")</button>
+            <button class="btn-fmt" disabled="@(_redoList.Count == 0)" @onclick="RedoAsync" title="@L.T("editor.redo")">@Ic("redo")</button>
+            <span class="mx-1 h-4 w-px bg-pb-border"></span>
             <button class="btn-fmt font-bold" @onmousedown:preventDefault="true" @onclick="@(() => Format("bold"))" title="@L.T("editor.fmt.bold")">B</button>
             <button class="btn-fmt italic" @onmousedown:preventDefault="true" @onclick="@(() => Format("italic"))" title="@L.T("editor.fmt.italic")">I</button>
             <button class="btn-fmt underline" @onmousedown:preventDefault="true" @onclick="@(() => Format("underline"))" title="@L.T("editor.fmt.underline")">U</button>
             <span class="mx-1 h-4 w-px bg-pb-border"></span>
-            <button class="btn-fmt" @onmousedown:preventDefault="true" @onclick="@(() => Format("insertUnorderedList"))" title="@L.T("editor.fmt.ul")">• ≡</button>
-            <button class="btn-fmt" @onmousedown:preventDefault="true" @onclick="@(() => Format("insertOrderedList"))" title="@L.T("editor.fmt.ol")">1. ≡</button>
+            <button class="btn-fmt" @onmousedown:preventDefault="true" @onclick="@(() => Format("insertUnorderedList"))" title="@L.T("editor.fmt.ul")">@Ic("list-ul")</button>
+            <button class="btn-fmt" @onmousedown:preventDefault="true" @onclick="@(() => Format("insertOrderedList"))" title="@L.T("editor.fmt.ol")">@Ic("list-ol")</button>
             <span class="mx-1 h-4 w-px bg-pb-border"></span>
-            <button class="btn-fmt" @onmousedown:preventDefault="true" @onclick="@(() => Format("justifyLeft"))" title="@L.T("editor.fmt.alignLeft")">⯇</button>
-            <button class="btn-fmt" @onmousedown:preventDefault="true" @onclick="@(() => Format("justifyCenter"))" title="@L.T("editor.fmt.alignCenter")">≡</button>
-            <button class="btn-fmt" @onmousedown:preventDefault="true" @onclick="@(() => Format("justifyRight"))" title="@L.T("editor.fmt.alignRight")">⯈</button>
-            <button class="btn-fmt" @onmousedown:preventDefault="true" @onclick="@(() => Format("removeFormat"))" title="@L.T("editor.fmt.clear")">⌫</button>
+            <button class="btn-fmt" @onmousedown:preventDefault="true" @onclick="@(() => Format("justifyLeft"))" title="@L.T("editor.fmt.alignLeft")">@Ic("align-left")</button>
+            <button class="btn-fmt" @onmousedown:preventDefault="true" @onclick="@(() => Format("justifyCenter"))" title="@L.T("editor.fmt.alignCenter")">@Ic("align-center")</button>
+            <button class="btn-fmt" @onmousedown:preventDefault="true" @onclick="@(() => Format("justifyRight"))" title="@L.T("editor.fmt.alignRight")">@Ic("align-right")</button>
+            <button class="btn-fmt" @onmousedown:preventDefault="true" @onclick="@(() => Format("removeFormat"))" title="@L.T("editor.fmt.clear")">@Ic("eraser")</button>
             <span class="mx-1 h-4 w-px bg-pb-border"></span>
             <span class="text-xs text-pb-fg-muted" title="@L.T("editor.fmt.textColor")">A</span>
             @foreach (var col in TextColors)
@@ -243,7 +408,7 @@
             }
             <input type="color" class="h-5 w-5 cursor-pointer rounded-full border border-pb-border bg-transparent p-0" title="@L.T("editor.fmt.textColorPick")"
                    @onchange="@(e => ApplyColor("foreColor", e.Value?.ToString() ?? "#000000"))" />
-            <span class="ml-1 text-xs text-pb-fg-muted" title="@L.T("editor.fmt.highlight")">▩</span>
+            <span class="ml-1 inline-flex text-pb-fg-muted" title="@L.T("editor.fmt.highlight")">@Ic("highlight")</span>
             @foreach (var col in HiliteColors)
             {
                 var c = col;
@@ -252,11 +417,24 @@
             }
             <input type="color" class="h-5 w-5 cursor-pointer rounded border border-pb-border bg-transparent p-0" title="@L.T("editor.fmt.highlightPick")"
                    @onchange="@(e => ApplyColor("hiliteColor", e.Value?.ToString() ?? "#ffff00"))" />
-            <button class="btn-fmt" title="@L.T("editor.fmt.highlightNone")" @onmousedown:preventDefault="true" @onclick="@(() => Format("hiliteColor", "transparent"))">▢</button>
-            <span class="ml-auto text-xs text-pb-fg-muted">@L.T("editor.fmt.hint")</span>
+            <button class="btn-fmt" title="@L.T("editor.fmt.highlightNone")" @onmousedown:preventDefault="true" @onclick="@(() => Format("hiliteColor", "transparent"))">@Ic("highlight-off")</button>
+            <span class="mx-1 h-4 w-px bg-pb-border"></span>
+            <label class="flex items-center gap-1 text-xs text-pb-fg-muted">
+                @L.T("editor.zoom.label")
+                <select class="rounded border border-pb-border bg-pb-bg px-1 py-0.5 text-xs" @bind="ZoomBinding">
+                    <option value="auto">@L.T("editor.zoom.auto")</option>
+                    <option value="50">50 %</option>
+                    <option value="75">75 %</option>
+                    <option value="100">100 %</option>
+                    <option value="125">125 %</option>
+                    <option value="150">150 %</option>
+                </select>
+            </label>
+            <span class="ml-auto hidden text-xs text-pb-fg-muted xl:inline">@L.T("editor.fmt.hint")</span>
         </div>
 
         <div class="pb-doc-stage flex-1" @onclick="DeselectIfBackground">
+            <div class="pb-zoom">
             @{ var dim = EditorLayouts.For(_doc.Layout); }
             @for (int pi = 0; pi < _doc.Pages.Count; pi++)
             {
@@ -264,16 +442,30 @@
                 var pageIndex = pi;
                 <div class="pb-page @(_selectedPage == page ? "pb-page-selected" : "")" id="pb-page-@pageIndex"
                      style="@PageStyle(page, dim)"
-                     @onclick:stopPropagation="true" @onclick="@(() => SelectPage(page))">
+                     @onclick:stopPropagation="true" @onclick="@(() => SelectPage(page))"
+                     @ondragover:preventDefault="true"
+                     @ondrop:preventDefault="true" @ondrop="@(() => OnPageAreaDrop(page))">
+
+                    @* Hintergrundbild als eigene Ebene (Deckkraft/Position/Kacheln) — liegt unter den Blöcken. *@
+                    @if (!string.IsNullOrEmpty(page.BackgroundImage))
+                    {
+                        <div class="pb-page-bg" style="@PageBgLayerCss(page)"></div>
+                    }
 
                     @* Seiten-Kopf (nur Bildschirm): Bezeichnung + Seiten-Aktionen *@
                     <div class="no-print absolute -top-6 left-0 right-0 flex items-center justify-between text-xs text-white/90" contenteditable="false">
-                        <span class="rounded bg-black/40 px-1.5 py-0.5">@PageLabel(pageIndex)</span>
+                        <span class="flex items-center gap-1">
+                            <span class="rounded bg-black/40 px-1.5 py-0.5">@PageLabel(pageIndex)</span>
+                            @if (_overflow.Contains(pageIndex))
+                            {
+                                <span class="inline-flex items-center gap-1 rounded bg-[#dc2626] px-1.5 py-0.5 font-medium text-white" title="@L.T("editor.page.overflow")">@Ic("warn") @L.T("editor.page.overflowShort")</span>
+                            }
+                        </span>
                         <span class="flex gap-0.5">
-                            <button class="btn-fmt" title="@L.T("editor.page.up")" @onclick:stopPropagation="true" @onclick="@(() => MovePage(page, -1))">↑</button>
-                            <button class="btn-fmt" title="@L.T("editor.page.down")" @onclick:stopPropagation="true" @onclick="@(() => MovePage(page, 1))">↓</button>
-                            <button class="btn-fmt" title="@L.T("editor.page.duplicate")" @onclick:stopPropagation="true" @onclick="@(() => DuplicatePage(page))">⧉</button>
-                            <button class="btn-fmt text-[#fca5a5]" title="@L.T("editor.page.delete")" disabled="@(_doc.Pages.Count <= 1)" @onclick:stopPropagation="true" @onclick="@(() => DeletePage(page))">🗑</button>
+                            <button class="btn-fmt" title="@L.T("editor.page.up")" @onclick:stopPropagation="true" @onclick="@(() => MovePage(page, -1))">@Ic("up")</button>
+                            <button class="btn-fmt" title="@L.T("editor.page.down")" @onclick:stopPropagation="true" @onclick="@(() => MovePage(page, 1))">@Ic("down")</button>
+                            <button class="btn-fmt" title="@L.T("editor.page.duplicate")" @onclick:stopPropagation="true" @onclick="@(() => DuplicatePage(page))">@Ic("copy")</button>
+                            <button class="btn-fmt text-[#fca5a5]" title="@L.T("editor.page.delete")" disabled="@(_doc.Pages.Count <= 1)" @onclick:stopPropagation="true" @onclick="@(() => DeletePage(page))">@Ic("trash")</button>
                         </span>
                     </div>
 
@@ -284,31 +476,37 @@
                     }
                     @if (page.Blocks.Count == 0)
                     {
-                        <p class="text-pb-fg-muted" style="color:#9ca3af">@L.T("editor.emptyDoc")</p>
+                        <p class="text-pb-fg-muted" style="position:relative;color:#9ca3af">@L.T("editor.emptyDoc")</p>
                     }
                     @foreach (var b in page.Blocks)
                     {
                         var blk = b;
-                        <div class="pb-block @(_selected==blk ? "pb-selected" : "")" @key="blk.Id"
+                        <div class="pb-block @(_selected==blk ? "pb-selected" : "") @(_dropBlock == blk && _dragBlock is not null && _dragBlock != blk ? "pb-drop-target" : "")" @key="blk.Id"
                              style="@(string.IsNullOrEmpty(blk.Background) ? null : $"background:{blk.Background}")"
-                             @onclick:stopPropagation="true" @onclick="@(() => SelectBlock(page, blk))">
+                             @onclick:stopPropagation="true" @onclick="@(() => SelectBlock(page, blk))"
+                             @ondragenter="@(() => { if (_dragBlock is not null) _dropBlock = blk; })"
+                             @ondragover:preventDefault="true"
+                             @ondrop:preventDefault="true" @ondrop:stopPropagation="true" @ondrop="@(() => OnBlockDrop(page, blk))">
+                            <span class="pb-drag-handle no-print" contenteditable="false" draggable="true" title="@L.T("editor.block.dragHandle")"
+                                  @ondragstart="@(() => { _dragBlock = blk; _dropBlock = null; })"
+                                  @ondragend="@(() => { _dragBlock = null; _dropBlock = null; })">@Ic("grip")</span>
                             @if (_selected == blk)
                             {
                                 <div class="no-print absolute -top-3 right-1 z-30 flex gap-0.5 rounded border border-pb-border bg-pb-bg px-1 py-0.5 shadow-sm" contenteditable="false">
-                                    <button class="btn-fmt" title="@L.T("editor.block.up")" @onmousedown:preventDefault="true" @onclick:stopPropagation="true" @onclick="@(() => MoveBlock(blk, -1))">↑</button>
-                                    <button class="btn-fmt" title="@L.T("editor.block.down")" @onmousedown:preventDefault="true" @onclick:stopPropagation="true" @onclick="@(() => MoveBlock(blk, 1))">↓</button>
-                                    <button class="btn-fmt" title="@L.T("editor.block.duplicate")" @onmousedown:preventDefault="true" @onclick:stopPropagation="true" @onclick="@(() => DuplicateBlock(blk))">⧉</button>
-                                    <button class="btn-fmt text-[#dc2626]" title="@L.T("editor.block.delete")" @onmousedown:preventDefault="true" @onclick:stopPropagation="true" @onclick="@(() => DeleteBlock(blk))">🗑</button>
+                                    <button class="btn-fmt" title="@L.T("editor.block.up")" @onmousedown:preventDefault="true" @onclick:stopPropagation="true" @onclick="@(() => MoveBlock(blk, -1))">@Ic("up")</button>
+                                    <button class="btn-fmt" title="@L.T("editor.block.down")" @onmousedown:preventDefault="true" @onclick:stopPropagation="true" @onclick="@(() => MoveBlock(blk, 1))">@Ic("down")</button>
+                                    <button class="btn-fmt" title="@L.T("editor.block.duplicate")" @onmousedown:preventDefault="true" @onclick:stopPropagation="true" @onclick="@(() => DuplicateBlock(blk))">@Ic("copy")</button>
+                                    <button class="btn-fmt text-[#dc2626]" title="@L.T("editor.block.delete")" @onmousedown:preventDefault="true" @onclick:stopPropagation="true" @onclick="@(() => DeleteBlock(blk))">@Ic("trash")</button>
                                 </div>
                             }
                             @switch (blk.Type)
                             {
                                 case EditorBlockType.Heading:
-                                    <div id="blk-@blk.Id" class="pb-edit pb-h@(blk.Level) align-@blk.Align" contenteditable="true"
+                                    <div id="blk-@blk.Id" class="pb-edit pb-h@(blk.Level) align-@blk.Align" contenteditable="true" style="@FontSizeCss(blk)"
                                          data-placeholder="@L.T("editor.ph.heading")" @onfocusin="@(() => SelectBlock(page, blk))" @onblur="OnEditableBlur">@((MarkupString)(blk.Text ?? ""))</div>
                                     break;
                                 case EditorBlockType.Paragraph:
-                                    <div id="blk-@blk.Id" class="pb-edit pb-para align-@blk.Align" contenteditable="true"
+                                    <div id="blk-@blk.Id" class="pb-edit pb-para align-@blk.Align" contenteditable="true" style="@FontSizeCss(blk)"
                                          data-placeholder="@L.T("editor.ph.paragraph")" @onfocusin="@(() => SelectBlock(page, blk))" @onblur="OnEditableBlur">@((MarkupString)(blk.Text ?? ""))</div>
                                     break;
                                 case EditorBlockType.Image:
@@ -337,11 +535,11 @@
                                     }
                                     else
                                     {
-                                        <div class="pb-shape-rect" style="height:@(blk.HeightPx)px;color:@blk.Color"></div>
+                                        <div class="pb-shape-rect @(blk.Fill ? "is-filled" : null)" style="height:@(blk.HeightPx)px;color:@blk.Color"></div>
                                     }
                                     break;
                                 case EditorBlockType.Table:
-                                    <table class="pb-table">
+                                    <table class="pb-table" style="@FontSizeCss(blk)">
                                         @if (blk.Rows is not null)
                                         {
                                             @for (int r = 0; r < blk.Rows.Count; r++)
@@ -370,6 +568,7 @@
                     }
                 </div>
             }
+            </div>
         </div>
     </div>
 </div>
@@ -387,6 +586,42 @@
     private string? _focusBlockId;
     private bool _pageSizeDirty = true;
 
+    // Undo/Redo: Schnappschüsse des gesamten Dokuments vor jeder Struktur-Änderung.
+    // Günstig trotz eingebetteter Bilder (Data-URL-Strings werden referenzgeteilt).
+    private const int MaxUndo = 50;
+    private readonly List<EditorDocument> _undoList = new();
+    private readonly List<EditorDocument> _redoList = new();
+
+    // Seiten-Indizes, deren Inhalt das Papierformat sprengt (Überlauf-Warnung).
+    private HashSet<int> _overflow = new();
+
+    // Design-Ordner (Dateisystem): Designs sind Schablonen (*.pbdesign.json).
+    // _templateFile != null = expliziter „Template bearbeiten“-Modus — nur dann
+    // schreibt „Template speichern“ in die Datei zurück.
+    // Drag & Drop: Block-Umsortierung (auch seitenübergreifend), Seitenliste,
+    // Datei-Drop auf die Leinwand (Bilder/JSON via JS-Bridge + DotNetObjectReference).
+    private EditorBlock? _dragBlock;
+    private EditorBlock? _dropBlock;
+    private int _dragPageIdx = -1;
+    private int _dropPageIdx = -1;
+    private DotNetObjectReference<DesignerPage>? _selfRef;
+
+    // Mobile: Sidebar als Drawer + Zoom der Seiten-Leinwand ("auto" = an Breite anpassen).
+    private bool _sidebarOpen;
+    private string _zoomMode = "auto";
+    private string ZoomBinding
+    {
+        get => _zoomMode;
+        set => _zoomMode = value;
+    }
+
+    private const string DesignSuffix = ".pbdesign.json";
+    private bool _designsSupported;
+    private string? _designFolder;
+    private IReadOnlyList<DesignFileInfo> _designs = Array.Empty<DesignFileInfo>();
+    private string? _templateFile;
+    private string? _designStatus;
+
     private static readonly JsonSerializerOptions ExportJsonOptions = new()
     {
         WriteIndented = true,
@@ -397,10 +632,17 @@
         Converters = { new JsonStringEnumConverter() }
     };
 
+    private static readonly JsonSerializerOptions ImportJsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        Converters = { new JsonStringEnumConverter() }
+    };
+
     private PageLayout LayoutBinding
     {
         get => _doc.Layout;
-        set { _doc.Layout = value; _pageSizeDirty = true; }
+        set { if (value == _doc.Layout) return; PushUndo(); _doc.Layout = value; _pageSizeDirty = true; }
     }
 
     protected override async Task OnInitializedAsync()
@@ -413,6 +655,16 @@
         _doc.Migrate();
         _selectedPage = _doc.Pages.FirstOrDefault();
         await RefreshDraftsAsync();
+
+        _designsSupported = await Designs.IsSupportedAsync(CancellationToken.None);
+        if (_designsSupported)
+        {
+            _designFolder = await Designs.GetFolderNameAsync(CancellationToken.None);
+            // Best-Effort: ohne bereits erteilte Berechtigung bleibt die Liste leer,
+            // bis der Nutzer per Klick (= Nutzergeste für den Permission-Prompt)
+            // aktualisiert oder eine Aktion ausführt.
+            if (_designFolder is not null) await RefreshDesignsAsync();
+        }
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -420,6 +672,8 @@
         if (firstRender)
         {
             await JS.InvokeVoidAsync("pageboundWysiwyg.initializeEditor");
+            _selfRef = DotNetObjectReference.Create(this);
+            await JS.InvokeVoidAsync("pageboundWysiwyg.registerFileDrop", _selfRef);
         }
         if (_pageSizeDirty)
         {
@@ -432,12 +686,62 @@
             _focusBlockId = null;
             await JS.InvokeVoidAsync("pageboundWysiwyg.focusBlockEnd", $"blk-{id}");
         }
+        // Zoom nach jedem Render anwenden (Layout/Modus können sich geändert haben;
+        // die Bridge schreibt nur einen Style-Wert — vernachlässigbar günstig).
+        await JS.InvokeVoidAsync("pageboundWysiwyg.setZoom", _zoomMode, EditorLayouts.For(_doc.Layout).WidthMm);
+        await MeasureOverflowAsync();
+    }
+
+    /// <summary>Misst nach jedem Render, ob Seiteninhalt das Papierformat sprengt (würde im Druck abgeschnitten).</summary>
+    private async Task MeasureOverflowAsync()
+    {
+        var ids = Enumerable.Range(0, _doc.Pages.Count).Select(i => $"pb-page-{i}").ToList();
+        var result = await JS.InvokeAsync<Dictionary<string, bool>>("pageboundWysiwyg.measureOverflow", ids);
+        var overflow = new HashSet<int>();
+        for (var i = 0; i < _doc.Pages.Count; i++)
+            if (result.TryGetValue($"pb-page-{i}", out var over) && over) overflow.Add(i);
+        if (!overflow.SetEquals(_overflow))
+        {
+            _overflow = overflow;
+            StateHasChanged();
+        }
     }
 
     private async Task RefreshDraftsAsync()
         => _drafts = await Drafts.ListAsync(CancellationToken.None);
 
     private string BlockTypeName(EditorBlockType t) => L.T($"editor.type.{t.ToString().ToLowerInvariant()}");
+
+    // --- Inline-SVG-Icons (statt Emojis): stroke-basiert, folgen currentColor ----
+    private const string IcOpen = "<svg class=\"pb-ic\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\">";
+
+    private static readonly Dictionary<string, string> IconPaths = new()
+    {
+        ["up"] = "<path d='M8 13V3M3.5 7.5 8 3l4.5 4.5'/>",
+        ["down"] = "<path d='M8 3v10M3.5 8.5 8 13l4.5-4.5'/>",
+        ["copy"] = "<rect x='5.8' y='5.8' width='7.2' height='7.2' rx='1.4'/><path d='M10.2 3.5H4.6A1.6 1.6 0 0 0 3 5.1v5.6'/>",
+        ["x"] = "<path d='m4 4 8 8M12 4l-8 8'/>",
+        ["trash"] = "<path d='M3 4.5h10M6.3 4.5V3.2h3.4v1.3M4.6 4.5l.6 8.8h5.6l.6-8.8M6.8 7v4M9.2 7v4'/>",
+        ["undo"] = "<path d='M3.5 6.5h6.8a3.2 3.2 0 1 1 0 6.4H7M3.5 6.5l2.8-2.8M3.5 6.5l2.8 2.8'/>",
+        ["redo"] = "<path d='M12.5 6.5H5.7a3.2 3.2 0 1 0 0 6.4H9M12.5 6.5 9.7 3.7M12.5 6.5 9.7 9.3'/>",
+        ["list-ul"] = "<path d='M6.5 4.2h7M6.5 8h7M6.5 11.8h7'/><circle cx='3.2' cy='4.2' r='.9' fill='currentColor' stroke='none'/><circle cx='3.2' cy='8' r='.9' fill='currentColor' stroke='none'/><circle cx='3.2' cy='11.8' r='.9' fill='currentColor' stroke='none'/>",
+        ["list-ol"] = "<path d='M6.5 4.2h7M6.5 8h7M6.5 11.8h7'/><text x='1.8' y='5.6' font-size='4.6' fill='currentColor' stroke='none'>1</text><text x='1.8' y='9.4' font-size='4.6' fill='currentColor' stroke='none'>2</text><text x='1.8' y='13.2' font-size='4.6' fill='currentColor' stroke='none'>3</text>",
+        ["align-left"] = "<path d='M2.5 4h11M2.5 8h7M2.5 12h9.5'/>",
+        ["align-center"] = "<path d='M2.5 4h11M4.5 8h7M3.2 12h9.6'/>",
+        ["align-right"] = "<path d='M2.5 4h11M6.5 8h7M4 12h9.5'/>",
+        ["eraser"] = "<path d='m9.2 3.2 3.6 3.6-5.6 5.6H4.6L2.6 10.4z'/><path d='M8.2 13.4h5.3'/>",
+        ["folder"] = "<path d='M2.5 5A1.3 1.3 0 0 1 3.8 3.7h2.7l1.4 1.8h4.3a1.3 1.3 0 0 1 1.3 1.3v4.4a1.3 1.3 0 0 1-1.3 1.3H3.8a1.3 1.3 0 0 1-1.3-1.3z'/>",
+        ["refresh"] = "<path d='M13.2 8a5.2 5.2 0 1 1-1.6-3.7M13.2 2.6v2.9h-2.9'/>",
+        ["swap"] = "<path d='M4.8 5.5h8.2M10.6 3 13 5.5 10.6 8M11.2 10.5H3M5.4 13 3 10.5 5.4 8'/>",
+        ["pen"] = "<path d='m3 13 .8-3.1 7.3-7.3 2.3 2.3-7.3 7.3zM9.6 4.1l2.3 2.3'/>",
+        ["warn"] = "<path d='M8 2.6 14 13.2H2z'/><path d='M8 6.6v3.2M8 11.8v.01'/>",
+        ["highlight"] = "<path d='m5.6 8.8 5-5 1.6 1.6-5 5H5.6z'/><path d='M3 13.4h10'/>",
+        ["highlight-off"] = "<rect x='3' y='3' width='10' height='10' rx='1.2'/><path d='m4.5 11.5 7-7'/>",
+        ["menu"] = "<path d='M2.5 4.5h11M2.5 8h11M2.5 11.5h11'/>",
+        ["grip"] = "<circle cx='5.5' cy='3.5' r='1' fill='currentColor' stroke='none'/><circle cx='10.5' cy='3.5' r='1' fill='currentColor' stroke='none'/><circle cx='5.5' cy='8' r='1' fill='currentColor' stroke='none'/><circle cx='10.5' cy='8' r='1' fill='currentColor' stroke='none'/><circle cx='5.5' cy='12.5' r='1' fill='currentColor' stroke='none'/><circle cx='10.5' cy='12.5' r='1' fill='currentColor' stroke='none'/>"
+    };
+
+    private static MarkupString Ic(string name) => (MarkupString)(IcOpen + IconPaths[name] + "</svg>");
 
     private bool IsSlide => _doc.Layout == PageLayout.Slide16x9;
     private string PageLabel(int idx) => L.T(IsSlide ? "editor.page.nthSlide" : "editor.page.nthPage", new Dictionary<string, object> { ["n"] = idx + 1 });
@@ -447,26 +751,52 @@
     {
         var sb = new StringBuilder();
         sb.Append("width:").Append(dim.CssWidth).Append(";height:").Append(dim.CssHeight).Append(";padding:").Append(dim.CssMargin).Append(';');
-        sb.Append(PageBgCss(page));
+        sb.Append(PageThemeAndColorCss(page));
         return sb.ToString();
     }
 
-    private static string PageBgCss(EditorPage page)
+    /// <summary>Theme-Variablen (--doc-*) + Seiten-Hintergrundfarbe als Inline-Style.
+    /// Das Hintergrund-BILD liegt als eigene Ebene (.pb-page-bg) unter den Blöcken.</summary>
+    private string PageThemeAndColorCss(EditorPage page)
     {
         var sb = new StringBuilder();
-        if (!string.IsNullOrEmpty(page.BackgroundImage))
+        var theme = _doc.Theme;
+        if (theme is not null)
         {
-            if (!string.IsNullOrEmpty(page.Background)) sb.Append("background-color:").Append(page.Background).Append(';');
-            sb.Append("background-image:url('").Append(page.BackgroundImage).Append("');");
-            sb.Append("background-size:").Append(page.BackgroundSize == "contain" ? "contain" : "cover").Append(';');
-            sb.Append("background-position:center;background-repeat:no-repeat;");
+            sb.Append("--doc-font-heading:").Append(EditorThemes.FontStack(theme.HeadingFont)).Append(';');
+            sb.Append("--doc-font-body:").Append(EditorThemes.FontStack(theme.BodyFont)).Append(';');
+            sb.Append("--doc-color-heading:").Append(theme.HeadingColor).Append(';');
+            sb.Append("--doc-color-body:").Append(theme.BodyColor).Append(';');
+            sb.Append("--doc-color-accent:").Append(theme.AccentColor).Append(';');
+            sb.Append("--doc-color-accent-soft:").Append(EditorThemes.MixWithWhite(theme.AccentColor, 12)).Append(';');
         }
-        else if (!string.IsNullOrEmpty(page.Background))
-        {
-            sb.Append("background:").Append(page.Background).Append(';');
-        }
+        var bg = page.Background ?? theme?.PageBackground;
+        if (!string.IsNullOrEmpty(bg)) sb.Append("background-color:").Append(bg).Append(';');
         return sb.ToString();
     }
+
+    private static string PageBgLayerCss(EditorPage page)
+    {
+        var sb = new StringBuilder();
+        sb.Append("background-image:url('").Append(page.BackgroundImage).Append("');");
+        if (page.BackgroundRepeat)
+        {
+            sb.Append("background-repeat:repeat;background-size:auto;background-position:left top;");
+        }
+        else
+        {
+            sb.Append("background-repeat:no-repeat;");
+            sb.Append("background-size:").Append(page.BackgroundSize == "contain" ? "contain" : "cover").Append(';');
+            var pos = page.BackgroundPosition is "top" or "bottom" ? page.BackgroundPosition : "center";
+            sb.Append("background-position:center ").Append(pos).Append(';');
+        }
+        if (page.BackgroundOpacityPercent < 100)
+            sb.Append("opacity:").Append((page.BackgroundOpacityPercent / 100.0).ToString("0.##", CultureInfo.InvariantCulture)).Append(';');
+        return sb.ToString();
+    }
+
+    private static string? FontSizeCss(EditorBlock b)
+        => b.FontSizePt is int pt ? $"font-size:{Math.Clamp(pt, 6, 120)}pt" : null;
 
     // --- Sync DOM (contentEditable) → Modell ---------------------------------
     private async Task SyncAllAsync()
@@ -510,6 +840,423 @@
 
     private Task OnEditableBlur() => SyncAllAsync();
 
+    // --- Undo/Redo --------------------------------------------------------------
+    private void PushUndo()
+    {
+        _undoList.Add(_doc.Snapshot());
+        if (_undoList.Count > MaxUndo) _undoList.RemoveAt(0);
+        _redoList.Clear();
+    }
+
+    private async Task UndoAsync()
+    {
+        if (_undoList.Count == 0) return;
+        await SyncAllAsync();
+        _redoList.Add(_doc.Snapshot());
+        _doc = _undoList[^1];
+        _undoList.RemoveAt(_undoList.Count - 1);
+        AfterDocReplaced();
+    }
+
+    private async Task RedoAsync()
+    {
+        if (_redoList.Count == 0) return;
+        await SyncAllAsync();
+        _undoList.Add(_doc.Snapshot());
+        _doc = _redoList[^1];
+        _redoList.RemoveAt(_redoList.Count - 1);
+        AfterDocReplaced();
+    }
+
+    private void AfterDocReplaced()
+    {
+        _selected = null;
+        _selectedPage = _doc.Pages.FirstOrDefault();
+        _pageSizeDirty = true;
+        // Sicherheit: Dokumentwechsel (auch Undo/Redo) beendet die Template-
+        // Bearbeitung — sonst könnte fremder Inhalt ins Template geschrieben werden.
+        _templateFile = null;
+    }
+
+    // --- Theme ------------------------------------------------------------------
+    private void OnThemePresetChange(ChangeEventArgs e)
+    {
+        var name = e.Value?.ToString();
+        PushUndo();
+        if (string.IsNullOrEmpty(name))
+        {
+            _doc.Theme = null;
+            return;
+        }
+        var preset = EditorThemes.Presets.FirstOrDefault(p => p.Name == name);
+        if (preset is not null) _doc.Theme = preset.Clone();
+    }
+
+    private async Task ExportTheme()
+    {
+        if (_doc.Theme is null) return;
+        var json = JsonSerializer.Serialize(_doc.Theme, ExportJsonOptions);
+        var name = string.IsNullOrWhiteSpace(_doc.Theme.Name) ? "theme" : SafeName(_doc.Theme.Name);
+        await DownloadTextAsync(name + ".pbtheme.json", json, "application/json");
+    }
+
+    private async Task OnImportTheme(InputFileChangeEventArgs e)
+    {
+        try
+        {
+            await using var stream = e.File.OpenReadStream(256 * 1024);
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms);
+            var theme = JsonSerializer.Deserialize<EditorTheme>(Encoding.UTF8.GetString(ms.ToArray()), ImportJsonOptions);
+            if (theme is null) throw new JsonException();
+            PushUndo();
+            _doc.Theme = EditorThemes.Sanitize(theme);
+            _status = L.T("editor.import.done");
+        }
+        catch
+        {
+            _status = L.T("editor.import.error");
+        }
+    }
+
+    // --- Dokument-Import (JSON-Roundtrip zu „Export → JSON") ---------------------
+    private async Task OnImportDocument(InputFileChangeEventArgs e)
+    {
+        try
+        {
+            const long max = 64 * 1024 * 1024;
+            await using var stream = e.File.OpenReadStream(max);
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms);
+            var doc = await ParseDesignJsonAsync(Encoding.UTF8.GetString(ms.ToArray()));
+            if (doc is null) throw new JsonException();
+            doc.Id = Guid.NewGuid().ToString("N"); // keine Kollision mit vorhandenen Entwürfen
+            PushUndo();
+            _doc = doc;
+            AfterDocReplaced();
+            _status = L.T("editor.import.done");
+        }
+        catch
+        {
+            _status = L.T("editor.import.error");
+        }
+    }
+
+    /// <summary>Parst + säubert eine Dokument-JSON aus Fremdquellen (Datei-Import,
+    /// Design-Ordner). Liefert <c>null</c>, wenn die Datei kein gültiges Dokument ist.</summary>
+    private async Task<EditorDocument?> ParseDesignJsonAsync(string json)
+    {
+        EditorDocument? doc;
+        try
+        {
+            doc = JsonSerializer.Deserialize<EditorDocument>(json, ImportJsonOptions);
+        }
+        catch
+        {
+            return null;
+        }
+        if (doc is null) return null;
+        doc.Migrate();
+        SanitizeImportedDocument(doc);
+        await SanitizeImportedHtmlAsync(doc);
+        return doc;
+    }
+
+    /// <summary>Begrenzt alle Werte einer importierten Datei auf sichere Bereiche
+    /// (nur Hex-Farben, nur data:image-URLs, Wertebereiche) — schützt vor
+    /// CSS-Injection über manipulierte JSON-Dateien.</summary>
+    private static void SanitizeImportedDocument(EditorDocument doc)
+    {
+        if (doc.Theme is not null) EditorThemes.Sanitize(doc.Theme);
+        foreach (var page in doc.Pages)
+        {
+            page.Background = EditorThemes.SanitizeColorOrNull(page.Background);
+            if (page.BackgroundImage is not null && !page.BackgroundImage.StartsWith("data:image/", StringComparison.OrdinalIgnoreCase))
+                page.BackgroundImage = null;
+            page.BackgroundSize = page.BackgroundSize == "contain" ? "contain" : "cover";
+            page.BackgroundPosition = page.BackgroundPosition is "top" or "bottom" ? page.BackgroundPosition : "center";
+            page.BackgroundOpacityPercent = Math.Clamp(page.BackgroundOpacityPercent, 10, 100);
+            foreach (var b in page.Blocks)
+            {
+                b.Align = b.Align is "center" or "right" or "justify" ? b.Align : "left";
+                b.Level = Math.Clamp(b.Level, 1, 3);
+                b.Color = EditorThemes.SanitizeColor(b.Color, "#1f2937");
+                b.Background = EditorThemes.SanitizeColorOrNull(b.Background);
+                b.WidthPercent = Math.Clamp(b.WidthPercent, 10, 100);
+                b.HeightPx = Math.Clamp(b.HeightPx, 1, 400);
+                if (b.FontSizePt is int pt) b.FontSizePt = Math.Clamp(pt, 6, 120);
+                if (b.Src is not null && !b.Src.StartsWith("data:image/", StringComparison.OrdinalIgnoreCase))
+                    b.Src = null;
+            }
+        }
+    }
+
+    /// <summary>Säubert alle Rich-Text-Felder eines importierten Dokuments über den
+    /// DOM-basierten Sanitizer der JS-Brücke (entfernt Skripte/Event-Handler).</summary>
+    private async Task SanitizeImportedHtmlAsync(EditorDocument doc)
+    {
+        var fragments = new List<string>();
+        foreach (var page in doc.Pages)
+        {
+            foreach (var b in page.Blocks)
+            {
+                if (b.Text is not null) fragments.Add(b.Text);
+                if (b.Rows is not null) foreach (var row in b.Rows) fragments.AddRange(row);
+            }
+        }
+        if (fragments.Count == 0) return;
+        var clean = await JS.InvokeAsync<string[]>("pageboundWysiwyg.sanitizeHtmlBatch", (object)fragments.ToArray());
+        var i = 0;
+        foreach (var page in doc.Pages)
+        {
+            foreach (var b in page.Blocks)
+            {
+                if (b.Text is not null) b.Text = clean[i++];
+                if (b.Rows is not null)
+                    foreach (var row in b.Rows)
+                        for (var c = 0; c < row.Count; c++) row[c] = clean[i++];
+            }
+        }
+    }
+
+    // --- Design-Ordner (Dateisystem) ---------------------------------------------
+    private async Task PickDesignFolder()
+    {
+        var name = await Designs.PickFolderAsync(CancellationToken.None);
+        if (name is null) return; // Abbruch
+        _designFolder = name;
+        _templateFile = null;
+        _designStatus = null;
+        await RefreshDesignsAsync();
+    }
+
+    private async Task DisconnectDesignFolder()
+    {
+        await Designs.ClearFolderAsync(CancellationToken.None);
+        _designFolder = null;
+        _designs = Array.Empty<DesignFileInfo>();
+        _templateFile = null;
+        _designStatus = null;
+    }
+
+    private async Task RefreshDesignsAsync()
+        => _designs = await Designs.ListAsync(CancellationToken.None);
+
+    /// <summary>Legt die mitgelieferten Standard-Designs in den Ordner — vorhandene
+    /// Dateien werden nie überschrieben (Designs des Nutzers bleiben unangetastet).</summary>
+    private async Task SeedDefaultDesigns()
+    {
+        var written = 0;
+        foreach (var def in EditorDesignDefaults.All)
+        {
+            var file = def.FileBaseName + DesignSuffix;
+            if (await Designs.ExistsAsync(file, CancellationToken.None)) continue;
+            var json = JsonSerializer.Serialize(def.Create(), ExportJsonOptions);
+            if (await Designs.WriteAsync(file, json, CancellationToken.None)) written++;
+        }
+        _designStatus = L.T("editor.designs.seeded", new Dictionary<string, object> { ["n"] = written });
+        await RefreshDesignsAsync();
+    }
+
+    /// <summary>Speichert das aktuelle Dokument als neue Design-Datei im Ordner.
+    /// Vorhandene fremde Dateien werden nicht überschrieben (Name wird hochgezählt);
+    /// nur im „Template bearbeiten“-Modus schreibt <see cref="SaveTemplate"/> zurück.</summary>
+    private async Task SaveAsDesign()
+    {
+        await JS.InvokeVoidAsync("pageboundWysiwyg.blurActive");
+        await SyncAllAsync();
+        var baseName = SafeName(string.IsNullOrWhiteSpace(_doc.Title) ? "design" : _doc.Title);
+        var file = baseName + DesignSuffix;
+        var n = 2;
+        while (await Designs.ExistsAsync(file, CancellationToken.None))
+        {
+            file = $"{baseName}-{n++}{DesignSuffix}";
+            if (n > 50) { _designStatus = L.T("editor.designs.error"); return; }
+        }
+        var json = JsonSerializer.Serialize(_doc, ExportJsonOptions);
+        _designStatus = await Designs.WriteAsync(file, json, CancellationToken.None)
+            ? L.T("editor.designs.saved", new Dictionary<string, object> { ["file"] = file })
+            : L.T("editor.designs.error");
+        await RefreshDesignsAsync();
+    }
+
+    /// <summary>„Verwenden“: lädt das Design als Schablone — Kopie mit neuer Id,
+    /// die Datei im Ordner bleibt unverändert.</summary>
+    private async Task UseDesignAsync(string fileName)
+    {
+        var json = await Designs.ReadAsync(fileName, CancellationToken.None);
+        var doc = json is null ? null : await ParseDesignJsonAsync(json);
+        if (doc is null) { _designStatus = L.T("editor.designs.error"); return; }
+        doc.Id = Guid.NewGuid().ToString("N");
+        PushUndo();
+        _doc = doc;
+        AfterDocReplaced();
+        _designStatus = L.T("editor.designs.useLoaded");
+        _status = null;
+    }
+
+    /// <summary>„Template bearbeiten“: lädt das Design und verknüpft es mit der
+    /// Datei — <see cref="SaveTemplate"/> schreibt dann dorthin zurück.</summary>
+    private async Task EditTemplateAsync(string fileName)
+    {
+        var json = await Designs.ReadAsync(fileName, CancellationToken.None);
+        var doc = json is null ? null : await ParseDesignJsonAsync(json);
+        if (doc is null) { _designStatus = L.T("editor.designs.error"); return; }
+        PushUndo();
+        _doc = doc;
+        AfterDocReplaced();
+        _templateFile = fileName;
+        _designStatus = null;
+        _status = null;
+    }
+
+    private async Task SaveTemplate()
+    {
+        if (_templateFile is null) return;
+        await JS.InvokeVoidAsync("pageboundWysiwyg.blurActive");
+        await SyncAllAsync();
+        var json = JsonSerializer.Serialize(_doc, ExportJsonOptions);
+        _designStatus = await Designs.WriteAsync(_templateFile, json, CancellationToken.None)
+            ? L.T("editor.designs.templateSaved")
+            : L.T("editor.designs.error");
+        await RefreshDesignsAsync();
+    }
+
+    private async Task DeleteDesignAsync(string fileName)
+    {
+        var confirmed = await JS.InvokeAsync<bool>("confirm",
+            L.T("editor.designs.deleteConfirm", new Dictionary<string, object> { ["file"] = fileName }));
+        if (!confirmed) return;
+        if (!await Designs.DeleteAsync(fileName, CancellationToken.None))
+        {
+            _designStatus = L.T("editor.designs.error");
+            return;
+        }
+        if (_templateFile == fileName) _templateFile = null;
+        _designStatus = null;
+        await RefreshDesignsAsync();
+    }
+
+    // --- Drag & Drop --------------------------------------------------------------
+    /// <summary>Block-Drop auf einen Ziel-Block: fügt den gezogenen Block davor ein
+    /// (auch seitenübergreifend). Die Pfeil-Buttons bleiben als Tastatur-/Touch-Weg.</summary>
+    private async Task OnBlockDrop(EditorPage targetPage, EditorBlock target)
+    {
+        var dragged = _dragBlock;
+        _dragBlock = null;
+        _dropBlock = null;
+        if (dragged is null || dragged == target) return;
+        var sourcePage = PageOf(dragged);
+        if (sourcePage is null) return;
+        await SyncAllAsync();
+        PushUndo();
+        sourcePage.Blocks.Remove(dragged);
+        var at = targetPage.Blocks.IndexOf(target);
+        if (at < 0) at = targetPage.Blocks.Count;
+        targetPage.Blocks.Insert(at, dragged);
+        _selected = dragged;
+        _selectedPage = targetPage;
+    }
+
+    /// <summary>Block-Drop auf freie Seitenfläche: hängt den Block ans Seitenende.</summary>
+    private async Task OnPageAreaDrop(EditorPage targetPage)
+    {
+        var dragged = _dragBlock;
+        _dragBlock = null;
+        _dropBlock = null;
+        if (dragged is null) return;
+        var sourcePage = PageOf(dragged);
+        if (sourcePage is null) return;
+        if (sourcePage == targetPage && targetPage.Blocks.LastOrDefault() == dragged) return;
+        await SyncAllAsync();
+        PushUndo();
+        sourcePage.Blocks.Remove(dragged);
+        targetPage.Blocks.Add(dragged);
+        _selected = dragged;
+        _selectedPage = targetPage;
+    }
+
+    /// <summary>Seitenliste: gezogene Seite vor die Zielposition verschieben.</summary>
+    private async Task OnPageListDrop(int targetIdx)
+    {
+        var from = _dragPageIdx;
+        _dragPageIdx = -1;
+        _dropPageIdx = -1;
+        if (from < 0 || from >= _doc.Pages.Count || from == targetIdx) return;
+        await SyncAllAsync();
+        PushUndo();
+        var page = _doc.Pages[from];
+        _doc.Pages.RemoveAt(from);
+        var at = Math.Clamp(targetIdx > from ? targetIdx - 1 : targetIdx, 0, _doc.Pages.Count);
+        _doc.Pages.Insert(at, page);
+        _selectedPage = page;
+    }
+
+    /// <summary>Vom JS-Datei-Drop gemeldete Dateien (Leinwand): Bilder werden als
+    /// Bild-Blöcke auf der Zielseite eingefügt; eine JSON-Datei importiert das
+    /// Dokument (wie „Import (JSON-Dokument)").</summary>
+    public sealed record DroppedFile(string Name, string Kind, string? DataUrl, string? Text);
+
+    [JSInvokable]
+    public async Task OnFilesDropped(int pageIndex, DroppedFile[] files)
+    {
+        var json = files.FirstOrDefault(f => f.Kind == "json" && !string.IsNullOrEmpty(f.Text));
+        if (json is not null)
+        {
+            var doc = await ParseDesignJsonAsync(json.Text!);
+            if (doc is null)
+            {
+                _status = L.T("editor.import.error");
+            }
+            else
+            {
+                doc.Id = Guid.NewGuid().ToString("N");
+                PushUndo();
+                _doc = doc;
+                AfterDocReplaced();
+                _status = L.T("editor.import.done");
+            }
+            StateHasChanged();
+            return;
+        }
+
+        var images = files.Where(f => f.Kind == "image"
+            && f.DataUrl is not null
+            && f.DataUrl.StartsWith("data:image/", StringComparison.OrdinalIgnoreCase)).ToList();
+        if (images.Count == 0) return;
+
+        await SyncAllAsync();
+        PushUndo();
+        var page = pageIndex >= 0 && pageIndex < _doc.Pages.Count ? _doc.Pages[pageIndex] : CurrentPage();
+        foreach (var img in images)
+        {
+            var block = new EditorBlock { Type = EditorBlockType.Image, Src = img.DataUrl, Alt = img.Name, WidthPercent = 60, Align = "center" };
+            page.Blocks.Add(block);
+            _selected = block;
+        }
+        _selectedPage = page;
+        _status = L.T("editor.dnd.imagesAdded", new Dictionary<string, object> { ["n"] = images.Count });
+        StateHasChanged();
+    }
+
+    public void Dispose() => _selfRef?.Dispose();
+
+    private void ApplyBackgroundToAllPages()
+    {
+        if (_selectedPage is null) return;
+        PushUndo();
+        foreach (var page in _doc.Pages)
+        {
+            if (page == _selectedPage) continue;
+            page.Background = _selectedPage.Background;
+            page.BackgroundImage = _selectedPage.BackgroundImage;
+            page.BackgroundSize = _selectedPage.BackgroundSize;
+            page.BackgroundOpacityPercent = _selectedPage.BackgroundOpacityPercent;
+            page.BackgroundPosition = _selectedPage.BackgroundPosition;
+            page.BackgroundRepeat = _selectedPage.BackgroundRepeat;
+        }
+    }
+
     // --- Auswahl --------------------------------------------------------------
     private void SelectBlock(EditorPage page, EditorBlock b) { _selected = b; _selectedPage = page; }
     private void SelectPage(EditorPage page) { _selectedPage = page; _selected = null; }
@@ -539,6 +1286,7 @@
     private async Task AddPage()
     {
         await SyncAllAsync();
+        PushUndo();
         var page = new EditorPage();
         var at = _selectedPage is not null ? _doc.Pages.IndexOf(_selectedPage) + 1 : _doc.Pages.Count;
         if (at < 0 || at > _doc.Pages.Count) at = _doc.Pages.Count;
@@ -550,6 +1298,7 @@
     private async Task DuplicatePage(EditorPage page)
     {
         await SyncAllAsync();
+        PushUndo();
         var copy = page.Clone();
         _doc.Pages.Insert(_doc.Pages.IndexOf(page) + 1, copy);
         _selectedPage = copy;
@@ -560,6 +1309,7 @@
     {
         if (_doc.Pages.Count <= 1) return;
         await SyncAllAsync();
+        PushUndo();
         var i = _doc.Pages.IndexOf(page);
         _doc.Pages.Remove(page);
         if (_selected is not null && page.Blocks.Contains(_selected)) _selected = null;
@@ -572,6 +1322,7 @@
         var i = _doc.Pages.IndexOf(page);
         var j = i + dir;
         if (i < 0 || j < 0 || j >= _doc.Pages.Count) return;
+        PushUndo();
         (_doc.Pages[i], _doc.Pages[j]) = (_doc.Pages[j], _doc.Pages[i]);
     }
 
@@ -579,8 +1330,10 @@
     private async Task AddBlock(EditorBlockType type)
     {
         await SyncAllAsync();
+        PushUndo();
         var page = CurrentPage();
         var b = new EditorBlock { Type = type };
+        if (type is EditorBlockType.Shape && _doc.Theme is not null) b.Color = _doc.Theme.AccentColor;
         switch (type)
         {
             case EditorBlockType.Heading: b.Level = 2; b.Text = ""; break;
@@ -613,6 +1366,7 @@
         var i = page.Blocks.IndexOf(b);
         var j = i + dir;
         if (i < 0 || j < 0 || j >= page.Blocks.Count) return;
+        PushUndo();
         (page.Blocks[i], page.Blocks[j]) = (page.Blocks[j], page.Blocks[i]);
     }
 
@@ -621,6 +1375,7 @@
         await SyncAllAsync();
         var page = PageOf(b);
         if (page is null) return;
+        PushUndo();
         var copy = b.Clone();
         page.Blocks.Insert(page.Blocks.IndexOf(b) + 1, copy);
         _selected = copy;
@@ -632,6 +1387,7 @@
         await SyncAllAsync();
         var page = PageOf(b);
         if (page is null) return;
+        PushUndo();
         page.Blocks.Remove(b);
         if (_selected == b) _selected = null;
     }
@@ -641,24 +1397,29 @@
     {
         await SyncAllAsync();
         if (b.Rows is null) return;
+        PushUndo();
         var cols = b.Rows.Count > 0 ? b.Rows[0].Count : 3;
         b.Rows.Add(Enumerable.Repeat("", cols).ToList());
     }
     private async Task TableRemoveRow(EditorBlock b)
     {
         await SyncAllAsync();
-        if (b.Rows is { Count: > 1 }) b.Rows.RemoveAt(b.Rows.Count - 1);
+        if (b.Rows is not { Count: > 1 }) return;
+        PushUndo();
+        b.Rows.RemoveAt(b.Rows.Count - 1);
     }
     private async Task TableAddCol(EditorBlock b)
     {
         await SyncAllAsync();
         if (b.Rows is null) return;
+        PushUndo();
         foreach (var row in b.Rows) row.Add("");
     }
     private async Task TableRemoveCol(EditorBlock b)
     {
         await SyncAllAsync();
         if (b.Rows is null) return;
+        PushUndo();
         foreach (var row in b.Rows) if (row.Count > 1) row.RemoveAt(row.Count - 1);
     }
 
@@ -673,6 +1434,7 @@
         using var ms = new MemoryStream();
         await stream.CopyToAsync(ms);
         var mime = string.IsNullOrEmpty(file.ContentType) ? "image/png" : file.ContentType;
+        PushUndo();
         _selected.Src = $"data:{mime};base64,{Convert.ToBase64String(ms.ToArray())}";
     }
 
@@ -686,28 +1448,33 @@
         using var ms = new MemoryStream();
         await stream.CopyToAsync(ms);
         var mime = string.IsNullOrEmpty(file.ContentType) ? "image/png" : file.ContentType;
+        PushUndo();
         _selectedPage.BackgroundImage = $"data:{mime};base64,{Convert.ToBase64String(ms.ToArray())}";
     }
 
     // --- Vorlagen / Entwürfe --------------------------------------------------
     private void NewDocument()
     {
+        PushUndo();
         _doc = EditorDocument.NewEmpty(string.Empty, _doc.Layout);
         _selected = null;
         _selectedPage = _doc.Pages.FirstOrDefault();
         _status = null;
         _pageSizeDirty = true;
+        _templateFile = null;
     }
 
     private void ApplyTemplate(ChangeEventArgs e)
     {
         var raw = e.Value?.ToString();
         if (string.IsNullOrEmpty(raw) || !Enum.TryParse<EditorTemplates.TemplateKind>(raw, out var kind)) return;
+        PushUndo();
         _doc = EditorTemplates.Create(kind).Migrate();
         _selected = null;
         _selectedPage = _doc.Pages.FirstOrDefault();
         _status = null;
         _pageSizeDirty = true;
+        _templateFile = null;
     }
 
     private async Task Save()
@@ -730,11 +1497,13 @@
     {
         var loaded = await Drafts.LoadAsync(id, CancellationToken.None);
         if (loaded is null) return;
+        PushUndo();
         _doc = loaded.Migrate();
         _selected = null;
         _selectedPage = _doc.Pages.FirstOrDefault();
         _status = null;
         _pageSizeDirty = true;
+        _templateFile = null;
     }
 
     private async Task DeleteDraft(string id)
@@ -779,8 +1548,10 @@
         var pages = new List<(string Style, string Inner)>();
         for (var i = 0; i < _doc.Pages.Count; i++)
         {
+            // Inner enthält bereits die .pb-page-bg-Ebene (Inline-Styles); Theme-
+            // Variablen + Seitenfarbe kommen als Style des Seiten-Containers mit.
             var inner = await JS.InvokeAsync<string>("pageboundWysiwyg.getCleanHtml", $"pb-page-{i}");
-            pages.Add((PageBgCss(_doc.Pages[i]), inner));
+            pages.Add((PageThemeAndColorCss(_doc.Pages[i]), inner));
         }
         var html = BuildStandaloneHtml(_doc.Title, dim, pages);
         await DownloadTextAsync(SafeName(_doc.Title) + ".html", html, "text/html");
@@ -815,14 +1586,19 @@
         sb.Append("@page{size:").Append(dim.CssPageSize).Append(";margin:0}");
         sb.Append("body{margin:0;background:#e5e7eb;color:#111827;font-family:Georgia,'Times New Roman',serif}");
         sb.Append(".pb-page{box-sizing:border-box;position:relative;background:#fff;width:").Append(dim.CssWidth)
-          .Append(";min-height:").Append(dim.CssHeight).Append(";padding:").Append(dim.CssMargin).Append(";margin:0 auto 12px;page-break-after:always}");
+          .Append(";min-height:").Append(dim.CssHeight).Append(";padding:").Append(dim.CssMargin).Append(";margin:0 auto 12px;page-break-after:always;")
+          .Append("color:var(--doc-color-body,#111827);font-family:var(--doc-font-body,Georgia,'Times New Roman',serif)}");
         sb.Append(".pb-page:last-child{page-break-after:auto;margin-bottom:0}");
+        sb.Append(".pb-page-bg{position:absolute;inset:0;pointer-events:none}");
+        sb.Append(".pb-block{position:relative;margin:0 0 8px}.pb-block:last-child{margin-bottom:0}");
+        sb.Append(".pb-h1,.pb-h2,.pb-h3{font-family:var(--doc-font-heading,inherit);color:var(--doc-color-heading,inherit)}");
         sb.Append(".pb-h1{font-size:22pt;font-weight:700}.pb-h2{font-size:16pt;font-weight:700}.pb-h3{font-size:13pt;font-weight:700}");
         sb.Append(".pb-para{font-size:11pt;line-height:1.5}");
         sb.Append(".pb-spacer{width:100%}");
         sb.Append(".pb-img{display:block;max-width:100%;height:auto}.pb-img-wrap.align-center{text-align:center}.pb-img-wrap.align-right{text-align:right}");
-        sb.Append(".pb-shape-rect{width:100%;border:1.5px solid currentColor}.pb-shape-line{border-top:1.5px solid currentColor}.pb-shape-divider{border-top:1px solid #d1d5db;margin:6px 0}");
-        sb.Append(".pb-table{width:100%;border-collapse:collapse;font-size:10.5pt}.pb-table td,.pb-table th{border:1px solid #9ca3af;padding:4px 8px;text-align:left}.pb-table th{background:#f3f4f6}");
+        sb.Append(".pb-shape-rect{width:100%;border:1.5px solid currentColor}.pb-shape-rect.is-filled{background:currentColor;border:none}");
+        sb.Append(".pb-shape-line{border-top:1.5px solid currentColor}.pb-shape-divider{border-top:1px solid var(--doc-color-accent,#d1d5db);margin:6px 0}");
+        sb.Append(".pb-table{width:100%;border-collapse:collapse;font-size:10.5pt}.pb-table td,.pb-table th{border:1px solid #9ca3af;padding:4px 8px;text-align:left}.pb-table th{background:var(--doc-color-accent-soft,#f3f4f6);color:#111827}");
         sb.Append(".align-center{text-align:center}.align-right{text-align:right}.align-justify{text-align:justify}");
         sb.Append("*{-webkit-print-color-adjust:exact;print-color-adjust:exact}");
         sb.Append("</style></head><body>");

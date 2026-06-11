@@ -78,7 +78,7 @@ public static class EditorTemplates
             P("<br><br>Max Mustermann")));
 
     // --- Flyer (Vorder- + Rückseite) -----------------------------------------
-    private static EditorDocument Flyer() => Doc(
+    private static EditorDocument Flyer() => WithTheme("Modern", Doc(
         "Flyer", PageLayout.A4Portrait,
         Page( // Vorderseite
             H("Veranstaltungstitel", 1, "center"),
@@ -86,7 +86,7 @@ public static class EditorTemplates
             Img("Bild / Logo hier einfügen"),
             P("Beschreiben Sie kurz und prägnant, worum es geht. Was, wann, wo — die wichtigsten Informationen auf einen Blick.", "center"),
             Divider(),
-            P("📅 Datum · 🕒 Uhrzeit · 📍 Ort<br>www.beispiel.de · kontakt@beispiel.de", "center")),
+            P("Datum · Uhrzeit · Ort<br>www.beispiel.de · kontakt@beispiel.de", "center")),
         Page( // Rückseite
             H("Programm & Details", 2, "center"),
             P("Hier ist Platz für das ausführliche Programm, den Ablauf oder weitere Informationen zur Veranstaltung."),
@@ -97,7 +97,13 @@ public static class EditorTemplates
                 new[] { "14:00", "Ausklang" }),
             Spacer(24),
             Divider(),
-            P("Anfahrt, Kontakt & Anmeldung<br>www.beispiel.de · kontakt@beispiel.de · 0123 456789", "center")));
+            P("Anfahrt, Kontakt & Anmeldung<br>www.beispiel.de · kontakt@beispiel.de · 0123 456789", "center"))));
+
+    private static EditorDocument WithTheme(string presetName, EditorDocument doc)
+    {
+        doc.Theme = EditorThemes.Presets.FirstOrDefault(t => t.Name == presetName)?.Clone();
+        return doc;
+    }
 
     // --- 16:9-Folien-Deck ----------------------------------------------------
     private static EditorDocument Slide() => Doc(

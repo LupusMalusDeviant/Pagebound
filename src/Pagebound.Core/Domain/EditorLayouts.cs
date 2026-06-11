@@ -30,6 +30,8 @@ public static class EditorLayouts
         PageLayout.A5Portrait => new PageDimensions(148, 210, 15),
         PageLayout.Letter => new PageDimensions(215.9, 279.4, 20),
         PageLayout.Slide16x9 => new PageDimensions(254, 142.875, 12),
+        PageLayout.DinLong => new PageDimensions(105, 210, 10),
+        PageLayout.A6Landscape => new PageDimensions(148, 105, 10),
         _ => new PageDimensions(210, 297, 20)
     };
 }

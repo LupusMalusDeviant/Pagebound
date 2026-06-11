@@ -12,11 +12,23 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 40px;                      /* Platz für die Seiten-Kopfleiste über jedem Blatt */
   padding: 40px 24px 24px;
   background: #4b5563;            /* neutraler Viewer-Hintergrund */
   overflow: auto;
   min-height: 100%;
+}
+
+/* Zoom-Hülle um alle Seiten: pageboundWysiwyg.setZoom setzt hier `zoom` (Mobile-
+   Auto-Fit bzw. manueller Zoom). Trägt das Seiten-Layout (Spalte + Abstand). */
+.pb-zoom {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 40px;                      /* Platz für die Seiten-Kopfleiste über jedem Blatt */
+}
+
+@media (max-width: 640px) {
+  .pb-doc-stage { padding: 40px 8px 16px; }
 }
 
 /* Ein virtuelles Blatt. Breite/Höhe/Innenrand (= Dokumentränder) kommen als
@@ -25,11 +37,22 @@
   position: relative;
   box-sizing: border-box;
   background: #ffffff;
-  color: #111827;
+  color: var(--doc-color-body, #111827);
   box-shadow: 0 8px 30px rgba(0, 0, 0, 0.35);
-  font-family: "Source Serif 4", Georgia, "Times New Roman", serif;
+  /* Theme-Variablen (--doc-*) kommen als Inline-Style aus dem Dokument-Theme;
+     ohne Theme greifen die Fallbacks (= bisheriger Look). */
+  font-family: var(--doc-font-body, Georgia, "Times New Roman", serif);
   font-size: 11pt;
   line-height: 1.5;
+}
+
+/* Hintergrundbild-Ebene einer Seite: eigene Schicht statt background-image am
+   Blatt, damit Deckkraft/Position/Kacheln möglich sind. Liegt unter den Blöcken
+   (erstes Kind, Blöcke sind position:relative). */
+.pb-page-bg {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
 }
 
 /* Aktuell gewählte Seite (Hintergrund-/Seiten-Werkzeuge wirken auf sie). */
@@ -71,6 +94,47 @@
   border-radius: 3px;
 }
 
+/* Drag-Handle zum Umsortieren: liegt im Seitenrand links neben dem Block,
+   erscheint bei Hover/Auswahl. Nur Bildschirm (no-print blendet im Druck aus). */
+.pb-drag-handle {
+  position: absolute;
+  left: -24px;
+  top: 1px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  color: #6b7280;
+  background: rgba(255, 255, 255, 0.7);
+  cursor: grab;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.pb-block:hover .pb-drag-handle,
+.pb-block.pb-selected .pb-drag-handle { opacity: 1; }
+.pb-drag-handle:active { cursor: grabbing; }
+
+/* Einfüge-Indikator beim Block-Drag: Linie über dem Ziel-Block. */
+.pb-block.pb-drop-target::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -6px;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(37, 99, 235, 0.75);
+  pointer-events: none;
+}
+
+/* Datei-Drop (Bilder/JSON) über der Leinwand. */
+.pb-doc-stage.pb-file-drop {
+  outline: 3px dashed rgba(37, 99, 235, 0.8);
+  outline-offset: -6px;
+}
+
 .pb-edit { outline: none; cursor: text; }
 .pb-edit:focus, .pb-edit:focus-visible {
   outline: 2px solid rgba(37, 99, 235, 0.45);
@@ -79,6 +143,10 @@
 }
 .pb-edit:empty::before { content: attr(data-placeholder); color: #9ca3af; }
 
+.pb-h1, .pb-h2, .pb-h3 {
+  font-family: var(--doc-font-heading, inherit);
+  color: var(--doc-color-heading, inherit);
+}
 .pb-h1 { font-size: 22pt; font-weight: 700; line-height: 1.2; margin-bottom: 10px; }
 .pb-h2 { font-size: 16pt; font-weight: 700; line-height: 1.25; margin-bottom: 8px; }
 .pb-h3 { font-size: 13pt; font-weight: 700; line-height: 1.3; margin-bottom: 6px; }
@@ -95,12 +163,17 @@
 .pb-block.pb-selected .pb-spacer { outline: 1px dashed rgba(37, 99, 235, 0.4); }
 
 .pb-shape-rect { width: 100%; border: 1.5px solid currentColor; }
+.pb-shape-rect.is-filled { background: currentColor; border: none; }
 .pb-shape-line { width: 100%; border: none; border-top: 1.5px solid currentColor; }
-.pb-shape-divider { width: 100%; border: none; border-top: 1px solid #d1d5db; margin: 6px 0; }
+.pb-shape-divider { width: 100%; border: none; border-top: 1px solid var(--doc-color-accent, #d1d5db); margin: 6px 0; }
 
 .pb-table { width: 100%; border-collapse: collapse; font-size: 10.5pt; }
 .pb-table td, .pb-table th { border: 1px solid #9ca3af; padding: 4px 8px; text-align: left; vertical-align: top; }
-.pb-table thead th { background: #f3f4f6; font-weight: 700; }
+/* Hinweis: kein `thead`-Selektor — der Editor rendert Kopfzellen als direkte
+   <th> in der ersten Zeile (ohne thead-Element). */
+/* Kopf-Text immer dunkel: accent-soft ist stets eine helle Weiß-Mischung —
+   bei dunklen Themes wäre die geerbte (helle) Textfarbe sonst unlesbar. */
+.pb-table th { background: var(--doc-color-accent-soft, #f3f4f6); color: #111827; font-weight: 700; }
 
 .align-center { text-align: center; }
 .align-right { text-align: right; }
@@ -126,6 +199,13 @@
   }
 
   .pb-doc-stage { gap: 0 !important; }
+
+  /* Zoom nur am Bildschirm — Druck immer in Originalgröße, als Block-Fluss. */
+  .pb-zoom {
+    zoom: 1 !important;
+    display: block !important;
+    gap: 0 !important;
+  }
 
   .pb-page {
     box-shadow: none !important;

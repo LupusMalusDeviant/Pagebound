@@ -47,6 +47,107 @@ export function initializeEditor(_elementId?: string): void {
     const range = sel.getRangeAt(0);
     if (editableOf(range)) savedRange = range.cloneRange();
   });
+
+  window.addEventListener("resize", applyZoom);
+}
+
+// --- Zoom der Seiten-Leinwand (Mobile: Seiten passen sonst nicht in den Viewport).
+// "auto" skaliert die mm-breite Seite auf die verfügbare Stage-Breite (max 100 %).
+// CSS `zoom` statt transform: beeinflusst das Layout (kein Leerraum), Druck setzt
+// es per Print-CSS auf 1 zurück.
+let zoomMode = "auto";
+let zoomPageWidthMm = 210;
+
+function applyZoom(): void {
+  const stage = document.querySelector(".pb-doc-stage") as HTMLElement | null;
+  const wrap = document.querySelector(".pb-zoom") as HTMLElement | null;
+  if (!stage || !wrap) return;
+  let z = 1;
+  if (zoomMode === "auto") {
+    const avail = stage.clientWidth - 24;
+    const pageWidthPx = (zoomPageWidthMm * 96) / 25.4;
+    z = Math.min(1, avail / pageWidthPx);
+  } else {
+    z = (parseInt(zoomMode, 10) || 100) / 100;
+  }
+  (wrap.style as unknown as { zoom: string }).zoom = z === 1 ? "" : z.toFixed(3);
+}
+
+/** Setzt den Zoom-Modus ("auto" | "50" … "150") und die aktuelle Seitenbreite in mm. */
+export function setZoom(mode: string, pageWidthMm: number): void {
+  zoomMode = mode || "auto";
+  zoomPageWidthMm = pageWidthMm > 0 ? pageWidthMm : 210;
+  applyZoom();
+}
+
+// --- Datei-Drop auf die Leinwand ---------------------------------------------
+// Blazor-Drop-Events liefern keine Dateien — diese Brücke liest sie (Bilder als
+// Data-URL, JSON als Text) und reicht sie samt Zielseite an C# durch. Block-
+// Drag&Drop (ohne Dateien) läuft rein über Blazor-Events und wird hier ignoriert.
+
+const MAX_DROP_FILES = 10;
+const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+const MAX_JSON_BYTES = 64 * 1024 * 1024;
+
+interface DroppedFilePayload {
+  name: string;
+  kind: "image" | "json";
+  dataUrl?: string;
+  text?: string;
+}
+
+function readAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
+export function registerFileDrop(dotnetRef: { invokeMethodAsync(method: string, ...args: unknown[]): Promise<unknown> }): void {
+  const stage = document.querySelector(".pb-doc-stage") as HTMLElement | null;
+  if (!stage || (stage as any).__pbDropWired) return;
+  (stage as any).__pbDropWired = true;
+
+  stage.addEventListener("dragover", (e: DragEvent) => {
+    if (e.dataTransfer && Array.from(e.dataTransfer.types).includes("Files")) {
+      e.preventDefault();
+      stage.classList.add("pb-file-drop");
+    }
+  });
+  stage.addEventListener("dragleave", (e: DragEvent) => {
+    if (e.target === stage) stage.classList.remove("pb-file-drop");
+  });
+  stage.addEventListener("drop", (e: DragEvent) => {
+    stage.classList.remove("pb-file-drop");
+    const files = e.dataTransfer?.files;
+    if (!files || files.length === 0) return; // Block-Drag (Blazor) — nicht unsere Baustelle
+    e.preventDefault();
+
+    const pageEl = (e.target as HTMLElement | null)?.closest?.(".pb-page") as HTMLElement | null;
+    const pageIndex = pageEl?.id?.startsWith("pb-page-") ? parseInt(pageEl.id.slice("pb-page-".length), 10) : -1;
+
+    void (async () => {
+      const payload: DroppedFilePayload[] = [];
+      for (const f of Array.from(files).slice(0, MAX_DROP_FILES)) {
+        try {
+          if (f.type.startsWith("image/")) {
+            if (f.size > MAX_IMAGE_BYTES) continue;
+            payload.push({ name: f.name, kind: "image", dataUrl: await readAsDataUrl(f) });
+          } else if (f.type === "application/json" || f.name.toLowerCase().endsWith(".json")) {
+            if (f.size > MAX_JSON_BYTES) continue;
+            payload.push({ name: f.name, kind: "json", text: await f.text() });
+          }
+        } catch {
+          /* unlesbare Datei überspringen */
+        }
+      }
+      if (payload.length > 0) {
+        await dotnetRef.invokeMethodAsync("OnFilesDropped", pageIndex, payload);
+      }
+    })();
+  });
 }
 
 /**
@@ -147,6 +248,57 @@ export function blurActive(): void {
 export function setHtmlContent(elementId: string, html: string): void {
   const el = document.getElementById(elementId);
   if (el) el.innerHTML = html;
+}
+
+/**
+ * Misst pro Element, ob dessen Inhalt höher ist als das Element selbst —
+ * der Editor zeigt damit eine Überlauf-Warnung an Seiten, deren Inhalt das
+ * feste Papierformat sprengt (würde im Druck abgeschnitten).
+ */
+export function measureOverflow(ids: string[]): Record<string, boolean> {
+  const out: Record<string, boolean> = {};
+  for (const id of ids ?? []) {
+    const el = document.getElementById(id);
+    if (el) out[id] = el.scrollHeight > el.clientHeight + 1;
+  }
+  return out;
+}
+
+// Beim Import fremder Dokument-/Theme-Dateien (JSON) könnten Text-Felder
+// aktives HTML enthalten. Dieser DOM-basierte Sanitizer entfernt Skripte,
+// Event-Handler und gefährliche URLs, bevor der Inhalt als Markup gerendert wird.
+const BLOCKED_TAGS = new Set([
+  "SCRIPT", "STYLE", "IFRAME", "OBJECT", "EMBED", "LINK", "META", "BASE", "FORM", "TEMPLATE",
+]);
+
+function sanitizeNode(el: Element): void {
+  for (const child of Array.from(el.children)) {
+    if (BLOCKED_TAGS.has(child.tagName)) {
+      child.remove();
+      continue;
+    }
+    for (const attr of Array.from(child.attributes)) {
+      const name = attr.name.toLowerCase();
+      const value = attr.value.trim().toLowerCase();
+      if (name.startsWith("on")) child.removeAttribute(attr.name);
+      else if ((name === "href" || name === "src" || name === "xlink:href") &&
+               (value.startsWith("javascript:") || value.startsWith("vbscript:") ||
+                (name !== "href" && value.startsWith("data:") && !value.startsWith("data:image/")))) {
+        child.removeAttribute(attr.name);
+      }
+    }
+    sanitizeNode(child);
+  }
+}
+
+/** Säubert eine Liste von HTML-Fragmenten (Dokument-Import, LF-05). */
+export function sanitizeHtmlBatch(values: string[]): string[] {
+  return (values ?? []).map((html) => {
+    const tpl = document.createElement("template");
+    tpl.innerHTML = html ?? "";
+    sanitizeNode(tpl.content as unknown as Element);
+    return tpl.innerHTML;
+  });
 }
 
 /** Setzt den Cursor ans Ende eines (gerade hinzugefügten) editierbaren Blocks. */

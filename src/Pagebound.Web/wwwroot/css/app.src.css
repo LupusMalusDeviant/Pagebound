@@ -287,20 +287,35 @@ textarea, select {
 
 /* WYSIWYG-Editor: kompakte Werkzeug-Buttons (Seitenleiste + Format-Leiste). */
 .btn-side {
-  display: inline-flex; align-items: center; justify-content: center; gap: 0.3em;
+  display: inline-flex; align-items: center; justify-content: center; gap: 0.35em;
   padding: calc(0.34em * var(--d)) calc(0.55em * var(--d));
   border: 1px solid var(--ctl-border); border-radius: 6px;
   background: var(--bg); color: var(--ink-2); font-size: 0.8rem; cursor: pointer; white-space: nowrap;
+  transition: background var(--speed), color var(--speed), border-color var(--speed);
 }
 .btn-side:hover { background: var(--bg-hover); color: var(--ink); }
 .btn-side.is-on { border-color: var(--accent); color: var(--accent); }
 .btn-side.is-primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; font-weight: 700; }
+.btn-side.is-primary:hover { background: color-mix(in oklch, var(--accent) 88%, white); }
 .btn-fmt {
-  min-width: 1.9em; padding: calc(0.3em * var(--d)) calc(0.45em * var(--d));
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 2em; min-height: 2em; padding: calc(0.3em * var(--d)) calc(0.45em * var(--d));
   border: 1px solid var(--ctl-border); border-radius: 6px;
   background: var(--bg); color: var(--ink); font-size: 0.85rem; cursor: pointer;
+  transition: background var(--speed), color var(--speed), border-color var(--speed);
 }
 .btn-fmt:hover { background: var(--bg-hover); }
+.btn-side:focus-visible, .btn-fmt:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.btn-side:disabled, .btn-fmt:disabled { opacity: 0.4; cursor: default; pointer-events: none; }
+
+/* Inline-SVG-Icons der Editor-Bedienflächen (statt Emojis — folgen currentColor). */
+.pb-ic { width: 13px; height: 13px; flex: none; }
+
+/* Nur auf Mobile sichtbar (Drawer-Toggle/-Schließen). Eigene Regel statt Tailwinds
+   `lg:hidden`, weil .btn-fmt sein display sonst mit gleicher Spezifität zurücksetzt. */
+@media (min-width: 1024px) {
+  .pb-mobile-only { display: none !important; }
+}
 
 .card { background: var(--bg-surface); border: 1px solid var(--line); border-radius: var(--radius-l); box-shadow: var(--shadow); }
 
