@@ -27,6 +27,7 @@
     "@fontsource-variable/newsreader": "^5.2.10",
     "fflate": "^0.8.3",
     "pdf-lib": "^1.17.1",
+    "qrcode": "^1.5.4",
     "tesseract.js": "^7.0.0"
   }
 }
