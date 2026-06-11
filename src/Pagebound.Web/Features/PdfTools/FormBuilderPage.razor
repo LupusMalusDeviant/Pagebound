@@ -1,0 +1,268 @@
+@page "/form-builder"
+@using Microsoft.AspNetCore.Components.Forms
+@using Pagebound.Core.Abstractions
+@implements IDisposable
+@inject IPdfManipulator Pdf
+@inject ILocalizationService L
+@inject IJSRuntime JS
+
+<PageTitle>@L.T("fb.pageTitle")</PageTitle>
+
+<div class="mx-auto max-w-5xl p-4 text-pb-fg">
+    <h1 class="mb-1 text-xl font-semibold">@L.T("fb.heading")</h1>
+    <p class="mb-4 text-sm text-pb-fg-muted">@L.T("fb.subtitle")</p>
+
+    @if (_pdfBytes is null)
+    {
+        <label class="mb-1 block text-xs font-medium text-pb-fg-muted">@L.T("fb.choose")</label>
+        <InputFile class="mb-4 w-full text-sm" OnChange="OnPdfSelected" accept="application/pdf,.pdf" />
+    }
+    else
+    {
+        <div class="mb-3 flex flex-wrap items-center gap-2">
+            <span class="truncate text-sm" title="@_fileName">@_fileName · @_pageCount @L.T("fb.pages")</span>
+            <span class="mx-1 h-4 w-px bg-pb-border"></span>
+            <button class="btn-side @(_placeType == "text" ? "is-on" : "")" @onclick="@(() => TogglePlace("text"))">@L.T("fb.addText")</button>
+            <button class="btn-side @(_placeType == "checkbox" ? "is-on" : "")" @onclick="@(() => TogglePlace("checkbox"))">@L.T("fb.addCheckbox")</button>
+            <span class="text-xs text-pb-fg-muted">@(_placeType is null ? L.T("fb.hint") : L.T("fb.placeHint"))</span>
+            <span class="ml-auto flex gap-1">
+                <button class="btn-side is-primary" disabled="@(_fields.Count == 0 || _busy)" @onclick="ExportAsync">
+                    @(_busy ? L.T("common.savingProgress") : L.T("fb.export", new Dictionary<string, object> { ["n"] = _fields.Count }))
+                </button>
+                <button class="btn-side" @onclick="ResetAll">@L.T("editor.draft.new")</button>
+            </span>
+        </div>
+        @if (!string.IsNullOrEmpty(_status))
+        {
+            <div class="mb-2 text-xs text-pb-accent">@_status</div>
+        }
+
+        @if (_fields.Count > 0)
+        {
+            <div class="mb-4 rounded border border-pb-border p-2">
+                <div class="mb-1 text-xs font-semibold text-pb-fg-muted">@L.T("fb.fields")</div>
+                <ul class="space-y-1">
+                    @foreach (var f in _fields.OrderBy(x => x.Page))
+                    {
+                        var field = f;
+                        <li class="flex items-center gap-2 text-xs">
+                            <span class="w-14 shrink-0 text-pb-fg-muted">@L.T("fb.page") @field.Page</span>
+                            <span class="w-16 shrink-0">@(field.Type == "checkbox" ? L.T("fb.typeCheckbox") : L.T("fb.typeText"))</span>
+                            <input class="min-w-0 flex-1 rounded border border-pb-border bg-pb-bg px-2 py-0.5"
+                                   value="@field.Name" @onchange="@(e => field.Name = SanitizeName(e.Value?.ToString()))" />
+                            <button class="btn-side px-1 text-[#dc2626]" title="@L.T("common.delete")" @onclick="@(() => RemoveField(field))">
+                                <svg class="pb-ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8"/></svg>
+                            </button>
+                        </li>
+                    }
+                </ul>
+            </div>
+        }
+
+        @if (_renderLimited)
+        {
+            <div class="mb-2 rounded border border-pb-border p-2 text-xs text-pb-fg-muted">@L.T("fb.pageLimit", new Dictionary<string, object> { ["max"] = MaxRenderPages })</div>
+        }
+
+        <div class="space-y-6 overflow-x-auto pb-4">
+            @for (var p = 0; p < _pageImages.Count; p++)
+            {
+                var pageIdx = p;
+                var img = _pageImages[p];
+                <div class="fb-page @(_placeType is not null ? "fb-placing" : "")" id="fb-page-@pageIdx"
+                     style="width:@(img.WidthPx)px;height:@(img.HeightPx)px"
+                     @onclick="@(e => OnPageClick(pageIdx, e))">
+                    <img src="data:image/png;base64,@img.Base64" alt="@L.T("fb.page") @(pageIdx + 1)" draggable="false" />
+                    @foreach (var f in _fields.Where(x => x.Page == pageIdx + 1))
+                    {
+                        var field = f;
+                        <div class="fb-field @(field.Type == "checkbox" ? "is-checkbox" : "") @(_selectedField == field ? "is-selected" : "")"
+                             data-fb-id="@field.Id"
+                             style="left:@Pct(field.X);top:@Pct(field.Y);width:@Pct(field.W);height:@Pct(field.H)"
+                             title="@field.Name"
+                             @onclick:stopPropagation="true" @onclick="@(() => _selectedField = field)">
+                            <span class="fb-label">@field.Name</span>
+                            <span class="fb-resize" title="@L.T("editor.overlay.resize")"></span>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private const int MaxRenderPages = 30;
+    private const double RenderScale = 1.4;
+
+    private sealed class FbField
+    {
+        public string Id { get; } = Guid.NewGuid().ToString("N");
+        public string Type { get; set; } = "text";   // text | checkbox
+        public int Page { get; set; }                // 1-basiert
+        public double X { get; set; }                // 0..1-Fractions, Ursprung oben-links
+        public double Y { get; set; }
+        public double W { get; set; }
+        public double H { get; set; }
+        public string Name { get; set; } = "";
+    }
+
+    private sealed record PageImage(string Base64, int WidthPx, int HeightPx);
+    private sealed record LoadResult(string Id, int PageCount, string? Title);
+
+    private byte[]? _pdfBytes;
+    private string _fileName = "";
+    private int _pageCount;
+    private bool _renderLimited;
+    private readonly List<PageImage> _pageImages = new();
+    private readonly List<FbField> _fields = new();
+    private FbField? _selectedField;
+    private string? _placeType;
+    private string? _status;
+    private bool _busy;
+    private int _nameCounter = 1;
+    private DotNetObjectReference<FormBuilderPage>? _selfRef;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _selfRef = DotNetObjectReference.Create(this);
+            await JS.InvokeVoidAsync("pageboundPdf.registerFormBuilder", _selfRef);
+        }
+    }
+
+    private async Task OnPdfSelected(InputFileChangeEventArgs e)
+    {
+        const long max = 64 * 1024 * 1024;
+        await using var stream = e.File.OpenReadStream(max);
+        using var ms = new MemoryStream();
+        await stream.CopyToAsync(ms);
+        _pdfBytes = ms.ToArray();
+        _fileName = e.File.Name;
+        _status = null;
+        _fields.Clear();
+        _pageImages.Clear();
+
+        var loaded = await JS.InvokeAsync<LoadResult>("pageboundPdf.loadPdf", _pdfBytes, null);
+        _pageCount = loaded.PageCount;
+        var renderCount = Math.Min(_pageCount, MaxRenderPages);
+        _renderLimited = _pageCount > MaxRenderPages;
+        for (var p = 1; p <= renderCount; p++)
+        {
+            var r = await JS.InvokeAsync<System.Text.Json.JsonElement>("pageboundPdf.renderPage", loaded.Id, p, RenderScale);
+            _pageImages.Add(new PageImage(
+                r.GetProperty("rasterBase64").GetString() ?? "",
+                r.GetProperty("widthPx").GetInt32(),
+                r.GetProperty("heightPx").GetInt32()));
+            StateHasChanged();
+        }
+    }
+
+    private void TogglePlace(string type) => _placeType = _placeType == type ? null : type;
+
+    private void OnPageClick(int pageIdx, MouseEventArgs e)
+    {
+        if (_placeType is null) return;
+        var img = _pageImages[pageIdx];
+        // OffsetX/Y sind relativ zum Klick-Ziel; die Seite wird in nativer
+        // Render-Größe angezeigt, daher reicht die Division durch die Pixelmaße.
+        var x = Math.Clamp(e.OffsetX / img.WidthPx, 0, 1);
+        var y = Math.Clamp(e.OffsetY / img.HeightPx, 0, 1);
+        var isCheckbox = _placeType == "checkbox";
+        var w = isCheckbox ? 22.0 / img.WidthPx : 200.0 / img.WidthPx;
+        var h = isCheckbox ? 22.0 / img.HeightPx : 28.0 / img.HeightPx;
+        var field = new FbField
+        {
+            Type = _placeType,
+            Page = pageIdx + 1,
+            X = Math.Min(x, 1 - w),
+            Y = Math.Min(y, 1 - h),
+            W = w,
+            H = h,
+            Name = (isCheckbox ? "checkbox" : "feld") + _nameCounter++
+        };
+        _fields.Add(field);
+        _selectedField = field;
+        _placeType = null;
+    }
+
+    [JSInvokable]
+    public Task OnFieldGeometry(string id, double leftPct, double topPct, double widthPct, double heightPct)
+    {
+        var field = _fields.FirstOrDefault(f => f.Id == id);
+        if (field is not null)
+        {
+            field.X = Math.Clamp(leftPct / 100, 0, 1);
+            field.Y = Math.Clamp(topPct / 100, 0, 1);
+            field.W = Math.Clamp(widthPct / 100, 0.01, 1);
+            field.H = Math.Clamp(heightPct / 100, 0.005, 1);
+            StateHasChanged();
+        }
+        return Task.CompletedTask;
+    }
+
+    private void RemoveField(FbField f)
+    {
+        _fields.Remove(f);
+        if (_selectedField == f) _selectedField = null;
+    }
+
+    private void ResetAll()
+    {
+        _pdfBytes = null;
+        _fileName = "";
+        _pageImages.Clear();
+        _fields.Clear();
+        _selectedField = null;
+        _placeType = null;
+        _status = null;
+    }
+
+    private static string SanitizeName(string? raw)
+    {
+        var name = (raw ?? "").Trim();
+        return name.Length == 0 ? "feld" : string.Concat(name.Select(c => char.IsLetterOrDigit(c) || c is '_' or '-' or '.' ? c : '_'));
+    }
+
+    private async Task ExportAsync()
+    {
+        if (_pdfBytes is null || _fields.Count == 0 || _busy) return;
+        _busy = true;
+        _status = null;
+        try
+        {
+            // Eindeutige Feldnamen erzwingen (AcroForm-Anforderung).
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var f in _fields)
+            {
+                var baseName = SanitizeName(f.Name);
+                var name = baseName;
+                var n = 2;
+                while (!seen.Add(name)) name = $"{baseName}-{n++}";
+                f.Name = name;
+            }
+            var regions = _fields
+                .Select(f => new FormFieldRegion(f.Page, f.X, f.Y, f.W, f.H, f.Name, f.Type))
+                .ToList();
+            using var stream = new MemoryStream(_pdfBytes);
+            var result = await Pdf.CreateFormFieldsAsync(stream, regions, CancellationToken.None);
+            var baseFile = Path.GetFileNameWithoutExtension(string.IsNullOrWhiteSpace(_fileName) ? "dokument" : _fileName);
+            await JS.InvokeVoidAsync("pageboundShortcuts.downloadBytes",
+                baseFile + "-formular.pdf", Convert.ToBase64String(result), "application/pdf");
+            _status = L.T("fb.done", new Dictionary<string, object> { ["n"] = _fields.Count });
+        }
+        catch (Exception ex)
+        {
+            _status = L.T("fb.error", new Dictionary<string, object> { ["message"] = ex.Message });
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private static string Pct(double fraction) => (fraction * 100).ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) + "%";
+
+    public void Dispose() => _selfRef?.Dispose();
+}

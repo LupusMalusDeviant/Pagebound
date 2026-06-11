@@ -317,6 +317,48 @@ textarea, select {
   .pb-mobile-only { display: none !important; }
 }
 
+/* --- Formular-Builder: Felder über gerenderten PDF-Seiten ------------------ */
+.fb-page { position: relative; background: #fff; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.3); }
+.fb-page img { display: block; width: 100%; height: 100%; user-select: none; }
+.fb-page.fb-placing { cursor: crosshair; }
+.fb-field {
+  position: absolute;
+  box-sizing: border-box;
+  border: 1.5px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border-radius: 2px;
+  cursor: grab;
+  touch-action: none;
+}
+.fb-field:active { cursor: grabbing; }
+.fb-field.is-selected { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent); }
+.fb-field.is-checkbox { border-radius: 3px; }
+.fb-field .fb-label {
+  position: absolute;
+  top: -16px;
+  left: 0;
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 3px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  white-space: nowrap;
+  pointer-events: none;
+}
+.fb-field .fb-resize {
+  position: absolute;
+  right: -7px;
+  bottom: -7px;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  background: var(--accent);
+  cursor: nwse-resize;
+  touch-action: none;
+}
+
 .card { background: var(--bg-surface); border: 1px solid var(--line); border-radius: var(--radius-l); box-shadow: var(--shadow); }
 
 .eyebrow { font-family: var(--font-mono); font-size: 0.72rem; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-3); }

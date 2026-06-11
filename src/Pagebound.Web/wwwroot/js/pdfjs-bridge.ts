@@ -743,6 +743,66 @@ export function clearTextLayer(containerSelector: string): void {
   }
 }
 
+// =============================================================================
+// Formular-Builder: Pointer-Drag/-Resize platzierter Felder (.fb-field) über
+// gerenderten Seiten (.fb-page). Geometrie in Prozent der Seitenfläche; am
+// Gesten-Ende geht sie an C# (ein Undo-/State-Update pro Geste). Pointer Events
+// = Maus, Touch und Stift.
+// =============================================================================
+
+let fbRef: { invokeMethodAsync(method: string, ...args: unknown[]): Promise<unknown> } | null = null;
+
+export function registerFormBuilder(dotnetRef: { invokeMethodAsync(method: string, ...args: unknown[]): Promise<unknown> }): void {
+  fbRef = dotnetRef;
+  if ((document as any).__pbFbWired) return;
+  (document as any).__pbFbWired = true;
+
+  document.addEventListener("pointerdown", (e: PointerEvent) => {
+    if (!fbRef) return;
+    const target = e.target as HTMLElement | null;
+    const field = target?.closest?.(".fb-field") as HTMLElement | null;
+    if (!field) return;
+    const page = field.closest(".fb-page") as HTMLElement | null;
+    if (!page) return;
+    e.preventDefault();
+    const resize = !!target?.closest?.(".fb-resize");
+    const pageRect = page.getBoundingClientRect();
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const startLeft = parseFloat(field.style.left) || 0;
+    const startTop = parseFloat(field.style.top) || 0;
+    const startWidth = parseFloat(field.style.width) || 10;
+    const startHeight = parseFloat(field.style.height) || 4;
+    try { field.setPointerCapture(e.pointerId); } catch { /* synthetische Events */ }
+
+    const onMove = (ev: PointerEvent) => {
+      const dx = ((ev.clientX - startX) / pageRect.width) * 100;
+      const dy = ((ev.clientY - startY) / pageRect.height) * 100;
+      if (resize) {
+        field.style.width = `${Math.min(100, Math.max(1.5, startWidth + dx)).toFixed(2)}%`;
+        field.style.height = `${Math.min(100, Math.max(1, startHeight + dy)).toFixed(2)}%`;
+      } else {
+        field.style.left = `${Math.min(98, Math.max(0, startLeft + dx)).toFixed(2)}%`;
+        field.style.top = `${Math.min(98, Math.max(0, startTop + dy)).toFixed(2)}%`;
+      }
+    };
+    const onUp = () => {
+      field.removeEventListener("pointermove", onMove);
+      field.removeEventListener("pointerup", onUp);
+      field.removeEventListener("pointercancel", onUp);
+      const id = field.dataset.fbId ?? "";
+      void fbRef?.invokeMethodAsync("OnFieldGeometry", id,
+        parseFloat(field.style.left) || 0,
+        parseFloat(field.style.top) || 0,
+        parseFloat(field.style.width) || startWidth,
+        parseFloat(field.style.height) || startHeight);
+    };
+    field.addEventListener("pointermove", onMove);
+    field.addEventListener("pointerup", onUp);
+    field.addEventListener("pointercancel", onUp);
+  });
+}
+
 export async function search(
   handleId: string,
   query: string,

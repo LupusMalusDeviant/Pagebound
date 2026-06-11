@@ -5,6 +5,7 @@
 @inject IPdfManipulator Manipulator
 @inject IImageToPdfConverter ImageConverter
 @inject IPdfConverter Converter
+@inject IPdfArchiveService Archive
 @inject ILocalizationService L
 @inject IJSRuntime JS
 @implements IAsyncDisposable
@@ -359,6 +360,44 @@
                 @(_isSettingMeta ? L.T("tools.metadata.running") : L.T("tools.metadata.apply"))
             </button>
             <p class="text-xs text-pb-fg-muted">@L.T("tools.metadata.note")</p>
+        </div>
+
+        @* PDF/A (Best Effort) — MCP-Parität: pdf_to_pdfa. Keine Konformitätsgarantie. *@
+        <div class="max-w-4xl mx-auto mt-2 rounded-lg pb-glass p-3 space-y-2 text-sm">
+            <div class="flex flex-wrap items-center gap-2">
+                <span class="text-pb-fg-muted">@L.T("tools.pdfa.label")</span>
+                <label class="flex items-center gap-1.5 cursor-pointer whitespace-nowrap">
+                    <input type="checkbox" @bind="_pdfaFlatten" /> @L.T("tools.pdfa.flatten")
+                </label>
+                <button type="button"
+                        class="ml-auto rounded border border-pb-border bg-pb-bg px-3 py-1 text-pb-fg-muted hover:text-pb-fg disabled:opacity-40"
+                        disabled="@(_isConvertingPdfa || _handle is null)"
+                        title="@L.T("tools.pdfa.buttonTitle")"
+                        @onclick="ConvertToPdfAAsync">
+                    @(_isConvertingPdfa ? L.T("tools.pdfa.running") : L.T("tools.pdfa.button"))
+                </button>
+            </div>
+            @if (_pdfaStatus is not null)
+            {
+                <div class="rounded border border-green-300/40 bg-green-50/10 px-3 py-2 text-pb-fg">
+                    @_pdfaStatus
+                    <button type="button" class="float-right text-pb-fg-muted hover:text-pb-fg"
+                            @onclick="@(() => _pdfaStatus = null)" aria-label="@L.T("common.close")">✕</button>
+                </div>
+            }
+            @if (_pdfaWarnings.Count > 0)
+            {
+                <div class="rounded border border-amber-300/40 bg-amber-50/10 px-3 py-2">
+                    <p class="font-medium text-pb-fg">@L.T("tools.pdfa.warningsHeading")</p>
+                    <ul class="mt-1 list-disc pl-5 text-xs text-pb-fg-muted space-y-0.5">
+                        @foreach (var warning in _pdfaWarnings)
+                        {
+                            <li>@warning</li>
+                        }
+                    </ul>
+                </div>
+            }
+            <p class="text-xs text-pb-fg-muted">@L.T("tools.pdfa.note")</p>
         </div>
 
         @* Wasserzeichen + Seitenzahlen / Bates *@
@@ -1154,6 +1193,56 @@
             _isSettingMeta = false;
             await InvokeAsync(StateHasChanged);
         }
+    }
+
+    // --- PDF/A (Best Effort) — MCP-Parität: pdf_to_pdfa ------------------------
+    private bool _pdfaFlatten = true;
+    private bool _isConvertingPdfa;
+    private string? _pdfaStatus;
+    private readonly List<string> _pdfaWarnings = new();
+
+    private async Task ConvertToPdfAAsync()
+    {
+        if (_originalPdfBytes is null || _isConvertingPdfa) return;
+        _isConvertingPdfa = true;
+        _pdfaStatus = null;
+        _pdfaWarnings.Clear();
+        _errorMessage = null;
+        try
+        {
+            await using var stream = new MemoryStream(_originalPdfBytes);
+            var result = await Archive.ConvertToPdfAAsync(stream, _pdfaFlatten, CancellationToken.None)
+                .ConfigureAwait(false);
+
+            var filename = BuildPdfaFilename(_currentFilename);
+            await JS.InvokeVoidAsync(
+                "pageboundShortcuts.downloadBytes",
+                filename,
+                Convert.ToBase64String(result.Bytes),
+                "application/pdf").ConfigureAwait(false);
+
+            _pdfaWarnings.AddRange(result.Warnings);
+            _pdfaStatus = L.T("tools.pdfa.done", new Dictionary<string, object> { ["name"] = filename });
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = ex.Message;
+        }
+        finally
+        {
+            _isConvertingPdfa = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private static string BuildPdfaFilename(string? originalName)
+    {
+        var baseName = string.IsNullOrWhiteSpace(originalName) ? "dokument" : originalName;
+        if (baseName.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
+            baseName = baseName[..^4];
+        var safe = string.Concat(baseName.Select(c =>
+            char.IsLetterOrDigit(c) || c is '_' or '-' or '.' or ' ' ? c : '_'));
+        return $"{safe}-pdfa.pdf";
     }
 
     // --- Bilder → PDF (FA-025) -----------------------------------------------

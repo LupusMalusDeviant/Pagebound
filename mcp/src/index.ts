@@ -26,6 +26,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { z } from "zod";
 import * as pdf from "./pdf.js";
 import * as design from "./design.js";
+import * as pdfa from "./pdfa.js";
 import { encryptPdf } from "./encrypt.js";
 
 const CHARACTER_LIMIT = 25_000;
@@ -424,6 +425,24 @@ Eingabe: 'path'/'dataBase64', 'fields'. Ausgabe: 'outputPath' oder 'dataBase64'.
   }, guard(async (a: { path?: string; dataBase64?: string; fields: pdf.NewField[]; outputPath?: string }) => {
     const r = await pdf.createFields(await loadPdf(a), a.fields);
     return ok({ created: r.created, ...(await emitPdf(r.bytes, a.outputPath)) }, `${r.created} Feld(er) angelegt.`);
+  }));
+
+  server.registerTool("pdf_to_pdfa", {
+    title: "PDF → PDF/A (Best Effort)",
+    description: `Konvertiert eine PDF Richtung PDF/A-2b — BEST EFFORT, KEINE Konformitätsgarantie. Setzt XMP-Metadaten (pdfaid:part=2, conformance=B), bettet einen sRGB-OutputIntent (GTS_PDFA1, ICC-Profil) ein, entfernt /OpenAction, Dokument-JavaScript und Additional Actions, flattet optional AcroForm-Felder und setzt eine Trailer-ID. Nicht eingebettete Schriften werden NICHT repariert, sondern in 'warnings' gemeldet. Ergebnis für Archivzwecke extern prüfen (z. B. veraPDF).
+Eingabe: 'path'/'dataBase64', optional 'flattenForm' (Default: true). Ausgabe: 'outputPath' oder 'dataBase64'. Returns: { warnings, ... }.`,
+    inputSchema: {
+      ...srcIn,
+      flattenForm: z.boolean().optional().describe("AcroForm-Felder vor der Konvertierung einbrennen (Default: true)."),
+      ...outOpt,
+    },
+    annotations: writeAnn,
+  }, guard(async (a: { path?: string; dataBase64?: string; flattenForm?: boolean; outputPath?: string }) => {
+    const r = await pdfa.toPdfA(await loadPdf(a), a.flattenForm ?? true);
+    const summary = r.warnings.length
+      ? `PDF/A-2b (Best Effort) erzeugt — ${r.warnings.length} Hinweis(e):\n- ${r.warnings.join("\n- ")}`
+      : "PDF/A-2b (Best Effort) erzeugt — keine Hinweise. Konformität extern prüfen (z. B. veraPDF).";
+    return ok({ warnings: r.warnings, ...(await emitPdf(r.bytes, a.outputPath)) }, summary);
   }));
 
   // --- Designer-Tools (WYSIWYG-Designs der PWA, *.pbdesign.json) ---------------

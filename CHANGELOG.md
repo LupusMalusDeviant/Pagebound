@@ -52,6 +52,10 @@ Liste fasst den aktuellen Funktionsumfang zusammen.
 - **Serie aus CSV**: Platzhalter wie `{{name}}` werden je CSV-Zeile ersetzt (Kopfzeile = Feldnamen, `,`/`;` automatisch erkannt, Werte HTML-encodiert) — Serienbriefe/-flyer als ein Mehrseiten-Dokument
 - **PWA-File-Handler**: `.pbdesign.json`-Dateien lassen sich per Doppelklick direkt im Designer öffnen (installierte PWA, Chromium)
 
+### Werkzeuge (neu)
+- **Formular-Builder** (`/form-builder`): Felder (Text/Checkbox) per Klick auf gerenderten PDF-Seiten platzieren, per Pointer ziehen/skalieren (Maus/Touch/Stift), Namen editieren — Export als echtes AcroForm-PDF (ausfüllbar in jedem Reader); schließt die Roadmap-Lücke „visuelles Drag-Platzieren" (D1)
+- **PDF → PDF/A (Best Effort)**: XMP-Metadaten (pdfaid 2/B), sRGB-OutputIntent (eingebettetes CC0-ICC-Profil), Entfernen von OpenAction/JavaScript/AA, optionales Formular-Flatten, Trailer-ID; **nicht eingebettete Schriften werden als Warnung gemeldet, nicht repariert** — keine Konformitätsgarantie, extern prüfen (z. B. veraPDF). In den PDF-Werkzeugen und als MCP-Tool `pdf_to_pdfa` (22 Tools)
+
 ### UI-Konsolidierung
 - **Split-View & Vergleich zusammengeführt**: `/compare` leitet auf die Split-View im Vergleichsmodus um (`/split?compare=1`); eine gemeinsame Diff-Engine/-Anzeige statt zweier Implementierungen, ein Navigationseintrag statt zwei
 - **PDF-Werkzeuge im Reader**: Tab-Leiste „Dokument | Werkzeuge" direkt im Reader-Fenster — das geöffnete PDF wird in die Werkzeuge übernommen (kein erneutes Laden); `/tools` bleibt als eigenständige Seite erhalten (gleiche Komponente)

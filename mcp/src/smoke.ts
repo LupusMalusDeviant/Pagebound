@@ -1,8 +1,9 @@
 // Smoke test for the PDF operations (run after `npm run build`: `node dist/smoke.js`).
 // Bytes-in/bytes-out — no temp files; exercises every operation end-to-end.
-import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
+import { PDFDocument, PDFName, StandardFonts, rgb } from "pdf-lib";
 import * as pdf from "./pdf.js";
 import * as design from "./design.js";
+import * as pdfa from "./pdfa.js";
 import { encryptPdf } from "./encrypt.js";
 
 let failures = 0;
@@ -188,6 +189,38 @@ async function main() {
   const cb = cfFields.find((f) => f.name === "agree");
   check("pdf_create_field fields readable + typed", tf?.type === "Text" && cb?.type === "Checkbox", JSON.stringify(cfFields.map((f) => `${f.name}:${f.type}`)));
   check("pdf_create_field text value set", tf?.value[0] === "Ada Lovelace", JSON.stringify(tf?.value));
+
+  // --- PDF → PDF/A (Best Effort) -----------------------------------------------
+  // Sample mit Standard-14-Font (Helvetica, nicht eingebettet), OpenAction + Formularfeld.
+  {
+    const srcDoc = await PDFDocument.load(await makeFormSample());
+    srcDoc.catalog.set(PDFName.of("OpenAction"), srcDoc.context.obj({}));
+    const srcBytes = await srcDoc.save();
+
+    const conv = await pdfa.toPdfA(srcBytes, true);
+    const reDoc = await PDFDocument.load(conv.bytes);
+    check("pdf_to_pdfa output re-parses (1 page)", reDoc.getPageCount() === 1);
+    check("pdf_to_pdfa sets Catalog /Metadata", reDoc.catalog.has(PDFName.of("Metadata")));
+    check("pdf_to_pdfa sets /OutputIntents", reDoc.catalog.has(PDFName.of("OutputIntents")));
+    check("pdf_to_pdfa removes /OpenAction", !reDoc.catalog.has(PDFName.of("OpenAction")));
+    const raw = Buffer.from(conv.bytes).toString("latin1");
+    check("pdf_to_pdfa XMP declares pdfaid part=2/B",
+      raw.includes("<pdfaid:part>2</pdfaid:part>") && raw.includes("<pdfaid:conformance>B</pdfaid:conformance>"));
+    check("pdf_to_pdfa embeds GTS_PDFA1 + ICC ('acsp')", raw.includes("/GTS_PDFA1") && raw.includes("acsp"));
+    check("pdf_to_pdfa writes trailer /ID", /\/ID\s*\[/.test(raw));
+    check("pdf_to_pdfa flattens form fields", (await pdf.getFormFields(conv.bytes)).length === 0);
+    const fontWarn = conv.warnings.some((w) => w.includes("Helvetica") && w.includes("nicht eingebettet"));
+    check("pdf_to_pdfa warns about non-embedded Helvetica", fontWarn, JSON.stringify(conv.warnings));
+    const openActionWarn = conv.warnings.some((w) => w.includes("/OpenAction"));
+    check("pdf_to_pdfa reports /OpenAction removal", openActionWarn, JSON.stringify(conv.warnings));
+
+    // XMP übernimmt dc:title aus dem Info-Dict.
+    const metaSrc = await pdf.setMetadata(await makeSample(1, "PdfA"), { title: "Archiv & Co", author: "Ada" });
+    const conv2 = await pdfa.toPdfA(metaSrc.bytes, true);
+    const raw2 = Buffer.from(conv2.bytes).toString("latin1");
+    check("pdf_to_pdfa XMP carries dc:title (xml-escaped)", raw2.includes("Archiv &amp; Co"));
+    check("pdf_to_pdfa XMP carries dc:creator", raw2.includes("<rdf:li>Ada</rdf:li>"));
+  }
 
   // --- Designer-Tools ---------------------------------------------------------
   const cat = design.catalog();

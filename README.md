@@ -40,8 +40,10 @@ Pagebound ist ein quelloffenes PDF-Werkzeug, das den Adobe Acrobat Reader im All
 - **Library** — automatisch erfasst, Tags, Suche, drei Ansichten (Liste/Tabelle/Raster), optionaler zentraler Sidecar-Workspace-Ordner, JSON-Sidecar-Export/Import
 - **Markdown-Export** — Highlights + Notizen, Obsidian-kompatibel (YAML-Frontmatter, Wikilinks)
 - **WYSIWYG-Designer** (`/editor`) — Flyer, Briefe, Rechnungen (mit §-19-Vorlage), Geschäftsbriefe (DIN 5008) und 16:9-Folien direkt im Browser entwerfen: mehrseitiger Block-Editor (Überschrift/Text/Bild/Form/Tabelle), **Design-Themes** (6 Presets, anpassbar, als JSON exportier-/importierbar), Text- & Hintergrundfarben, Seiten-Hintergrundbilder (Deckkraft/Position/Kacheln, auch WebP), Flyer-Formate **DIN lang & A6**, **frei platzierbare Overlays** (Text/Bild/Fläche mit Touch-fähigem Drag/Resize, Drehung, Deckkraft), **Spalten- & QR-Code-Blöcke**, Bild-Werkzeuge (Eckenradius/Rahmen/Schatten, Auto-Kompression), **Serie aus CSV** (`{{platzhalter}}`), Tastatur-Shortcuts, Schriftgröße pro Block, **Undo/Redo**, Überlauf-Warnung, Schnittmarken; **Design-Ordner auf dem eigenen System** (Chromium-FSA-API) mit 5 mitgelieferten Standard-Designs — Designs wirken als **Schablonen** („Verwenden" lädt eine Kopie, nur „Template bearbeiten" schreibt in die Datei zurück); Export als **pixelgenaues PDF** (Print-CSS), HTML oder JSON — **JSON-Import** inklusive (Roundtrip); Entwürfe lokal in IndexedDB
-- **PDF-Vergleich** — zwei PDFs auf Text-Ebene vergleichen (wortgenau, seitenweise), unter `/compare` **oder direkt in der Split-View**, komplett lokal
-- **MCP-Server für LLM-Agenten** — Pagebounds PDF-Operationen **tokenlos**, lokal über **stdio** oder **gehostet** über **Streamable HTTP** (`…/mcp`); **21 Tools** (Seiten-Werkzeuge, Split, Stempeln, AES-256-Verschlüsselung, AcroForm-Formulare lesen/ausfüllen/anlegen, Metadaten, Text, Text-Diff/Vergleich, Tabellen→CSV, Bilder→PDF, **Designer**: Designs erzeugen/validieren/als HTML rendern im PWA-kompatiblen `*.pbdesign.json`-Format), base64-I/O mit Größen-/Seiten-Limits
+- **Formular-Builder** (`/form-builder`) — Text-/Checkbox-Felder **per Klick auf der PDF-Seite platzieren**, ziehen & skalieren (auch Touch), Export als echtes **AcroForm-PDF**
+- **PDF → PDF/A (Best Effort)** — XMP (pdfaid 2/B), sRGB-OutputIntent, Bereinigung (OpenAction/JS), optionales Flatten; nicht eingebettete Fonts werden **ehrlich als Warnung gemeldet** (keine Konformitätsgarantie — extern z. B. mit veraPDF prüfen)
+- **PDF-Vergleich** — zwei PDFs auf Text-Ebene vergleichen (wortgenau, seitenweise), in der **Split-View** (`/compare` leitet dorthin um), komplett lokal
+- **MCP-Server für LLM-Agenten** — Pagebounds PDF-Operationen **tokenlos**, lokal über **stdio** oder **gehostet** über **Streamable HTTP** (`…/mcp`); **22 Tools** (Seiten-Werkzeuge, Split, Stempeln, AES-256-Verschlüsselung, AcroForm-Formulare lesen/ausfüllen/anlegen, Metadaten, **PDF/A Best-Effort**, Text, Text-Diff/Vergleich, Tabellen→CSV, Bilder→PDF, **Designer**: Designs erzeugen/validieren/als HTML rendern im PWA-kompatiblen `*.pbdesign.json`-Format), base64-I/O mit Größen-/Seiten-Limits
 - **Darstellung** — „Warm Ink"-Design, Settings-Panel mit Theme (Hell/Dunkel), **8 Akzentfarben**, Schriftgröße, Dichte & Bewegung; DE/EN, Offline-PWA, keine Telemetrie
 
 ## Quick-Start
@@ -72,8 +74,7 @@ Erfordert .NET 10 SDK und Node 20+.
 
 ### Geplant
 
-- **Formular-Builder im Designer** (visuelles Drag-Platzieren) — das Anlegen von Feldern in `/tools` ist bereits da
-- **PDF/A-Export** + **A11y-Tagging** (PDF/UA) für Archivierung & Barrierefreiheit
+- **A11y-Tagging** (PDF/UA) für Barrierefreiheit; PDF/A über den Best-Effort-Konverter hinaus härten (Font-Einbettung)
 - **Digitale Signaturen** (PAdES/eIDAS, zertifikatsbasiert) als Ergänzung zur Bild-+-Hash-Signatur
 - **Mobile-/Touch-Politur** und **Streaming-Rendering** für sehr große Dateien
 - **Öffentlicher Release-Tag** (`v1.0`)
