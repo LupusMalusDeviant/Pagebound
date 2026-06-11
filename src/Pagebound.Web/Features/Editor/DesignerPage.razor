@@ -180,6 +180,16 @@
             <button class="btn-side" @onclick="@(() => AddBlock(EditorBlockType.Shape))">@L.T("editor.add.shape")</button>
             <button class="btn-side" @onclick="@(() => AddBlock(EditorBlockType.Spacer))">@L.T("editor.add.spacer")</button>
             <button class="btn-side" @onclick="@(() => AddBlock(EditorBlockType.Table))">@L.T("editor.add.table")</button>
+            <button class="btn-side" @onclick="@(() => AddBlock(EditorBlockType.Columns))">@L.T("editor.add.columns")</button>
+            <button class="btn-side" @onclick="@(() => AddBlock(EditorBlockType.QrCode))">@L.T("editor.add.qr")</button>
+        </div>
+
+        @* ---- Frei platzieren (Overlays über dem Block-Fluss) ---- *@
+        <div class="mb-1 text-xs font-medium text-pb-fg-muted">@L.T("editor.overlay.label")</div>
+        <div class="mb-3 grid grid-cols-3 gap-1">
+            <button class="btn-side" @onclick="@(() => AddOverlay(EditorOverlayType.Text))">@L.T("editor.overlay.text")</button>
+            <button class="btn-side" @onclick="@(() => AddOverlay(EditorOverlayType.Image))">@L.T("editor.overlay.image")</button>
+            <button class="btn-side" @onclick="@(() => AddOverlay(EditorOverlayType.Shape))">@L.T("editor.overlay.shape")</button>
         </div>
 
         <label class="mb-1 block text-xs font-medium text-pb-fg-muted">@L.T("editor.template.label")</label>
@@ -227,6 +237,34 @@
                     <InputFile class="mb-2 w-full text-xs" OnChange="OnImageSelected" accept="image/png,image/jpeg,image/webp" />
                     <label class="mb-1 block text-xs">@L.T("editor.props.imageWidth"): @_selected.WidthPercent%</label>
                     <input type="range" min="10" max="100" step="5" class="mb-1 w-full" @bind="_selected.WidthPercent" @bind:event="oninput" />
+                    <label class="mb-1 block text-xs">@L.T("editor.props.cornerRadius"): @_selected.CornerRadiusPx px</label>
+                    <input type="range" min="0" max="48" step="2" class="mb-1 w-full" @bind="_selected.CornerRadiusPx" @bind:event="oninput" />
+                    <div class="mb-2 flex items-center gap-2 text-xs">
+                        <input type="color" value="@(_selected.BorderColor ?? "#111827")"
+                               @onchange="@(e => { if (_selected is not null) _selected.BorderColor = EditorThemes.SanitizeColorOrNull(e.Value?.ToString()); })" />
+                        <input type="number" min="0" max="12" class="w-14 rounded border border-pb-border bg-pb-bg px-1 py-0.5" @bind="_selected.BorderWidthPx" />
+                        <span class="text-pb-fg-muted">@L.T("editor.props.borderPx")</span>
+                    </div>
+                    <label class="mb-2 flex items-center gap-2 text-xs"><input type="checkbox" @bind="_selected.ShadowEnabled" /> @L.T("editor.props.shadow")</label>
+                }
+
+                @if (_selected.Type is EditorBlockType.QrCode)
+                {
+                    <label class="mb-1 block text-xs">@L.T("editor.props.qrText")</label>
+                    <input class="mb-2 w-full rounded border border-pb-border bg-pb-bg px-2 py-1 text-xs"
+                           value="@_selected.Text" @onchange="@(e => OnQrTextChanged(e.Value?.ToString() ?? ""))" />
+                    <label class="mb-1 block text-xs">@L.T("editor.props.imageWidth"): @_selected.WidthPercent%</label>
+                    <input type="range" min="10" max="100" step="5" class="mb-1 w-full" @bind="_selected.WidthPercent" @bind:event="oninput" />
+                }
+
+                @if (_selected.Type is EditorBlockType.Columns)
+                {
+                    <div class="mb-2 grid grid-cols-2 gap-1">
+                        <button class="btn-side" disabled="@((_selected.ColumnsHtml?.Count ?? 0) >= 4)" @onclick="@(() => ColumnAdd(_selected))">+ @L.T("editor.props.table.col")</button>
+                        <button class="btn-side" disabled="@((_selected.ColumnsHtml?.Count ?? 0) <= 2)" @onclick="@(() => ColumnRemove(_selected))">− @L.T("editor.props.table.col")</button>
+                    </div>
+                    <label class="mb-1 block text-xs">@L.T("editor.props.colGap"): @_selected.ColumnGapPx px</label>
+                    <input type="range" min="0" max="64" step="4" class="mb-2 w-full" @bind="_selected.ColumnGapPx" @bind:event="oninput" />
                 }
 
                 @if (_selected.Type is EditorBlockType.Shape)
@@ -282,6 +320,61 @@
                 </div>
             </div>
         }
+
+        @* ---- Eigenschaften des gewählten Overlays ---- *@
+        @if (_selectedOverlay is not null)
+        {
+            <div class="mb-3 rounded border border-pb-border p-2">
+                <div class="mb-2 text-xs font-semibold text-pb-fg-muted">@L.T("editor.overlay.props") · @L.T($"editor.overlay.type.{_selectedOverlay.Type.ToString().ToLowerInvariant()}")</div>
+
+                @if (_selectedOverlay.Type is EditorOverlayType.Text)
+                {
+                    <label class="mb-1 block text-xs">@L.T("editor.props.fontSize")</label>
+                    <input type="number" min="6" max="120" placeholder="@L.T("editor.props.fontSizeAuto")"
+                           class="mb-2 w-full rounded border border-pb-border bg-pb-bg px-2 py-1" @bind="_selectedOverlay.FontSizePt" />
+                    <div class="mb-2 flex items-center gap-2 text-xs">
+                        <input type="color" @bind="_selectedOverlay.Color" /> @L.T("editor.theme.textColor")
+                        <input type="color" value="@(_selectedOverlay.Background ?? "#ffffff")"
+                               @onchange="@(e => { if (_selectedOverlay is not null) _selectedOverlay.Background = EditorThemes.SanitizeColorOrNull(e.Value?.ToString()); })" />
+                        <button class="btn-side" @onclick="@(() => { if (_selectedOverlay is not null) _selectedOverlay.Background = null; })">@L.T("editor.props.bgNone")</button>
+                    </div>
+                }
+                @if (_selectedOverlay.Type is EditorOverlayType.Image)
+                {
+                    <label class="mb-1 block text-xs">@L.T("editor.props.chooseImage")</label>
+                    <InputFile class="mb-2 w-full text-xs" OnChange="OnOverlayImageSelected" accept="image/png,image/jpeg,image/webp" />
+                }
+                @if (_selectedOverlay.Type is EditorOverlayType.Shape)
+                {
+                    <select class="mb-2 w-full rounded border border-pb-border bg-pb-bg px-2 py-1 text-xs" @bind="_selectedOverlay.Shape">
+                        <option value="rectangle">@L.T("editor.props.shape.rectangle")</option>
+                        <option value="ellipse">@L.T("editor.overlay.ellipse")</option>
+                    </select>
+                    <div class="mb-2 flex items-center gap-2 text-xs">
+                        <input type="color" @bind="_selectedOverlay.Color" /> @L.T("editor.theme.accentColor")
+                    </div>
+                    <label class="mb-1 block text-xs">@L.T("editor.overlay.height"): @($"{_selectedOverlay.HeightPercent:0}")%</label>
+                    <input type="range" min="2" max="100" step="1" class="mb-2 w-full" @bind="_selectedOverlay.HeightPercent" @bind:event="oninput" />
+                }
+
+                <label class="mb-1 block text-xs">@L.T("editor.overlay.rotation"): @_selectedOverlay.RotationDeg°</label>
+                <input type="range" min="-180" max="180" step="5" class="mb-2 w-full" @bind="_selectedOverlay.RotationDeg" @bind:event="oninput" />
+                <label class="mb-1 block text-xs">@L.T("editor.doc.bgOpacity"): @_selectedOverlay.OpacityPercent%</label>
+                <input type="range" min="10" max="100" step="5" class="mb-2 w-full" @bind="_selectedOverlay.OpacityPercent" @bind:event="oninput" />
+
+                <div class="flex gap-1">
+                    <button class="btn-side flex-1" title="@L.T("editor.overlay.back")" @onclick="@(() => MoveOverlayZ(_selectedOverlay, -1))">@Ic("down")</button>
+                    <button class="btn-side flex-1" title="@L.T("editor.overlay.front")" @onclick="@(() => MoveOverlayZ(_selectedOverlay, 1))">@Ic("up")</button>
+                    <button class="btn-side flex-1" title="@L.T("editor.block.duplicate")" @onclick="@(() => DuplicateOverlay(_selectedOverlay))">@Ic("copy")</button>
+                    <button class="btn-side flex-1 text-[#dc2626]" title="@L.T("editor.block.delete")" @onclick="@(() => DeleteOverlay(_selectedOverlay))">@Ic("trash")</button>
+                </div>
+            </div>
+        }
+
+        @* ---- Serie aus CSV (Platzhalter {{name}}) ---- *@
+        <div class="mb-1 text-xs font-medium text-pb-fg-muted">@L.T("editor.series.label")</div>
+        <p class="mb-1 text-xs text-pb-fg-muted">@L.T("editor.series.hint")</p>
+        <InputFile class="mb-3 w-full text-xs" OnChange="OnSeriesCsvSelected" accept=".csv,text/csv" />
 
         @* ---- Entwürfe ---- *@
         <div class="mb-1 text-xs font-medium text-pb-fg-muted">@L.T("editor.draft.label")</div>
@@ -513,11 +606,37 @@
                                     <div class="pb-img-wrap align-@blk.Align">
                                         @if (!string.IsNullOrEmpty(blk.Src))
                                         {
-                                            <img class="pb-img" src="@blk.Src" alt="@blk.Alt" style="width:@(blk.WidthPercent)%" />
+                                            <img class="pb-img" src="@blk.Src" alt="@blk.Alt" style="@ImageStyle(blk)" />
                                         }
                                         else
                                         {
                                             <div style="border:1px dashed #9ca3af;color:#9ca3af;padding:24px;text-align:center">@L.T("editor.image.empty")</div>
+                                        }
+                                    </div>
+                                    break;
+                                case EditorBlockType.QrCode:
+                                    <div class="pb-img-wrap align-@blk.Align">
+                                        @if (!string.IsNullOrEmpty(blk.Src))
+                                        {
+                                            <img class="pb-img" src="@blk.Src" alt="QR: @blk.Text" style="width:@(blk.WidthPercent)%" />
+                                        }
+                                        else
+                                        {
+                                            <div style="border:1px dashed #9ca3af;color:#9ca3af;padding:24px;text-align:center">QR</div>
+                                        }
+                                    </div>
+                                    break;
+                                case EditorBlockType.Columns:
+                                    <div class="pb-cols" style="gap:@(blk.ColumnGapPx)px;@FontSizeCss(blk)">
+                                        @if (blk.ColumnsHtml is not null)
+                                        {
+                                            @for (var ci = 0; ci < blk.ColumnsHtml.Count; ci++)
+                                            {
+                                                var cidx = ci;
+                                                <div id="col-@blk.Id-@cidx" class="pb-edit pb-col" contenteditable="true"
+                                                     data-placeholder="@L.T("editor.ph.paragraph")"
+                                                     @onfocusin="@(() => SelectBlock(page, blk))" @onblur="OnEditableBlur">@((MarkupString)blk.ColumnsHtml[cidx])</div>
+                                            }
                                         }
                                     </div>
                                     break;
@@ -566,6 +685,41 @@
                             }
                         </div>
                     }
+
+                    @* Frei platzierte Overlays — über dem Block-Fluss, Reihenfolge = Stapelung. *@
+                    @foreach (var o in page.Overlays)
+                    {
+                        var ov = o;
+                        <div class="pb-overlay @(_selectedOverlay == ov ? "pb-ov-selected" : "")" id="ov-@ov.Id" @key="ov.Id"
+                             style="@OverlayStyle(ov)" @onclick:stopPropagation="true" @onclick="@(() => SelectOverlay(page, ov))">
+                            @if (_selectedOverlay == ov)
+                            {
+                                <span class="pb-ov-move no-print" contenteditable="false" title="@L.T("editor.overlay.move")">@Ic("grip")</span>
+                                <span class="pb-ov-resize no-print" contenteditable="false" title="@L.T("editor.overlay.resize")"></span>
+                            }
+                            @switch (ov.Type)
+                            {
+                                case EditorOverlayType.Text:
+                                    <div id="ovedit-@ov.Id" class="pb-ov-text pb-edit align-@ov.Align" contenteditable="true"
+                                         style="@OverlayTextCss(ov)" data-placeholder="@L.T("editor.ph.paragraph")"
+                                         @onfocusin="@(() => SelectOverlay(page, ov))" @onblur="OnEditableBlur">@((MarkupString)(ov.Text ?? ""))</div>
+                                    break;
+                                case EditorOverlayType.Image:
+                                    @if (!string.IsNullOrEmpty(ov.Src))
+                                    {
+                                        <img class="pb-ov-img" src="@ov.Src" alt="@ov.Alt" />
+                                    }
+                                    else
+                                    {
+                                        <div style="border:1px dashed #9ca3af;color:#9ca3af;padding:16px;text-align:center;background:rgba(255,255,255,.6)">@L.T("editor.image.empty")</div>
+                                    }
+                                    break;
+                                case EditorOverlayType.Shape:
+                                    <div class="pb-ov-shape @(ov.Shape == "ellipse" ? "is-ellipse" : "")" style="background:@ov.Color"></div>
+                                    break;
+                            }
+                        </div>
+                    }
                 </div>
             }
             </div>
@@ -578,6 +732,7 @@
 
     private EditorDocument _doc = EditorDocument.NewEmpty(string.Empty);
     private EditorBlock? _selected;
+    private EditorOverlay? _selectedOverlay;
     private EditorPage? _selectedPage;
     private IReadOnlyList<EditorDraftInfo> _drafts = Array.Empty<EditorDraftInfo>();
     private bool _showCrops;
@@ -674,6 +829,22 @@
             await JS.InvokeVoidAsync("pageboundWysiwyg.initializeEditor");
             _selfRef = DotNetObjectReference.Create(this);
             await JS.InvokeVoidAsync("pageboundWysiwyg.registerFileDrop", _selfRef);
+
+            // Per Datei-Doppelklick gestartet (PWA-File-Handler)? Dann Design laden.
+            var launch = await JS.InvokeAsync<string?>("pageboundWysiwyg.consumeLaunchDesign");
+            if (!string.IsNullOrEmpty(launch))
+            {
+                var doc = await ParseDesignJsonAsync(launch);
+                if (doc is not null)
+                {
+                    doc.Id = Guid.NewGuid().ToString("N");
+                    PushUndo();
+                    _doc = doc;
+                    AfterDocReplaced();
+                    _status = L.T("editor.import.done");
+                    StateHasChanged();
+                }
+            }
         }
         if (_pageSizeDirty)
         {
@@ -798,6 +969,40 @@
     private static string? FontSizeCss(EditorBlock b)
         => b.FontSizePt is int pt ? $"font-size:{Math.Clamp(pt, 6, 120)}pt" : null;
 
+    private static string ImageStyle(EditorBlock b)
+    {
+        var sb = new StringBuilder();
+        sb.Append("width:").Append(b.WidthPercent).Append("%;");
+        if (b.CornerRadiusPx > 0) sb.Append("border-radius:").Append(b.CornerRadiusPx).Append("px;");
+        if (b.BorderWidthPx > 0 && !string.IsNullOrEmpty(b.BorderColor))
+            sb.Append("border:").Append(b.BorderWidthPx).Append("px solid ").Append(b.BorderColor).Append(';');
+        if (b.ShadowEnabled) sb.Append("box-shadow:0 6px 18px rgba(0,0,0,.25);");
+        return sb.ToString();
+    }
+
+    private static string OverlayStyle(EditorOverlay ov)
+    {
+        var inv = CultureInfo.InvariantCulture;
+        var sb = new StringBuilder();
+        sb.Append("left:").Append(ov.XPercent.ToString("0.##", inv)).Append("%;");
+        sb.Append("top:").Append(ov.YPercent.ToString("0.##", inv)).Append("%;");
+        sb.Append("width:").Append(ov.WidthPercent.ToString("0.##", inv)).Append("%;");
+        if (ov.Type == EditorOverlayType.Shape)
+            sb.Append("height:").Append(ov.HeightPercent.ToString("0.##", inv)).Append("%;");
+        if (ov.RotationDeg != 0) sb.Append("transform:rotate(").Append(ov.RotationDeg).Append("deg);");
+        if (ov.OpacityPercent < 100) sb.Append("opacity:").Append((ov.OpacityPercent / 100.0).ToString("0.##", inv)).Append(';');
+        return sb.ToString();
+    }
+
+    private static string OverlayTextCss(EditorOverlay ov)
+    {
+        var sb = new StringBuilder();
+        sb.Append("color:").Append(ov.Color).Append(';');
+        if (ov.FontSizePt is int pt) sb.Append("font-size:").Append(Math.Clamp(pt, 6, 120)).Append("pt;");
+        if (!string.IsNullOrEmpty(ov.Background)) sb.Append("background:").Append(ov.Background).Append(";padding:2px 6px;");
+        return sb.ToString();
+    }
+
     // --- Sync DOM (contentEditable) → Modell ---------------------------------
     private async Task SyncAllAsync()
     {
@@ -816,7 +1021,14 @@
                         for (var c = 0; c < b.Rows[r].Count; c++)
                             ids.Add($"cell-{b.Id}-{r}-{c}");
                 }
+                else if (b.Type == EditorBlockType.Columns && b.ColumnsHtml is not null)
+                {
+                    for (var c = 0; c < b.ColumnsHtml.Count; c++)
+                        ids.Add($"col-{b.Id}-{c}");
+                }
             }
+            foreach (var ov in page.Overlays)
+                if (ov.Type == EditorOverlayType.Text) ids.Add($"ovedit-{ov.Id}");
         }
         if (ids.Count == 0) return;
         var values = await JS.InvokeAsync<Dictionary<string, string>>("pageboundWysiwyg.readValues", ids);
@@ -834,7 +1046,14 @@
                         for (var c = 0; c < b.Rows[r].Count; c++)
                             if (values.TryGetValue($"cell-{b.Id}-{r}-{c}", out var cv)) b.Rows[r][c] = cv;
                 }
+                else if (b.Type == EditorBlockType.Columns && b.ColumnsHtml is not null)
+                {
+                    for (var c = 0; c < b.ColumnsHtml.Count; c++)
+                        if (values.TryGetValue($"col-{b.Id}-{c}", out var colv)) b.ColumnsHtml[c] = colv;
+                }
             }
+            foreach (var ov in page.Overlays)
+                if (ov.Type == EditorOverlayType.Text && values.TryGetValue($"ovedit-{ov.Id}", out var ovv)) ov.Text = ovv;
         }
     }
 
@@ -871,6 +1090,7 @@
     private void AfterDocReplaced()
     {
         _selected = null;
+        _selectedOverlay = null;
         _selectedPage = _doc.Pages.FirstOrDefault();
         _pageSizeDirty = true;
         // Sicherheit: Dokumentwechsel (auch Undo/Redo) beendet die Template-
@@ -984,9 +1204,30 @@
                 b.Background = EditorThemes.SanitizeColorOrNull(b.Background);
                 b.WidthPercent = Math.Clamp(b.WidthPercent, 10, 100);
                 b.HeightPx = Math.Clamp(b.HeightPx, 1, 400);
+                b.CornerRadiusPx = Math.Clamp(b.CornerRadiusPx, 0, 48);
+                b.BorderWidthPx = Math.Clamp(b.BorderWidthPx, 0, 12);
+                b.BorderColor = EditorThemes.SanitizeColorOrNull(b.BorderColor);
+                b.ColumnGapPx = Math.Clamp(b.ColumnGapPx, 0, 64);
+                if (b.ColumnsHtml is { Count: > 4 }) b.ColumnsHtml = b.ColumnsHtml.Take(4).ToList();
                 if (b.FontSizePt is int pt) b.FontSizePt = Math.Clamp(pt, 6, 120);
                 if (b.Src is not null && !b.Src.StartsWith("data:image/", StringComparison.OrdinalIgnoreCase))
                     b.Src = null;
+            }
+            foreach (var ov in page.Overlays)
+            {
+                ov.XPercent = Math.Clamp(ov.XPercent, -20, 98);
+                ov.YPercent = Math.Clamp(ov.YPercent, -10, 98);
+                ov.WidthPercent = Math.Clamp(ov.WidthPercent, 4, 100);
+                ov.HeightPercent = Math.Clamp(ov.HeightPercent, 2, 100);
+                ov.RotationDeg = Math.Clamp(ov.RotationDeg, -180, 180);
+                ov.OpacityPercent = Math.Clamp(ov.OpacityPercent, 10, 100);
+                ov.Align = ov.Align is "center" or "right" or "justify" ? ov.Align : "left";
+                ov.Color = EditorThemes.SanitizeColor(ov.Color, "#111827");
+                ov.Background = EditorThemes.SanitizeColorOrNull(ov.Background);
+                ov.Shape = ov.Shape == "ellipse" ? "ellipse" : "rectangle";
+                if (ov.FontSizePt is int opt) ov.FontSizePt = Math.Clamp(opt, 6, 120);
+                if (ov.Src is not null && !ov.Src.StartsWith("data:image/", StringComparison.OrdinalIgnoreCase))
+                    ov.Src = null;
             }
         }
     }
@@ -1002,7 +1243,10 @@
             {
                 if (b.Text is not null) fragments.Add(b.Text);
                 if (b.Rows is not null) foreach (var row in b.Rows) fragments.AddRange(row);
+                if (b.ColumnsHtml is not null) fragments.AddRange(b.ColumnsHtml);
             }
+            foreach (var ov in page.Overlays)
+                if (ov.Text is not null) fragments.Add(ov.Text);
         }
         if (fragments.Count == 0) return;
         var clean = await JS.InvokeAsync<string[]>("pageboundWysiwyg.sanitizeHtmlBatch", (object)fragments.ToArray());
@@ -1015,7 +1259,11 @@
                 if (b.Rows is not null)
                     foreach (var row in b.Rows)
                         for (var c = 0; c < row.Count; c++) row[c] = clean[i++];
+                if (b.ColumnsHtml is not null)
+                    for (var c = 0; c < b.ColumnsHtml.Count; c++) b.ColumnsHtml[c] = clean[i++];
             }
+            foreach (var ov in page.Overlays)
+                if (ov.Text is not null) ov.Text = clean[i++];
         }
     }
 
@@ -1230,7 +1478,8 @@
         var page = pageIndex >= 0 && pageIndex < _doc.Pages.Count ? _doc.Pages[pageIndex] : CurrentPage();
         foreach (var img in images)
         {
-            var block = new EditorBlock { Type = EditorBlockType.Image, Src = img.DataUrl, Alt = img.Name, WidthPercent = 60, Align = "center" };
+            var compressed = await JS.InvokeAsync<string>("pageboundWysiwyg.compressDataUrl", img.DataUrl, 2000, 0.85);
+            var block = new EditorBlock { Type = EditorBlockType.Image, Src = compressed, Alt = img.Name, WidthPercent = 60, Align = "center" };
             page.Blocks.Add(block);
             _selected = block;
         }
@@ -1258,9 +1507,10 @@
     }
 
     // --- Auswahl --------------------------------------------------------------
-    private void SelectBlock(EditorPage page, EditorBlock b) { _selected = b; _selectedPage = page; }
-    private void SelectPage(EditorPage page) { _selectedPage = page; _selected = null; }
-    private void DeselectIfBackground() => _selected = null;
+    private void SelectBlock(EditorPage page, EditorBlock b) { _selected = b; _selectedPage = page; _selectedOverlay = null; }
+    private void SelectPage(EditorPage page) { _selectedPage = page; _selected = null; _selectedOverlay = null; }
+    private void SelectOverlay(EditorPage page, EditorOverlay ov) { _selectedOverlay = ov; _selectedPage = page; _selected = null; }
+    private void DeselectIfBackground() { _selected = null; _selectedOverlay = null; }
 
     private void SetAlign(string align)
     {
@@ -1350,10 +1600,201 @@
                     new() { "", "", "" }
                 };
                 break;
+            case EditorBlockType.Columns:
+                b.ColumnsHtml = new List<string> { "", "" };
+                break;
+            case EditorBlockType.QrCode:
+                b.Text = "https://";
+                b.WidthPercent = 30;
+                b.Align = "center";
+                b.Src = await JS.InvokeAsync<string>("pageboundWysiwyg.makeQr", b.Text, 512);
+                break;
         }
         page.Blocks.Add(b);
         _selected = b;
+        _selectedOverlay = null;
         if (type is EditorBlockType.Heading or EditorBlockType.Paragraph) _focusBlockId = b.Id;
+    }
+
+    private async Task OnQrTextChanged(string text)
+    {
+        if (_selected is null || _selected.Type != EditorBlockType.QrCode) return;
+        _selected.Text = text;
+        _selected.Src = await JS.InvokeAsync<string>("pageboundWysiwyg.makeQr", text, 512);
+    }
+
+    private async Task ColumnAdd(EditorBlock b)
+    {
+        await SyncAllAsync();
+        b.ColumnsHtml ??= new List<string>();
+        if (b.ColumnsHtml.Count >= 4) return;
+        PushUndo();
+        b.ColumnsHtml.Add("");
+    }
+
+    private async Task ColumnRemove(EditorBlock b)
+    {
+        await SyncAllAsync();
+        if (b.ColumnsHtml is not { Count: > 2 }) return;
+        PushUndo();
+        b.ColumnsHtml.RemoveAt(b.ColumnsHtml.Count - 1);
+    }
+
+    // --- Overlays (frei platzierte Elemente) -----------------------------------
+    private async Task AddOverlay(EditorOverlayType type)
+    {
+        await SyncAllAsync();
+        PushUndo();
+        var page = CurrentPage();
+        var ov = new EditorOverlay { Type = type };
+        switch (type)
+        {
+            case EditorOverlayType.Text:
+                ov.Text = L.T("editor.overlay.textDefault");
+                ov.WidthPercent = 40;
+                break;
+            case EditorOverlayType.Image:
+                ov.WidthPercent = 30;
+                ov.Alt = L.T("editor.image.empty");
+                break;
+            case EditorOverlayType.Shape:
+                ov.WidthPercent = 30;
+                ov.HeightPercent = 10;
+                ov.Color = _doc.Theme?.AccentColor ?? "#2563eb";
+                ov.OpacityPercent = 80;
+                break;
+        }
+        // Leicht versetzt einfügen, damit mehrere neue Overlays nicht exakt stapeln.
+        var offset = (page.Overlays.Count % 5) * 4;
+        ov.XPercent = 10 + offset;
+        ov.YPercent = 10 + offset;
+        page.Overlays.Add(ov);
+        _selectedOverlay = ov;
+        _selectedPage = page;
+        _selected = null;
+    }
+
+    private EditorPage? PageOfOverlay(EditorOverlay ov) => _doc.Pages.FirstOrDefault(p => p.Overlays.Contains(ov));
+
+    private async Task DeleteOverlay(EditorOverlay ov)
+    {
+        await SyncAllAsync();
+        var page = PageOfOverlay(ov);
+        if (page is null) return;
+        PushUndo();
+        page.Overlays.Remove(ov);
+        if (_selectedOverlay == ov) _selectedOverlay = null;
+    }
+
+    private async Task DuplicateOverlay(EditorOverlay ov)
+    {
+        await SyncAllAsync();
+        var page = PageOfOverlay(ov);
+        if (page is null) return;
+        PushUndo();
+        var copy = ov.Clone();
+        copy.XPercent = Math.Min(95, copy.XPercent + 3);
+        copy.YPercent = Math.Min(95, copy.YPercent + 3);
+        page.Overlays.Add(copy);
+        _selectedOverlay = copy;
+    }
+
+    /// <summary>Stapel-Reihenfolge ändern (Listenposition = Z-Ordnung).</summary>
+    private async Task MoveOverlayZ(EditorOverlay ov, int dir)
+    {
+        await SyncAllAsync();
+        var page = PageOfOverlay(ov);
+        if (page is null) return;
+        var i = page.Overlays.IndexOf(ov);
+        var j = i + dir;
+        if (i < 0 || j < 0 || j >= page.Overlays.Count) return;
+        PushUndo();
+        (page.Overlays[i], page.Overlays[j]) = (page.Overlays[j], page.Overlays[i]);
+    }
+
+    private async Task OnOverlayImageSelected(InputFileChangeEventArgs e)
+    {
+        if (_selectedOverlay is null || _selectedOverlay.Type != EditorOverlayType.Image) return;
+        var dataUrl = await ReadCompressedImageAsync(e.File);
+        if (dataUrl is null) return;
+        PushUndo();
+        _selectedOverlay.Src = dataUrl;
+        _selectedOverlay.Alt = e.File.Name;
+    }
+
+    /// <summary>Vom Pointer-Drag/-Resize (JS) gemeldete End-Geometrie eines Overlays.</summary>
+    [JSInvokable]
+    public Task OnOverlayGeometry(string id, double xPercent, double yPercent, double widthPercent)
+    {
+        foreach (var page in _doc.Pages)
+        {
+            var ov = page.Overlays.FirstOrDefault(o => o.Id == id);
+            if (ov is null) continue;
+            PushUndo();
+            ov.XPercent = Math.Clamp(xPercent, -20, 98);
+            ov.YPercent = Math.Clamp(yPercent, -10, 98);
+            ov.WidthPercent = Math.Clamp(widthPercent, 4, 100);
+            StateHasChanged();
+            break;
+        }
+        return Task.CompletedTask;
+    }
+
+    /// <summary>Globale Tastatur-Shortcuts (JS-Bridge): Strg+S, Strg+Z/Y, Entf.</summary>
+    [JSInvokable]
+    public async Task OnShortcut(string name)
+    {
+        switch (name)
+        {
+            case "save": await Save(); break;
+            case "undo": await UndoAsync(); break;
+            case "redo": await RedoAsync(); break;
+            case "delete":
+                if (_selectedOverlay is not null) await DeleteOverlay(_selectedOverlay);
+                else if (_selected is not null) await DeleteBlock(_selected);
+                break;
+        }
+        StateHasChanged();
+    }
+
+    // --- Serie aus CSV ({{platzhalter}}) ----------------------------------------
+    private async Task OnSeriesCsvSelected(InputFileChangeEventArgs e)
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("pageboundWysiwyg.blurActive");
+            await SyncAllAsync();
+            await using var stream = e.File.OpenReadStream(16 * 1024 * 1024);
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms);
+            var rows = EditorSeries.ParseCsv(Encoding.UTF8.GetString(ms.ToArray()));
+            if (rows.Count == 0)
+            {
+                _status = L.T("editor.series.empty");
+                return;
+            }
+            PushUndo();
+            _doc = EditorSeries.Expand(_doc, rows);
+            AfterDocReplaced();
+            _status = L.T("editor.series.done", new Dictionary<string, object> { ["n"] = rows.Count, ["pages"] = _doc.Pages.Count });
+        }
+        catch
+        {
+            _status = L.T("editor.series.error");
+        }
+    }
+
+    /// <summary>Liest eine Bilddatei und re-encodiert sie platzsparend (JS-Canvas).</summary>
+    private async Task<string?> ReadCompressedImageAsync(IBrowserFile? file)
+    {
+        if (file is null) return null;
+        const long max = 12 * 1024 * 1024;
+        await using var stream = file.OpenReadStream(max);
+        using var ms = new MemoryStream();
+        await stream.CopyToAsync(ms);
+        var mime = string.IsNullOrEmpty(file.ContentType) ? "image/png" : file.ContentType;
+        var dataUrl = $"data:{mime};base64,{Convert.ToBase64String(ms.ToArray())}";
+        return await JS.InvokeAsync<string>("pageboundWysiwyg.compressDataUrl", dataUrl, 2000, 0.85);
     }
 
     private EditorPage? PageOf(EditorBlock b) => _doc.Pages.FirstOrDefault(p => p.Blocks.Contains(b));
@@ -1427,29 +1868,19 @@
     private async Task OnImageSelected(InputFileChangeEventArgs e)
     {
         if (_selected is null || _selected.Type != EditorBlockType.Image) return;
-        var file = e.File;
-        if (file is null) return;
-        const long max = 8 * 1024 * 1024;
-        await using var stream = file.OpenReadStream(max);
-        using var ms = new MemoryStream();
-        await stream.CopyToAsync(ms);
-        var mime = string.IsNullOrEmpty(file.ContentType) ? "image/png" : file.ContentType;
+        var dataUrl = await ReadCompressedImageAsync(e.File);
+        if (dataUrl is null) return;
         PushUndo();
-        _selected.Src = $"data:{mime};base64,{Convert.ToBase64String(ms.ToArray())}";
+        _selected.Src = dataUrl;
     }
 
     private async Task OnPageBgSelected(InputFileChangeEventArgs e)
     {
         if (_selectedPage is null) return;
-        var file = e.File;
-        if (file is null) return;
-        const long max = 12 * 1024 * 1024;
-        await using var stream = file.OpenReadStream(max);
-        using var ms = new MemoryStream();
-        await stream.CopyToAsync(ms);
-        var mime = string.IsNullOrEmpty(file.ContentType) ? "image/png" : file.ContentType;
+        var dataUrl = await ReadCompressedImageAsync(e.File);
+        if (dataUrl is null) return;
         PushUndo();
-        _selectedPage.BackgroundImage = $"data:{mime};base64,{Convert.ToBase64String(ms.ToArray())}";
+        _selectedPage.BackgroundImage = dataUrl;
     }
 
     // --- Vorlagen / Entwürfe --------------------------------------------------
@@ -1595,7 +2026,10 @@
         sb.Append(".pb-h1{font-size:22pt;font-weight:700}.pb-h2{font-size:16pt;font-weight:700}.pb-h3{font-size:13pt;font-weight:700}");
         sb.Append(".pb-para{font-size:11pt;line-height:1.5}");
         sb.Append(".pb-spacer{width:100%}");
-        sb.Append(".pb-img{display:block;max-width:100%;height:auto}.pb-img-wrap.align-center{text-align:center}.pb-img-wrap.align-right{text-align:right}");
+        sb.Append(".pb-img{display:inline-block;max-width:100%;height:auto}.pb-img-wrap.align-center{text-align:center}.pb-img-wrap.align-right{text-align:right}");
+        sb.Append(".pb-cols{display:flex;align-items:flex-start}.pb-col{flex:1 1 0;min-width:0;font-size:11pt}");
+        sb.Append(".pb-overlay{position:absolute;box-sizing:border-box}.pb-ov-text{word-wrap:break-word}");
+        sb.Append(".pb-ov-img{display:block;width:100%;height:auto}.pb-ov-shape{width:100%;height:100%}.pb-ov-shape.is-ellipse{border-radius:50%}");
         sb.Append(".pb-shape-rect{width:100%;border:1.5px solid currentColor}.pb-shape-rect.is-filled{background:currentColor;border:none}");
         sb.Append(".pb-shape-line{border-top:1.5px solid currentColor}.pb-shape-divider{border-top:1px solid var(--doc-color-accent,#d1d5db);margin:6px 0}");
         sb.Append(".pb-table{width:100%;border-collapse:collapse;font-size:10.5pt}.pb-table td,.pb-table th{border:1px solid #9ca3af;padding:4px 8px;text-align:left}.pb-table th{background:var(--doc-color-accent-soft,#f3f4f6);color:#111827}");

@@ -22,7 +22,76 @@ public enum EditorBlockType
     Image,
     Shape,
     Table,
-    Spacer
+    Spacer,
+    Columns,
+    QrCode
+}
+
+/// <summary>Typ eines frei platzierbaren Overlay-Elements.</summary>
+public enum EditorOverlayType
+{
+    Text,
+    Image,
+    Shape
+}
+
+/// <summary>
+/// Frei platzierbares Element über dem Block-Fluss einer Seite (Flyer-Gestaltung:
+/// Text über Bildern, Sticker, Akzentflächen). Position/Größe in Prozent der
+/// Seitenfläche — damit zoom-, format- und druckstabil. Reihenfolge in der Liste
+/// bestimmt die Stapelung (später = oben).
+/// </summary>
+public sealed class EditorOverlay
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+    public EditorOverlayType Type { get; set; }
+
+    public double XPercent { get; set; } = 10;
+    public double YPercent { get; set; } = 10;
+    public double WidthPercent { get; set; } = 40;
+    /// <summary>Nur für Formen: Höhe in Prozent der Seitenhöhe (Text/Bild: automatisch).</summary>
+    public double HeightPercent { get; set; } = 10;
+    public int RotationDeg { get; set; }
+    public int OpacityPercent { get; set; } = 100;
+
+    // Text (Rich-Text-HTML aus contentEditable)
+    public string? Text { get; set; }
+    public int? FontSizePt { get; set; }
+    public string Color { get; set; } = "#111827";
+    public string? Background { get; set; }
+    public string Align { get; set; } = "left";
+
+    // Bild (Data-URL)
+    public string? Src { get; set; }
+    public string? Alt { get; set; }
+
+    // Form
+    public string Shape { get; set; } = "rectangle"; // rectangle | ellipse
+
+    public EditorOverlay Clone() => CloneCore(Guid.NewGuid().ToString("N"));
+
+    /// <summary>Exakte Kopie inkl. Id — für Undo-Schnappschüsse.</summary>
+    public EditorOverlay Snapshot() => CloneCore(Id);
+
+    private EditorOverlay CloneCore(string id) => new()
+    {
+        Id = id,
+        Type = Type,
+        XPercent = XPercent,
+        YPercent = YPercent,
+        WidthPercent = WidthPercent,
+        HeightPercent = HeightPercent,
+        RotationDeg = RotationDeg,
+        OpacityPercent = OpacityPercent,
+        Text = Text,
+        FontSizePt = FontSizePt,
+        Color = Color,
+        Background = Background,
+        Align = Align,
+        Src = Src,
+        Alt = Alt,
+        Shape = Shape
+    };
 }
 
 /// <summary>
@@ -58,6 +127,16 @@ public sealed class EditorBlock
     // Optionale Schriftgröße in pt (null = automatisch je Block-Typ/Theme).
     public int? FontSizePt { get; set; }
 
+    // Bild-Gestaltung: Eckenradius, Rahmen, Schatten (nur Image-Block).
+    public int CornerRadiusPx { get; set; }
+    public string? BorderColor { get; set; }
+    public int BorderWidthPx { get; set; }
+    public bool ShadowEnabled { get; set; }
+
+    // Columns: Rich-Text-HTML je Spalte (2–4) + Spaltenabstand.
+    public List<string>? ColumnsHtml { get; set; }
+    public int ColumnGapPx { get; set; } = 16;
+
     // Table (Zeilen × Zellen; erste Zeile optional als Kopf)
     public List<List<string>>? Rows { get; set; }
     public bool HeaderRow { get; set; } = true;
@@ -83,6 +162,12 @@ public sealed class EditorBlock
         Fill = Fill,
         Background = Background,
         FontSizePt = FontSizePt,
+        CornerRadiusPx = CornerRadiusPx,
+        BorderColor = BorderColor,
+        BorderWidthPx = BorderWidthPx,
+        ShadowEnabled = ShadowEnabled,
+        ColumnsHtml = ColumnsHtml is null ? null : new List<string>(ColumnsHtml),
+        ColumnGapPx = ColumnGapPx,
         Rows = Rows?.Select(r => new List<string>(r)).ToList(),
         HeaderRow = HeaderRow
     };
@@ -118,6 +203,9 @@ public sealed class EditorPage
 
     public List<EditorBlock> Blocks { get; set; } = new();
 
+    /// <summary>Frei platzierte Elemente über dem Block-Fluss (Listenreihenfolge = Stapelung).</summary>
+    public List<EditorOverlay> Overlays { get; set; } = new();
+
     public EditorPage Clone() => new()
     {
         Background = Background,
@@ -126,7 +214,8 @@ public sealed class EditorPage
         BackgroundOpacityPercent = BackgroundOpacityPercent,
         BackgroundPosition = BackgroundPosition,
         BackgroundRepeat = BackgroundRepeat,
-        Blocks = Blocks.Select(b => b.Clone()).ToList()
+        Blocks = Blocks.Select(b => b.Clone()).ToList(),
+        Overlays = Overlays.Select(o => o.Clone()).ToList()
     };
 
     /// <summary>Exakte Kopie inkl. Ids — für Undo-Schnappschüsse.</summary>
@@ -139,7 +228,8 @@ public sealed class EditorPage
         BackgroundOpacityPercent = BackgroundOpacityPercent,
         BackgroundPosition = BackgroundPosition,
         BackgroundRepeat = BackgroundRepeat,
-        Blocks = Blocks.Select(b => b.Snapshot()).ToList()
+        Blocks = Blocks.Select(b => b.Snapshot()).ToList(),
+        Overlays = Overlays.Select(o => o.Snapshot()).ToList()
     };
 }
 

@@ -9,6 +9,8 @@
 // 100 % lokal, kein Netzwerk, keine Fremd-Bibliothek.
 // =============================================================================
 
+import QRCode from "qrcode";
+
 // Zuletzt bekannte Auswahl innerhalb eines `.pb-edit`-Blocks. Wird laufend per
 // `selectionchange` gemerkt, damit Bedien­elemente, die den Fokus stehlen (z. B.
 // der native Farbwähler `<input type="color">`), die Auswahl wiederherstellen
@@ -105,7 +107,145 @@ function readAsDataUrl(file: File): Promise<string> {
   });
 }
 
-export function registerFileDrop(dotnetRef: { invokeMethodAsync(method: string, ...args: unknown[]): Promise<unknown> }): void {
+type DotNetRef = { invokeMethodAsync(method: string, ...args: unknown[]): Promise<unknown> };
+
+// --- PWA-File-Handler (.pbdesign.json) -----------------------------------------
+// Der launchQueue-Consumer feuert beim App-Start (vor Blazor-Boot) und parkt den
+// Dateiinhalt; der Designer holt ihn nach dem Mount per consumeLaunchDesign() ab.
+if ("launchQueue" in globalThis) {
+  (globalThis as any).launchQueue.setConsumer(async (params: { files?: Array<{ getFile(): Promise<File> }> }) => {
+    try {
+      if (!params.files || params.files.length === 0) return;
+      const file = await params.files[0].getFile();
+      (globalThis as any).__pbLaunchDesign = await file.text();
+    } catch {
+      /* Datei nicht lesbar — ignorieren */
+    }
+  });
+}
+
+/** Holt eine per Datei-Doppelklick (PWA-File-Handler) übergebene Design-Datei ab (einmalig). */
+export function consumeLaunchDesign(): string | null {
+  const text = (globalThis as any).__pbLaunchDesign as string | undefined;
+  (globalThis as any).__pbLaunchDesign = undefined;
+  return text ?? null;
+}
+
+/** QR-Code als PNG-Data-URL erzeugen (lokal, kein Netz). */
+export function makeQr(text: string, sizePx: number): Promise<string> {
+  return QRCode.toDataURL(text || " ", { width: Math.max(64, Math.min(1024, sizePx || 512)), margin: 1 });
+}
+
+/**
+ * Re-encodiert ein Bild platzsparend (Data-URLs blähen Entwürfe sonst auf):
+ * skaliert auf max. `maxDim` px Kantenlänge und encodiert als JPEG, außer das
+ * Original ist ein kleines PNG (Transparenz erhalten). Liefert das kleinere
+ * Ergebnis von Original/Re-Encode.
+ */
+export async function compressDataUrl(dataUrl: string, maxDim = 2000, quality = 0.85): Promise<string> {
+  try {
+    const isPng = dataUrl.startsWith("data:image/png");
+    if (isPng && dataUrl.length < 1_500_000) return dataUrl;
+    const img = new Image();
+    await new Promise<void>((res, rej) => { img.onload = () => res(); img.onerror = () => rej(new Error("img")); img.src = dataUrl; });
+    const scale = Math.min(1, maxDim / Math.max(img.naturalWidth, img.naturalHeight));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
+    canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return dataUrl;
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    const out = canvas.toDataURL("image/jpeg", quality);
+    return out.length < dataUrl.length ? out : dataUrl;
+  } catch {
+    return dataUrl;
+  }
+}
+
+// --- Tastatur-Shortcuts + Overlay-Interaktionen (Pointer-basiert = Touch-fähig) --
+
+let editorRef: DotNetRef | null = null;
+
+function wireShortcuts(): void {
+  if ((document as any).__pbShortcutsWired) return;
+  (document as any).__pbShortcutsWired = true;
+  document.addEventListener("keydown", (e: KeyboardEvent) => {
+    if (!editorRef || !document.querySelector(".pb-doc-stage")) return;
+    const target = e.target as HTMLElement | null;
+    const inEdit = !!target?.closest?.(".pb-edit, [contenteditable='true'], input, textarea, select");
+    const mod = e.ctrlKey || e.metaKey;
+    const key = e.key.toLowerCase();
+    if (mod && key === "s") {
+      e.preventDefault();
+      void editorRef.invokeMethodAsync("OnShortcut", "save");
+    } else if (mod && !inEdit && key === "z" && !e.shiftKey) {
+      e.preventDefault();
+      void editorRef.invokeMethodAsync("OnShortcut", "undo");
+    } else if (mod && !inEdit && (key === "y" || (key === "z" && e.shiftKey))) {
+      e.preventDefault();
+      void editorRef.invokeMethodAsync("OnShortcut", "redo");
+    } else if (!mod && !inEdit && (e.key === "Delete" || e.key === "Backspace")) {
+      e.preventDefault();
+      void editorRef.invokeMethodAsync("OnShortcut", "delete");
+    }
+  });
+}
+
+// Drag/Resize frei platzierter Overlays: Pointer Events (Maus + Touch + Stift).
+// Während der Geste wird nur der Inline-Style aktualisiert; erst am Ende geht
+// die Geometrie (in % der Seitenfläche) an C# — ein Undo-Schritt pro Geste.
+function wireOverlayInteractions(): void {
+  if ((document as any).__pbOverlayWired) return;
+  (document as any).__pbOverlayWired = true;
+
+  document.addEventListener("pointerdown", (e: PointerEvent) => {
+    if (!editorRef) return;
+    const target = e.target as HTMLElement | null;
+    const handle = target?.closest?.(".pb-ov-move, .pb-ov-resize") as HTMLElement | null;
+    if (!handle) return;
+    const overlay = handle.closest(".pb-overlay") as HTMLElement | null;
+    const page = handle.closest(".pb-page") as HTMLElement | null;
+    if (!overlay || !page) return;
+    e.preventDefault();
+    const resize = handle.classList.contains("pb-ov-resize");
+    const pageRect = page.getBoundingClientRect();
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const startLeft = parseFloat(overlay.style.left) || 0;   // %
+    const startTop = parseFloat(overlay.style.top) || 0;     // %
+    const startWidth = parseFloat(overlay.style.width) || 20; // %
+    try { handle.setPointerCapture(e.pointerId); } catch { /* synthetische Events haben keine gültige Pointer-Id */ }
+
+    const onMove = (ev: PointerEvent) => {
+      const dxPct = ((ev.clientX - startX) / pageRect.width) * 100;
+      const dyPct = ((ev.clientY - startY) / pageRect.height) * 100;
+      if (resize) {
+        overlay.style.width = `${Math.min(100, Math.max(4, startWidth + dxPct)).toFixed(2)}%`;
+      } else {
+        overlay.style.left = `${Math.min(98, Math.max(-20, startLeft + dxPct)).toFixed(2)}%`;
+        overlay.style.top = `${Math.min(98, Math.max(-10, startTop + dyPct)).toFixed(2)}%`;
+      }
+    };
+    const onUp = () => {
+      handle.removeEventListener("pointermove", onMove);
+      handle.removeEventListener("pointerup", onUp);
+      handle.removeEventListener("pointercancel", onUp);
+      const id = overlay.id.startsWith("ov-") ? overlay.id.slice(3) : overlay.id;
+      void editorRef?.invokeMethodAsync("OnOverlayGeometry", id,
+        parseFloat(overlay.style.left) || 0,
+        parseFloat(overlay.style.top) || 0,
+        parseFloat(overlay.style.width) || startWidth);
+    };
+    handle.addEventListener("pointermove", onMove);
+    handle.addEventListener("pointerup", onUp);
+    handle.addEventListener("pointercancel", onUp);
+  });
+}
+
+export function registerFileDrop(dotnetRef: DotNetRef): void {
+  editorRef = dotnetRef;
+  wireShortcuts();
+  wireOverlayInteractions();
   const stage = document.querySelector(".pb-doc-stage") as HTMLElement | null;
   if (!stage || (stage as any).__pbDropWired) return;
   (stage as any).__pbDropWired = true;

@@ -27,7 +27,7 @@ export interface EditorTheme {
 
 export interface EditorBlock {
   id?: string;
-  type: string; // Heading | Paragraph | Image | Shape | Table | Spacer
+  type: string; // Heading | Paragraph | Image | Shape | Table | Spacer | Columns | QrCode
   text?: string | null;
   level?: number;
   align?: string;
@@ -40,8 +40,33 @@ export interface EditorBlock {
   fill?: boolean;
   background?: string | null;
   fontSizePt?: number | null;
+  cornerRadiusPx?: number;
+  borderColor?: string | null;
+  borderWidthPx?: number;
+  shadowEnabled?: boolean;
+  columnsHtml?: string[] | null;
+  columnGapPx?: number;
   rows?: string[][] | null;
   headerRow?: boolean;
+}
+
+export interface EditorOverlay {
+  id?: string;
+  type: string; // Text | Image | Shape
+  xPercent?: number;
+  yPercent?: number;
+  widthPercent?: number;
+  heightPercent?: number;
+  rotationDeg?: number;
+  opacityPercent?: number;
+  text?: string | null;
+  fontSizePt?: number | null;
+  color?: string;
+  background?: string | null;
+  align?: string;
+  src?: string | null;
+  alt?: string | null;
+  shape?: string;
 }
 
 export interface EditorPage {
@@ -53,6 +78,7 @@ export interface EditorPage {
   backgroundPosition?: string;
   backgroundRepeat?: boolean;
   blocks: EditorBlock[];
+  overlays?: EditorOverlay[];
 }
 
 export interface EditorDocument {
@@ -306,7 +332,8 @@ export function createDesign(kind: string, opts: { title?: string; theme?: strin
 
 // --- Validierung / Normalisierung -----------------------------------------------
 
-const BLOCK_TYPES = ["Heading", "Paragraph", "Image", "Shape", "Table", "Spacer"];
+const BLOCK_TYPES = ["Heading", "Paragraph", "Image", "Shape", "Table", "Spacer", "Columns", "QrCode"];
+const OVERLAY_TYPES = ["Text", "Image", "Shape"];
 const ALIGNS = new Set(["left", "center", "right", "justify"]);
 
 function clamp(v: unknown, min: number, max: number, fallback: number): number {
@@ -400,7 +427,47 @@ export function validateDesign(raw: string): { doc: EditorDocument; issues: stri
       if (Array.isArray(b.rows)) {
         block.rows = b.rows.map((row) => (Array.isArray(row) ? row.map((c) => stripDangerousHtml(String(c ?? ""), issues, where)) : []));
       }
+      block.cornerRadiusPx = clamp(b.cornerRadiusPx, 0, 48, 0);
+      block.borderWidthPx = clamp(b.borderWidthPx, 0, 12, 0);
+      block.borderColor = sanitizeColorOrNull(b.borderColor);
+      block.shadowEnabled = b.shadowEnabled === true;
+      block.columnGapPx = clamp(b.columnGapPx, 0, 64, 16);
+      if (Array.isArray(b.columnsHtml)) {
+        block.columnsHtml = b.columnsHtml.slice(0, 4).map((c) => stripDangerousHtml(String(c ?? ""), issues, where));
+      }
       outBlocks.push(block);
+    }
+
+    const outOverlays: EditorOverlay[] = [];
+    for (const o of Array.isArray(p?.overlays) ? p.overlays! : []) {
+      const typeRaw = typeof o?.type === "string" ? o.type : "";
+      const type = OVERLAY_TYPES.find((t) => t.toLowerCase() === typeRaw.toLowerCase());
+      if (!type) {
+        issues.push(`Seite ${pi + 1}: Overlay mit unbekanntem Typ '${typeRaw}' entfernt.`);
+        continue;
+      }
+      const where = `Seite ${pi + 1}/Overlay-${type}`;
+      const overlay: EditorOverlay = {
+        type,
+        xPercent: clamp(o.xPercent, -20, 98, 10),
+        yPercent: clamp(o.yPercent, -10, 98, 10),
+        widthPercent: clamp(o.widthPercent, 4, 100, 40),
+        heightPercent: clamp(o.heightPercent, 2, 100, 10),
+        rotationDeg: clamp(o.rotationDeg, -180, 180, 0),
+        opacityPercent: clamp(o.opacityPercent, 10, 100, 100),
+        align: ALIGNS.has(o.align ?? "") ? o.align : "left",
+        color: sanitizeColor(o.color, "#111827"),
+        background: sanitizeColorOrNull(o.background),
+        shape: o.shape === "ellipse" ? "ellipse" : "rectangle",
+      };
+      if (typeof o.text === "string") overlay.text = stripDangerousHtml(o.text, issues, where);
+      if (typeof o.fontSizePt === "number") overlay.fontSizePt = clamp(o.fontSizePt, 6, 120, 11);
+      if (typeof o.alt === "string") overlay.alt = o.alt.slice(0, 200);
+      if (typeof o.src === "string") {
+        if (o.src.toLowerCase().startsWith("data:image/")) overlay.src = o.src;
+        else issues.push(`${where}: Bildquelle ist keine data:image-URL — entfernt.`);
+      }
+      outOverlays.push(overlay);
     }
 
     let backgroundImage: string | null = null;
@@ -416,6 +483,7 @@ export function validateDesign(raw: string): { doc: EditorDocument; issues: stri
       backgroundPosition: p?.backgroundPosition === "top" || p?.backgroundPosition === "bottom" ? p.backgroundPosition : "center",
       backgroundRepeat: p?.backgroundRepeat === true,
       blocks: outBlocks,
+      overlays: outOverlays,
     };
   });
 
@@ -453,9 +521,21 @@ function blockHtml(b: EditorBlock): string {
       return `${open}<div class="pb-h${b.level ?? 2}${align}" style="${fontSize}">${b.text ?? ""}</div></div>`;
     case "Paragraph":
       return `${open}<div class="pb-para${align}" style="${fontSize}">${b.text ?? ""}</div></div>`;
-    case "Image":
+    case "Columns": {
+      const cols = (b.columnsHtml ?? []).map((c) => `<div class="pb-col">${c}</div>`).join("");
+      return `${open}<div class="pb-cols" style="gap:${b.columnGapPx ?? 16}px;${fontSize}">${cols}</div></div>`;
+    }
+    case "QrCode":
       if (!b.src) return "";
-      return `${open}<div class="pb-img-wrap${align}"><img class="pb-img" src="${b.src}" alt="${esc(b.alt ?? "")}" style="width:${b.widthPercent ?? 100}%;display:inline-block"/></div></div>`;
+      return `${open}<div class="pb-img-wrap${align}"><img class="pb-img" src="${b.src}" alt="QR" style="width:${b.widthPercent ?? 30}%;display:inline-block"/></div></div>`;
+    case "Image": {
+      if (!b.src) return "";
+      let imgStyle = `width:${b.widthPercent ?? 100}%;display:inline-block;`;
+      if ((b.cornerRadiusPx ?? 0) > 0) imgStyle += `border-radius:${b.cornerRadiusPx}px;`;
+      if ((b.borderWidthPx ?? 0) > 0 && b.borderColor) imgStyle += `border:${b.borderWidthPx}px solid ${b.borderColor};`;
+      if (b.shadowEnabled) imgStyle += "box-shadow:0 6px 18px rgba(0,0,0,.25);";
+      return `${open}<div class="pb-img-wrap${align}"><img class="pb-img" src="${b.src}" alt="${esc(b.alt ?? "")}" style="${imgStyle}"/></div></div>`;
+    }
     case "Spacer":
       return `${open}<div class="pb-spacer" style="height:${b.heightPx ?? 24}px"></div></div>`;
     case "Shape":
@@ -507,14 +587,38 @@ export function renderHtml(document: EditorDocument): string {
     ".pb-img{display:block;max-width:100%;height:auto}.pb-img-wrap.align-center{text-align:center}.pb-img-wrap.align-right{text-align:right}" +
     ".pb-shape-rect{width:100%;border:1.5px solid currentColor}.pb-shape-rect.is-filled{background:currentColor;border:none}" +
     ".pb-shape-line{border-top:1.5px solid currentColor}.pb-shape-divider{border-top:1px solid var(--doc-color-accent,#d1d5db);margin:6px 0}" +
+    ".pb-cols{display:flex;align-items:flex-start}.pb-col{flex:1 1 0;min-width:0;font-size:11pt}" +
+    ".pb-overlay{position:absolute;box-sizing:border-box}.pb-ov-text{word-wrap:break-word}" +
+    ".pb-ov-img{display:block;width:100%;height:auto}.pb-ov-shape{width:100%;height:100%}.pb-ov-shape.is-ellipse{border-radius:50%}" +
     ".pb-table{width:100%;border-collapse:collapse;font-size:10.5pt}.pb-table td,.pb-table th{border:1px solid #9ca3af;padding:4px 8px;text-align:left}.pb-table th{background:var(--doc-color-accent-soft,#f3f4f6);color:#111827}" +
     ".align-center{text-align:center}.align-right{text-align:right}.align-justify{text-align:justify}" +
     "*{-webkit-print-color-adjust:exact;print-color-adjust:exact}";
 
+  const overlayHtml = (o: EditorOverlay): string => {
+    let style = `left:${o.xPercent}%;top:${o.yPercent}%;width:${o.widthPercent}%;`;
+    if (o.type === "Shape") style += `height:${o.heightPercent}%;`;
+    if (o.rotationDeg) style += `transform:rotate(${o.rotationDeg}deg);`;
+    if ((o.opacityPercent ?? 100) < 100) style += `opacity:${((o.opacityPercent ?? 100) / 100).toFixed(2)};`;
+    let inner = "";
+    if (o.type === "Text") {
+      let t = `color:${o.color};`;
+      if (o.fontSizePt) t += `font-size:${o.fontSizePt}pt;`;
+      if (o.background) t += `background:${o.background};padding:2px 6px;`;
+      const align = o.align && o.align !== "left" ? ` align-${o.align}` : "";
+      inner = `<div class="pb-ov-text${align}" style="${t}">${o.text ?? ""}</div>`;
+    } else if (o.type === "Image" && o.src) {
+      inner = `<img class="pb-ov-img" src="${o.src}" alt="${esc(o.alt ?? "")}"/>`;
+    } else if (o.type === "Shape") {
+      inner = `<div class="pb-ov-shape${o.shape === "ellipse" ? " is-ellipse" : ""}" style="background:${o.color}"></div>`;
+    }
+    return inner ? `<div class="pb-overlay" style="${style}">${inner}</div>` : "";
+  };
+
   const pages = document.pages.map((p) => {
     const bg = p.background ?? document.theme?.pageBackground;
     const style = vars + (bg ? `background-color:${bg};` : "");
-    return `<div class="pb-page" style="${style}">${pageBgLayer(p)}${p.blocks.map(blockHtml).join("")}</div>`;
+    const overlays = (p.overlays ?? []).map(overlayHtml).join("");
+    return `<div class="pb-page" style="${style}">${pageBgLayer(p)}${p.blocks.map(blockHtml).join("")}${overlays}</div>`;
   }).join("");
 
   return `<!doctype html><html lang="de"><head><meta charset="utf-8"><title>${esc(document.title || "Dokument")}</title><style>${css}</style></head><body>${pages}</body></html>`;

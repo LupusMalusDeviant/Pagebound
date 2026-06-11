@@ -225,6 +225,29 @@ async function main() {
   check("design_validate sanitizes theme", hostileDoc.theme?.headingFont === "georgia" && hostileDoc.theme?.headingColor === "#111827" && hostileDoc.theme?.accentColor === "#abc");
   check("design_validate reports issues", hostile.issues.length >= 4, JSON.stringify(hostile.issues));
 
+  const extended = design.validateDesign(JSON.stringify({
+    title: "Erweitert", layout: "A4Portrait",
+    pages: [{
+      blocks: [
+        { type: "Columns", columnsHtml: ["<b>links</b>", "rechts", "c3", "c4", "c5-zuviel"], columnGapPx: 999 },
+        { type: "QrCode", src: "data:image/png;base64,AAA", widthPercent: 30 },
+        { type: "Image", src: "data:image/png;base64,AAA", cornerRadiusPx: 99, borderWidthPx: 5, borderColor: "#ff0000", shadowEnabled: true },
+      ],
+      overlays: [
+        { type: "text", text: "Hi<script>x</script>", xPercent: 500, rotationDeg: 9999 },
+        { type: "Shape", shape: "ellipse", color: "#f59e0b" },
+        { type: "Raumschiff" },
+      ],
+    }],
+  }));
+  const extDoc = extended.doc;
+  check("design_validate clamps columns+gap", extDoc.pages[0].blocks[0].columnsHtml!.length === 4 && extDoc.pages[0].blocks[0].columnGapPx === 64);
+  check("design_validate clamps overlay geometry + strips html", extDoc.pages[0].overlays!.length === 2
+    && extDoc.pages[0].overlays![0].xPercent === 98 && extDoc.pages[0].overlays![0].rotationDeg === 180
+    && !(extDoc.pages[0].overlays![0].text ?? "").includes("script"));
+  const extHtml = design.renderHtml(extDoc);
+  check("design_render_html renders cols+qr+overlays", extHtml.includes("pb-cols") && extHtml.includes("pb-overlay") && extHtml.includes("is-ellipse") && extHtml.includes("border-radius:48px"));
+
   const html = design.renderHtml(roundtrip.doc);
   check("design_render_html contains @page size", html.includes("@page{size:105mm 210mm"), html.slice(0, 120));
   check("design_render_html applies theme vars", html.includes("--doc-color-accent:#f59e0b"));

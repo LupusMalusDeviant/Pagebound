@@ -7,6 +7,14 @@
   "background_color": "#ffffff",
   "theme_color": "#03173d",
   "prefer_related_applications": false,
+  "file_handlers": [
+    {
+      "action": "/editor",
+      "accept": {
+        "application/json": [".pbdesign.json"]
+      }
+    }
+  ],
   "icons": [
     {
       "src": "icon-512.png",
