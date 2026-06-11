@@ -369,6 +369,9 @@
                 <label class="flex items-center gap-1.5 cursor-pointer whitespace-nowrap">
                     <input type="checkbox" @bind="_pdfaFlatten" /> @L.T("tools.pdfa.flatten")
                 </label>
+                <label class="flex items-center gap-1.5 cursor-pointer whitespace-nowrap" title="@L.T("tools.pdfa.embedFontsTitle")">
+                    <input type="checkbox" @bind="_pdfaEmbedFonts" /> @L.T("tools.pdfa.embedFonts")
+                </label>
                 <button type="button"
                         class="ml-auto rounded border border-pb-border bg-pb-bg px-3 py-1 text-pb-fg-muted hover:text-pb-fg disabled:opacity-40"
                         disabled="@(_isConvertingPdfa || _handle is null)"
@@ -398,6 +401,122 @@
                 </div>
             }
             <p class="text-xs text-pb-fg-muted">@L.T("tools.pdfa.note")</p>
+        </div>
+
+        @* Signieren (Zertifikat, P12) — MCP-Parität: pdf_sign. Kryptografische
+           Signatur (adbe.pkcs7.detached); Abgrenzung zur optischen Bild-Signatur
+           mit Hash-Badge im Reader siehe tools.sign.note. *@
+        <div class="max-w-4xl mx-auto mt-2 rounded-lg pb-glass p-3 space-y-2 text-sm">
+            <div class="flex flex-wrap items-center gap-2">
+                <span class="text-pb-fg-muted">@L.T("tools.sign.label")</span>
+                <label class="rounded border border-pb-border bg-pb-bg px-2 py-0.5 text-pb-fg-muted hover:text-pb-fg cursor-pointer">
+                    @L.T("tools.sign.chooseCert")
+                    <InputFile OnChange="HandleSignCertSelectedAsync"
+                               accept=".p12,.pfx"
+                               class="hidden" />
+                </label>
+                @if (_signCertName is not null)
+                {
+                    <span class="text-xs rounded bg-pb-accent/15 px-2 py-0.5 text-pb-accent">
+                        @L.T("tools.sign.certLoaded", new Dictionary<string, object> { ["name"] = _signCertName })
+                    </span>
+                }
+            </div>
+            <div class="grid gap-2 sm:grid-cols-3">
+                <input type="password"
+                       @bind="_signPassword"
+                       @bind:event="oninput"
+                       class="rounded border border-pb-border bg-pb-bg px-2 py-1 text-sm"
+                       placeholder="@L.T("tools.sign.password")"
+                       autocomplete="off"
+                       aria-label="@L.T("tools.sign.password")" />
+                <input @bind="_signReason"
+                       class="rounded border border-pb-border bg-pb-bg px-2 py-1 text-sm"
+                       placeholder="@L.T("tools.sign.reason")"
+                       aria-label="@L.T("tools.sign.reason")" />
+                <input @bind="_signLocation"
+                       class="rounded border border-pb-border bg-pb-bg px-2 py-1 text-sm"
+                       placeholder="@L.T("tools.sign.location")"
+                       aria-label="@L.T("tools.sign.location")" />
+            </div>
+            <button type="button"
+                    class="btn primary disabled:opacity-40"
+                    disabled="@(_isSigning || _handle is null || _signCertBytes is null || string.IsNullOrEmpty(_signPassword))"
+                    title="@L.T("tools.sign.buttonTitle")"
+                    @onclick="SignPdfAsync">
+                @(_isSigning ? L.T("tools.sign.running") : L.T("tools.sign.button"))
+            </button>
+            @if (_signStatus is not null)
+            {
+                <div class="rounded border border-green-300/40 bg-green-50/10 px-3 py-2 text-pb-fg">
+                    @_signStatus
+                    @if (_signSubject is not null)
+                    {
+                        <p class="mt-1 text-xs text-pb-fg-muted">@L.T("tools.sign.signer", new Dictionary<string, object> { ["subject"] = _signSubject })</p>
+                    }
+                    <button type="button" class="float-right text-pb-fg-muted hover:text-pb-fg"
+                            @onclick="@(() => { _signStatus = null; _signSubject = null; })" aria-label="@L.T("common.close")">✕</button>
+                </div>
+            }
+            @if (_signWarnings.Count > 0)
+            {
+                <div class="rounded border border-amber-300/40 bg-amber-50/10 px-3 py-2">
+                    <p class="font-medium text-pb-fg">@L.T("tools.sign.warningsHeading")</p>
+                    <ul class="mt-1 list-disc pl-5 text-xs text-pb-fg-muted space-y-0.5">
+                        @foreach (var warning in _signWarnings)
+                        {
+                            <li>@warning</li>
+                        }
+                    </ul>
+                </div>
+            }
+            <p class="text-xs text-pb-fg-muted">@L.T("tools.sign.note")</p>
+        </div>
+
+        @* PDF/UA (Kennzeichnung + Bericht) — MCP-Parität: pdf_ua_prepare.
+           Best Effort: setzt MarkInfo/Lang/DisplayDocTitle/XMP pdfuaid und
+           meldet ehrlich, was fehlt (Tagging kann NICHT synthetisiert werden). *@
+        <div class="max-w-4xl mx-auto mt-2 rounded-lg pb-glass p-3 space-y-2 text-sm">
+            <div class="flex flex-wrap items-center gap-2">
+                <span class="text-pb-fg-muted">@L.T("tools.pdfua.label")</span>
+                <label class="flex items-center gap-1.5 whitespace-nowrap">
+                    @L.T("tools.pdfua.lang")
+                    <select @bind="_pdfuaLang"
+                            class="rounded border border-pb-border bg-pb-bg px-2 py-1 text-sm"
+                            aria-label="@L.T("tools.pdfua.lang")">
+                        <option value="de-DE">de-DE</option>
+                        <option value="en-US">en-US</option>
+                    </select>
+                </label>
+                <button type="button"
+                        class="ml-auto rounded border border-pb-border bg-pb-bg px-3 py-1 text-pb-fg-muted hover:text-pb-fg disabled:opacity-40"
+                        disabled="@(_isPreparingPdfua || _handle is null)"
+                        title="@L.T("tools.pdfua.buttonTitle")"
+                        @onclick="PreparePdfUaAsync">
+                    @(_isPreparingPdfua ? L.T("tools.pdfua.running") : L.T("tools.pdfua.button"))
+                </button>
+            </div>
+            @if (_pdfuaStatus is not null)
+            {
+                <div class="rounded border border-green-300/40 bg-green-50/10 px-3 py-2 text-pb-fg">
+                    @_pdfuaStatus
+                    <button type="button" class="float-right text-pb-fg-muted hover:text-pb-fg"
+                            @onclick="@(() => _pdfuaStatus = null)" aria-label="@L.T("common.close")">✕</button>
+                </div>
+            }
+            @if (_pdfuaReport.Count > 0)
+            {
+                <div class="rounded border border-amber-300/40 bg-amber-50/10 px-3 py-2">
+                    <p class="font-medium text-pb-fg">@L.T("tools.pdfua.reportHeading")</p>
+                    <ul class="mt-1 list-disc pl-5 text-xs text-pb-fg-muted space-y-0.5">
+                        @foreach (var line in _pdfuaReport)
+                        {
+                            <li>@line</li>
+                        }
+                    </ul>
+                </div>
+            }
+            <p class="text-xs text-pb-fg-muted">@L.T("tools.pdfua.note")</p>
         </div>
 
         @* Wasserzeichen + Seitenzahlen / Bates *@
@@ -1197,6 +1316,7 @@
 
     // --- PDF/A (Best Effort) — MCP-Parität: pdf_to_pdfa ------------------------
     private bool _pdfaFlatten = true;
+    private bool _pdfaEmbedFonts = true;
     private bool _isConvertingPdfa;
     private string? _pdfaStatus;
     private readonly List<string> _pdfaWarnings = new();
@@ -1211,7 +1331,7 @@
         try
         {
             await using var stream = new MemoryStream(_originalPdfBytes);
-            var result = await Archive.ConvertToPdfAAsync(stream, _pdfaFlatten, CancellationToken.None)
+            var result = await Archive.ConvertToPdfAAsync(stream, _pdfaFlatten, _pdfaEmbedFonts, CancellationToken.None)
                 .ConfigureAwait(false);
 
             var filename = BuildPdfaFilename(_currentFilename);
@@ -1243,6 +1363,56 @@
         var safe = string.Concat(baseName.Select(c =>
             char.IsLetterOrDigit(c) || c is '_' or '-' or '.' or ' ' ? c : '_'));
         return $"{safe}-pdfa.pdf";
+    }
+
+    // --- PDF/UA (Kennzeichnung + Bericht) — MCP-Parität: pdf_ua_prepare --------
+    private string _pdfuaLang = "de-DE";
+    private bool _isPreparingPdfua;
+    private string? _pdfuaStatus;
+    private readonly List<string> _pdfuaReport = new();
+
+    private async Task PreparePdfUaAsync()
+    {
+        if (_originalPdfBytes is null || _isPreparingPdfua) return;
+        _isPreparingPdfua = true;
+        _pdfuaStatus = null;
+        _pdfuaReport.Clear();
+        _errorMessage = null;
+        try
+        {
+            await using var stream = new MemoryStream(_originalPdfBytes);
+            var result = await Archive.PreparePdfUaAsync(stream, _pdfuaLang, CancellationToken.None)
+                .ConfigureAwait(false);
+
+            var filename = BuildPdfUaFilename(_currentFilename);
+            await JS.InvokeVoidAsync(
+                "pageboundShortcuts.downloadBytes",
+                filename,
+                Convert.ToBase64String(result.Bytes),
+                "application/pdf").ConfigureAwait(false);
+
+            _pdfuaReport.AddRange(result.Warnings);
+            _pdfuaStatus = L.T("tools.pdfua.done", new Dictionary<string, object> { ["name"] = filename });
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = ex.Message;
+        }
+        finally
+        {
+            _isPreparingPdfua = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private static string BuildPdfUaFilename(string? originalName)
+    {
+        var baseName = string.IsNullOrWhiteSpace(originalName) ? "dokument" : originalName;
+        if (baseName.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
+            baseName = baseName[..^4];
+        var safe = string.Concat(baseName.Select(c =>
+            char.IsLetterOrDigit(c) || c is '_' or '-' or '.' or ' ' ? c : '_'));
+        return $"{safe}-ua.pdf";
     }
 
     // --- Bilder → PDF (FA-025) -----------------------------------------------
@@ -1356,5 +1526,94 @@
         public bool Deleted { get; set; }
         public int Rotation { get; set; } // 0, 90, 180, 270
         public bool SplitBeforeThis { get; set; }
+    }
+
+    // --- Signieren (Zertifikat, P12) — MCP-Parität: pdf_sign -------------------
+    // Property-Injection statt @inject, damit alle Sign-Änderungen in diesem
+    // Block gebündelt bleiben (Header wird parallel anderweitig bearbeitet).
+    [Inject] private IPdfSignService SignService { get; set; } = default!;
+
+    private const long MaxCertFileSize = 1L * 1024 * 1024; // 1 MB reicht für P12/PFX-Dateien
+    private byte[]? _signCertBytes;
+    private string? _signCertName;
+    private string _signPassword = string.Empty;
+    private string _signReason = string.Empty;
+    private string _signLocation = string.Empty;
+    private bool _isSigning;
+    private string? _signStatus;
+    private string? _signSubject;
+    private readonly List<string> _signWarnings = new();
+
+    private async Task HandleSignCertSelectedAsync(InputFileChangeEventArgs e)
+    {
+        _errorMessage = null;
+        _signStatus = null;
+        _signSubject = null;
+        _signWarnings.Clear();
+        try
+        {
+            await using var stream = e.File.OpenReadStream(MaxCertFileSize);
+            await using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms);
+            _signCertBytes = ms.ToArray();
+            _signCertName = e.File.Name;
+        }
+        catch (Exception ex)
+        {
+            _signCertBytes = null;
+            _signCertName = null;
+            _errorMessage = $"Zertifikat konnte nicht geladen werden: {ex.Message}";
+        }
+    }
+
+    private async Task SignPdfAsync()
+    {
+        if (_originalPdfBytes is null || _signCertBytes is null || _isSigning || string.IsNullOrEmpty(_signPassword)) return;
+        _isSigning = true;
+        _signStatus = null;
+        _signSubject = null;
+        _signWarnings.Clear();
+        _errorMessage = null;
+        try
+        {
+            var options = new PdfSignOptions(
+                Reason: string.IsNullOrWhiteSpace(_signReason) ? null : _signReason.Trim(),
+                Location: string.IsNullOrWhiteSpace(_signLocation) ? null : _signLocation.Trim(),
+                ContactInfo: null);
+            await using var stream = new MemoryStream(_originalPdfBytes);
+            var result = await SignService.SignAsync(stream, _signCertBytes, _signPassword, options, CancellationToken.None)
+                .ConfigureAwait(false);
+
+            var filename = BuildSignedFilename(_currentFilename);
+            await JS.InvokeVoidAsync(
+                "pageboundShortcuts.downloadBytes",
+                filename,
+                Convert.ToBase64String(result.Bytes),
+                "application/pdf").ConfigureAwait(false);
+
+            _signWarnings.AddRange(result.Warnings);
+            _signSubject = result.SignerSubject;
+            _signStatus = L.T("tools.sign.done", new Dictionary<string, object> { ["name"] = filename });
+            _signPassword = string.Empty; // Passwort nicht im UI-State behalten
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = ex.Message;
+        }
+        finally
+        {
+            _isSigning = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private static string BuildSignedFilename(string? originalName)
+    {
+        var baseName = string.IsNullOrWhiteSpace(originalName) ? "dokument" : originalName;
+        if (baseName.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
+            baseName = baseName[..^4];
+        var safe = string.Concat(baseName.Select(c =>
+            char.IsLetterOrDigit(c) || c is '_' or '-' or '.' or ' ' ? c : '_'));
+        return $"{safe}-signiert.pdf";
     }
 }

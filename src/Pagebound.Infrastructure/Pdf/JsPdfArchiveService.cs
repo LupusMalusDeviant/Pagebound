@@ -22,7 +22,7 @@ public sealed class JsPdfArchiveService : IPdfArchiveService
         _js = js ?? throw new ArgumentNullException(nameof(js));
     }
 
-    public async Task<PdfArchiveResult> ConvertToPdfAAsync(Stream pdf, bool flattenForm, CancellationToken cancellationToken)
+    public async Task<PdfArchiveResult> ConvertToPdfAAsync(Stream pdf, bool flattenForm, bool embedFonts, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(pdf);
 
@@ -33,7 +33,7 @@ public sealed class JsPdfArchiveService : IPdfArchiveService
         try
         {
             var result = await _js.InvokeAsync<JsPdfAResult>(
-                "pageboundPdfManipulator.convertToPdfA", cancellationToken, bytes, flattenForm).ConfigureAwait(false);
+                "pageboundPdfManipulator.convertToPdfA", cancellationToken, bytes, flattenForm, embedFonts).ConfigureAwait(false);
             return new PdfArchiveResult(
                 Convert.FromBase64String(result.DataBase64),
                 result.Warnings ?? Array.Empty<string>());
@@ -41,6 +41,29 @@ public sealed class JsPdfArchiveService : IPdfArchiveService
         catch (JSException jsex)
         {
             throw new InvalidOperationException($"[stage:pdfa] pdf-lib convertToPdfA fehlgeschlagen: {jsex.Message}", jsex);
+        }
+    }
+
+    public async Task<PdfArchiveResult> PreparePdfUaAsync(Stream pdf, string language, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(pdf);
+        ArgumentException.ThrowIfNullOrWhiteSpace(language);
+
+        await using var ms = new MemoryStream();
+        await pdf.CopyToAsync(ms, cancellationToken).ConfigureAwait(false);
+        var bytes = ms.ToArray();
+
+        try
+        {
+            var result = await _js.InvokeAsync<JsPdfAResult>(
+                "pageboundPdfManipulator.preparePdfUa", cancellationToken, bytes, language).ConfigureAwait(false);
+            return new PdfArchiveResult(
+                Convert.FromBase64String(result.DataBase64),
+                result.Warnings ?? Array.Empty<string>());
+        }
+        catch (JSException jsex)
+        {
+            throw new InvalidOperationException($"[stage:pdfua] pdf-lib preparePdfUa fehlgeschlagen: {jsex.Message}", jsex);
         }
     }
 }

@@ -714,11 +714,27 @@ export function setStorage(key: string, value: string): void {
   }
 }
 
+// Optionaler Beobachter für PDF-Downloads: Der Reader registriert sich hier,
+// um Werkzeug-Ergebnisse aus dem „Werkzeuge"-Tab direkt übernehmen zu können
+// (UI-Konsolidierung) — der normale Download läuft unverändert zusätzlich.
+let downloadObserver: { invokeMethodAsync(method: string, ...args: unknown[]): Promise<unknown> } | null = null;
+
+export function registerDownloadObserver(dotnetRef: { invokeMethodAsync(method: string, ...args: unknown[]): Promise<unknown> }): void {
+  downloadObserver = dotnetRef;
+}
+
+export function unregisterDownloadObserver(): void {
+  downloadObserver = null;
+}
+
 export function downloadBytes(
   filename: string,
   base64: string,
   mimeType: string
 ): void {
+  if (downloadObserver && mimeType === "application/pdf") {
+    void downloadObserver.invokeMethodAsync("OnPdfDownloaded", filename, base64).catch(() => undefined);
+  }
   const binary = atob(base64);
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) {

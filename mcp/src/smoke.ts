@@ -1,9 +1,12 @@
 // Smoke test for the PDF operations (run after `npm run build`: `node dist/smoke.js`).
 // Bytes-in/bytes-out — no temp files; exercises every operation end-to-end.
-import { PDFDocument, PDFName, StandardFonts, rgb } from "pdf-lib";
+import { PDFBool, PDFDict, PDFDocument, PDFName, PDFString, StandardFonts, rgb } from "pdf-lib";
+import forge from "node-forge";
 import * as pdf from "./pdf.js";
 import * as design from "./design.js";
 import * as pdfa from "./pdfa.js";
+import * as pdfua from "./pdfua.js";
+import * as sign from "./sign.js";
 import { encryptPdf } from "./encrypt.js";
 
 let failures = 0;
@@ -197,7 +200,8 @@ async function main() {
     srcDoc.catalog.set(PDFName.of("OpenAction"), srcDoc.context.obj({}));
     const srcBytes = await srcDoc.save();
 
-    const conv = await pdfa.toPdfA(srcBytes, true);
+    // embedFonts:false — der klassische Pfad: Helvetica bleibt nicht eingebettet → Warnung.
+    const conv = await pdfa.toPdfA(srcBytes, true, false);
     const reDoc = await PDFDocument.load(conv.bytes);
     check("pdf_to_pdfa output re-parses (1 page)", reDoc.getPageCount() === 1);
     check("pdf_to_pdfa sets Catalog /Metadata", reDoc.catalog.has(PDFName.of("Metadata")));
@@ -220,6 +224,151 @@ async function main() {
     const raw2 = Buffer.from(conv2.bytes).toString("latin1");
     check("pdf_to_pdfa XMP carries dc:title (xml-escaped)", raw2.includes("Archiv &amp; Co"));
     check("pdf_to_pdfa XMP carries dc:creator", raw2.includes("<rdf:li>Ada</rdf:li>"));
+
+    // --- Font-Härtung (embedFonts:true, Default): Helvetica → Liberation Sans ---
+    const convEmbed = await pdfa.toPdfA(await makeSample(1, "FontEmbed"), true, true);
+    const rawEmbed = Buffer.from(convEmbed.bytes).toString("latin1");
+    check("pdf_to_pdfa embedFonts embeds FontFile2", rawEmbed.includes("/FontFile2"));
+    check("pdf_to_pdfa embedFonts: no 'nicht eingebettet' warning for Helvetica",
+      !convEmbed.warnings.some((w) => w.includes("Helvetica") && w.includes("nicht eingebettet")), JSON.stringify(convEmbed.warnings));
+    check("pdf_to_pdfa embedFonts reports Liberation Sans replacement",
+      convEmbed.warnings.some((w) => w.includes("Helvetica") && w.includes("Liberation Sans")), JSON.stringify(convEmbed.warnings));
+    const reEmbed = await PDFDocument.load(convEmbed.bytes);
+    check("pdf_to_pdfa embedFonts output re-parses (1 page)", reEmbed.getPageCount() === 1);
+    check("pdf_to_pdfa embedFonts switches dict to TrueType+WinAnsi",
+      rawEmbed.includes("/TrueType") && rawEmbed.includes("/WinAnsiEncoding"));
+    try {
+      const reText = await pdf.extractText(convEmbed.bytes.slice(), "1");
+      check("pdf_to_pdfa embedFonts keeps text extractable",
+        /Pagebound Test/.test(reText.pages[0]?.text ?? ""), JSON.stringify(reText.pages[0]?.text?.slice(0, 60)));
+    } catch (err) {
+      check("pdf_to_pdfa embedFonts text extraction runs", false, String(err));
+    }
+  }
+
+  // --- pdf_ua_prepare (PDF/UA-Vorbereitung + Bericht) ----------------------------
+  {
+    const uaSrc = await makeSample(1, "Ua");
+    const prep = await pdfua.preparePdfUa(uaSrc, { lang: "de-DE" });
+    const reDoc = await PDFDocument.load(prep.bytes);
+    const markInfo = reDoc.catalog.lookupMaybe(PDFName.of("MarkInfo"), PDFDict);
+    check("pdf_ua_prepare sets /MarkInfo Marked true",
+      markInfo?.get(PDFName.of("Marked")) === PDFBool.True);
+    const langStr = reDoc.catalog.lookupMaybe(PDFName.of("Lang"), PDFString)?.decodeText();
+    check("pdf_ua_prepare sets Catalog /Lang de-DE", langStr === "de-DE", JSON.stringify(langStr));
+    const vp = reDoc.catalog.lookupMaybe(PDFName.of("ViewerPreferences"), PDFDict);
+    check("pdf_ua_prepare sets /DisplayDocTitle true",
+      vp?.get(PDFName.of("DisplayDocTitle")) === PDFBool.True);
+    const rawUa = Buffer.from(prep.bytes).toString("latin1");
+    check("pdf_ua_prepare XMP declares pdfuaid:part=1", rawUa.includes("<pdfuaid:part>1</pdfuaid:part>"));
+    check("pdf_ua_prepare reports missing StructTreeRoot (not tagged)",
+      prep.report.some((r) => r.includes("StructTreeRoot")), JSON.stringify(prep.report));
+    check("pdf_ua_prepare reports missing title",
+      prep.report.some((r) => r.includes("Dokumenttitel")), JSON.stringify(prep.report));
+    let badLang = false;
+    try { await pdfua.preparePdfUa(await makeSample(1, "UaBad"), { lang: "kein gültiger code" }); }
+    catch (e) { badLang = e instanceof pdf.ToolError && /Sprachcode/.test(e.message); }
+    check("pdf_ua_prepare rejects invalid lang", badLang);
+  }
+
+  // --- pdf_sign (Zertifikatssignatur) -------------------------------------------
+  // Self-Signed-Zertifikat + P12 IM TEST erzeugen, signieren, dann verifizieren:
+  // /ByteRange + /Contents aus den Bytes parsen, Digest über die ByteRange-Teile
+  // neu rechnen, CMS laden, messageDigest-Attribut vergleichen + Signatur prüfen.
+  {
+    const keys = forge.pki.rsa.generateKeyPair(2048);
+    const cert = forge.pki.createCertificate();
+    cert.publicKey = keys.publicKey;
+    cert.serialNumber = "01";
+    cert.validity.notBefore = new Date(Date.now() - 60_000);
+    cert.validity.notAfter = new Date(Date.now() + 365 * 24 * 3600 * 1000);
+    const certAttrs = [
+      { name: "commonName", value: "Pagebound Smoke" },
+      { name: "countryName", value: "DE" },
+    ];
+    cert.setSubject(certAttrs);
+    cert.setIssuer(certAttrs);
+    cert.sign(keys.privateKey, forge.md.sha256.create());
+    const p12Asn1 = forge.pkcs12.toPkcs12Asn1(keys.privateKey, [cert], "smoke-pass", { algorithm: "3des" });
+    const p12Bytes = new Uint8Array(Buffer.from(forge.asn1.toDer(p12Asn1).getBytes(), "binary"));
+
+    const signed = await sign.signPdf(await makeSample(2, "Sig"), p12Bytes, "smoke-pass", {
+      reason: "Smoke-Test",
+      location: "Node",
+    });
+    check("pdf_sign signerSubject has CN", signed.signerSubject.includes("CN=Pagebound Smoke"), signed.signerSubject);
+    check("pdf_sign no warnings for fresh self-signed cert", signed.warnings.length === 0, JSON.stringify(signed.warnings));
+    check("pdf_sign output re-parses (2 pages)", (await pdf.getInfo(signed.bytes)).pageCount === 2);
+
+    const raw = Buffer.from(signed.bytes).toString("latin1");
+    check("pdf_sign writes Sig dict markers", raw.includes("/Adobe.PPKLite") && raw.includes("/adbe.pkcs7.detached") && raw.includes("/SigFlags 3"));
+
+    // 1) /ByteRange aus den Bytes parsen und auf Konsistenz prüfen
+    const brMatch = raw.match(/\/ByteRange\s*\[\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*\]/);
+    check("pdf_sign writes concrete /ByteRange", !!brMatch, raw.match(/\/ByteRange[^\]]*\]/)?.[0] ?? "(none)");
+    const [b0, b1, b2, b3] = brMatch ? brMatch.slice(1, 5).map(Number) : [0, 0, 0, 0];
+    check("pdf_sign ByteRange covers file minus /Contents",
+      b0 === 0 && b2 > b1 && b2 + b3 === signed.bytes.length && raw[b1] === "<" && raw[b2 - 1] === ">",
+      JSON.stringify({ b0, b1, b2, b3, total: signed.bytes.length }));
+
+    // 2) Digest über die ByteRange-Teile neu rechnen
+    const part1 = raw.slice(b0, b0 + b1);
+    const part2 = raw.slice(b2, b2 + b3);
+    const contentMd = forge.md.sha256.create();
+    contentMd.update(part1 + part2);
+    const expectedDigest = contentMd.digest().getBytes();
+
+    // 3) CMS aus der /Contents-Lücke laden (DER; 0-Padding über die im
+    //    DER-Header deklarierte Gesamtlänge abschneiden)
+    const contentsHex = raw.slice(b1 + 1, b2 - 1);
+    const padded = forge.util.hexToBytes(contentsHex);
+    const lenByte = padded.charCodeAt(1);
+    const lenOfLen = lenByte < 0x80 ? 0 : lenByte & 0x7f;
+    let derLen = lenByte < 0x80 ? lenByte : 0;
+    for (let i = 0; i < lenOfLen; i++) derLen = derLen * 256 + padded.charCodeAt(2 + i);
+    const contentsDer = padded.slice(0, 2 + lenOfLen + derLen);
+    check("pdf_sign /Contents DER shorter than reserved gap", contentsDer.length < padded.length && contentsDer.length > 0);
+    const p7: any = forge.pkcs7.messageFromAsn1(forge.asn1.fromDer(forge.util.createBuffer(contentsDer)));
+
+    // 4) messageDigest-Attribut vergleichen
+    const authAttrs: any[] = p7.rawCapture?.authenticatedAttributes ?? [];
+    check("pdf_sign CMS has authenticatedAttributes", authAttrs.length >= 3, String(authAttrs.length));
+    let messageDigestAttr: string | null = null;
+    let hasContentType = false;
+    let hasSigningTime = false;
+    for (const attr of authAttrs) {
+      const oid = forge.asn1.derToOid(attr.value[0].value);
+      if (oid === forge.pki.oids.messageDigest) messageDigestAttr = attr.value[1].value[0].value as string;
+      if (oid === forge.pki.oids.contentType) hasContentType = true;
+      if (oid === forge.pki.oids.signingTime) hasSigningTime = true;
+    }
+    check("pdf_sign signed attrs: contentType + signingTime present", hasContentType && hasSigningTime);
+    check("pdf_sign messageDigest equals recomputed SHA-256 of ByteRange parts",
+      messageDigestAttr !== null && messageDigestAttr === expectedDigest);
+
+    // 5) Signatur mit dem Zertifikat prüfen (RSASSA-PKCS1-v1_5 über DER(SET der Attribute))
+    const attrSet = forge.asn1.create(forge.asn1.Class.UNIVERSAL, forge.asn1.Type.SET, true, authAttrs);
+    const attrMd = forge.md.sha256.create();
+    attrMd.update(forge.asn1.toDer(attrSet).getBytes());
+    const p7Cert: forge.pki.Certificate | undefined = p7.certificates?.[0];
+    check("pdf_sign CMS embeds the certificate", !!p7Cert
+      && p7Cert.subject.getField("CN")?.value === "Pagebound Smoke");
+    let sigVerified = false;
+    try {
+      sigVerified = !!p7Cert && (p7Cert.publicKey as forge.pki.rsa.PublicKey)
+        .verify(attrMd.digest().getBytes(), p7.rawCapture.signature as string);
+    } catch { sigVerified = false; }
+    check("pdf_sign CMS signature verifies against certificate", sigVerified);
+
+    // Fehlerpfade: bereits signierte PDF + falsches Passwort werden abgelehnt
+    let rejectedSigned = false;
+    try { await sign.signPdf(signed.bytes, p12Bytes, "smoke-pass"); }
+    catch (e) { rejectedSigned = e instanceof pdf.ToolError && /bereits eine Signatur/.test(e.message); }
+    check("pdf_sign rejects already-signed PDF", rejectedSigned);
+    let rejectedPassword = false;
+    try { await sign.signPdf(await makeSample(1, "Sig2"), p12Bytes, "falsch"); }
+    catch (e) { rejectedPassword = e instanceof pdf.ToolError && /Passwort/.test(e.message); }
+    check("pdf_sign rejects wrong P12 password", rejectedPassword);
   }
 
   // --- Designer-Tools ---------------------------------------------------------

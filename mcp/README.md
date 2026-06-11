@@ -51,7 +51,9 @@ Eingaben bleiben stets unangetastet (neue Datei/neue Bytes).
 | `pdf_fill_form` | Formularfelder ausfüllen, optional **flatten** (einbrennen) |
 | `pdf_create_field` | AcroForm-Felder (Text/Checkbox) **anlegen** — Einstieg Formular-Erstellung |
 | `pdf_set_metadata` | Metadaten setzen (Titel/Autor/Betreff/Schlagwörter/Ersteller/Producer) |
-| `pdf_to_pdfa` | PDF Richtung **PDF/A-2b** (Best Effort: XMP, sRGB-OutputIntent, Aufräumen; nicht eingebettete Fonts nur als `warnings` — **keine Konformitätsgarantie**) |
+| `pdf_to_pdfa` | PDF Richtung **PDF/A-2b** (Best Effort: XMP, sRGB-OutputIntent, Aufräumen; `embedFonts` (Default an) ersetzt nicht eingebettete Standard-14-Fonts (Helvetica/Times/Courier) durch eingebettete **Liberation**-Fonts (metrisch kompatibel, SIL OFL 1.1, `mcp/fonts/`); übrige nicht eingebettete Fonts nur als `warnings` — **keine Konformitätsgarantie**) |
+| `pdf_ua_prepare` | PDF Richtung **PDF/UA-1** vorbereiten: Kennzeichnung (`/MarkInfo`, `/Lang`, `/DisplayDocTitle`, XMP `pdfuaid:part=1`) + ehrlicher Prüfbericht (fehlendes Tagging/StructTreeRoot, Titel, Bilder ohne `/Alt`, Fonts ohne ToUnicode) — echtes Tagging wird **nicht** synthetisiert, **keine Konformitätsgarantie** |
+| `pdf_sign` | PDF mit **P12/PFX-Zertifikat** signieren (`adbe.pkcs7.detached`, SHA-256, CMS mit signierten Attributen, Kette eingebettet; **kein** Zeitstempel/PAdES-B-T, **kein** LTV, ohne signingCertificateV2; bereits signierte PDFs werden abgelehnt) |
 | `images_to_pdf` | PNG/JPG-Bilder zu einer PDF (`imagePaths` / `imagesBase64`) |
 | `design_catalog` | Designer-Bausteine auflisten: Themes, Schriften, Layouts, Vorlagen (read-only) |
 | `design_create` | Pagebound-Design (`*.pbdesign.json`) aus Vorlage erzeugen — Titel/Theme/Layout überschreibbar |

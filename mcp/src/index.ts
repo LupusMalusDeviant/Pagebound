@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+﻿#!/usr/bin/env node
 // =============================================================================
 // pagebound-pdf-mcp-server — Pagebound's PDF operations as an MCP server.
 //
@@ -27,6 +27,8 @@ import { z } from "zod";
 import * as pdf from "./pdf.js";
 import * as design from "./design.js";
 import * as pdfa from "./pdfa.js";
+import * as pdfua from "./pdfua.js";
+import * as sign from "./sign.js";
 import { encryptPdf } from "./encrypt.js";
 
 const CHARACTER_LIMIT = 25_000;
@@ -429,20 +431,72 @@ Eingabe: 'path'/'dataBase64', 'fields'. Ausgabe: 'outputPath' oder 'dataBase64'.
 
   server.registerTool("pdf_to_pdfa", {
     title: "PDF → PDF/A (Best Effort)",
-    description: `Konvertiert eine PDF Richtung PDF/A-2b — BEST EFFORT, KEINE Konformitätsgarantie. Setzt XMP-Metadaten (pdfaid:part=2, conformance=B), bettet einen sRGB-OutputIntent (GTS_PDFA1, ICC-Profil) ein, entfernt /OpenAction, Dokument-JavaScript und Additional Actions, flattet optional AcroForm-Felder und setzt eine Trailer-ID. Nicht eingebettete Schriften werden NICHT repariert, sondern in 'warnings' gemeldet. Ergebnis für Archivzwecke extern prüfen (z. B. veraPDF).
-Eingabe: 'path'/'dataBase64', optional 'flattenForm' (Default: true). Ausgabe: 'outputPath' oder 'dataBase64'. Returns: { warnings, ... }.`,
+    description: `Konvertiert eine PDF Richtung PDF/A-2b — BEST EFFORT, KEINE Konformitätsgarantie. Setzt XMP-Metadaten (pdfaid:part=2, conformance=B), bettet einen sRGB-OutputIntent (GTS_PDFA1, ICC-Profil) ein, entfernt /OpenAction, Dokument-JavaScript und Additional Actions, flattet optional AcroForm-Felder und setzt eine Trailer-ID. Nicht eingebettete Standard-14-Fonts (Helvetica/Times/Courier) werden mit 'embedFonts' (Default: true) durch metrisch kompatible, eingebettete Liberation-Fonts (SIL OFL 1.1) ersetzt; andere nicht eingebettete Schriften (inkl. Symbol/ZapfDingbats) werden nur in 'warnings' gemeldet. Ergebnis für Archivzwecke extern prüfen (z. B. veraPDF).
+Eingabe: 'path'/'dataBase64', optional 'flattenForm' (Default: true), 'embedFonts' (Default: true). Ausgabe: 'outputPath' oder 'dataBase64'. Returns: { warnings, ... }.`,
     inputSchema: {
       ...srcIn,
       flattenForm: z.boolean().optional().describe("AcroForm-Felder vor der Konvertierung einbrennen (Default: true)."),
+      embedFonts: z.boolean().optional().describe("Nicht eingebettete Standard-14-Fonts (Helvetica/Times/Courier) durch eingebettete Liberation-Fonts ersetzen (metrisch kompatibel, SIL OFL 1.1; Default: true). Symbol/ZapfDingbats werden nie ersetzt."),
       ...outOpt,
     },
     annotations: writeAnn,
-  }, guard(async (a: { path?: string; dataBase64?: string; flattenForm?: boolean; outputPath?: string }) => {
-    const r = await pdfa.toPdfA(await loadPdf(a), a.flattenForm ?? true);
+  }, guard(async (a: { path?: string; dataBase64?: string; flattenForm?: boolean; embedFonts?: boolean; outputPath?: string }) => {
+    const r = await pdfa.toPdfA(await loadPdf(a), a.flattenForm ?? true, a.embedFonts ?? true);
     const summary = r.warnings.length
       ? `PDF/A-2b (Best Effort) erzeugt — ${r.warnings.length} Hinweis(e):\n- ${r.warnings.join("\n- ")}`
       : "PDF/A-2b (Best Effort) erzeugt — keine Hinweise. Konformität extern prüfen (z. B. veraPDF).";
     return ok({ warnings: r.warnings, ...(await emitPdf(r.bytes, a.outputPath)) }, summary);
+  }));
+
+  server.registerTool("pdf_ua_prepare", {
+    title: "PDF/UA vorbereiten (Kennzeichnung + Bericht)",
+    description: `Bereitet eine PDF Richtung PDF/UA-1 vor — NUR Kennzeichnung + ehrlicher Prüfbericht, KEINE PDF/UA-Konformitätsgarantie. Setzt /MarkInfo (Marked true), Catalog /Lang, /ViewerPreferences /DisplayDocTitle und XMP pdfuaid:part=1. Der Bericht meldet (ohne zu reparieren): fehlenden /StructTreeRoot ("Dokument ist nicht getaggt" — echtes Tagging liegt AUSSERHALB des Scopes und kann nicht synthetisiert werden), fehlenden Dokumenttitel, Bild-XObjects ohne Alternativtexte (/Alt) und Schriften ohne ToUnicode-Mapping. Echte Barrierefreiheit erfordert getaggte Quelldokumente.
+Eingabe: 'path'/'dataBase64', optional 'lang' (BCP-47, Default: "de-DE"). Ausgabe: 'outputPath' oder 'dataBase64'. Returns: { report, ... }.`,
+    inputSchema: {
+      ...srcIn,
+      lang: z.string().optional().describe('Dokumentsprache als BCP-47-Code für Catalog /Lang (z. B. "de-DE", "en-US"; Default: "de-DE").'),
+      ...outOpt,
+    },
+    annotations: writeAnn,
+  }, guard(async (a: { path?: string; dataBase64?: string; lang?: string; outputPath?: string }) => {
+    const r = await pdfua.preparePdfUa(await loadPdf(a), { lang: a.lang });
+    const summary = `PDF/UA-Vorbereitung abgeschlossen — ${r.report.length} Punkt(e):\n- ${r.report.join("\n- ")}`;
+    return ok({ report: r.report, ...(await emitPdf(r.bytes, a.outputPath)) }, summary);
+  }));
+
+  server.registerTool("pdf_sign", {
+    title: "PDF signieren (Zertifikat, P12/PFX)",
+    description: `Signiert eine PDF mit einem P12/PFX-Zertifikat: klassische PDF-32000-Signatur 'adbe.pkcs7.detached' mit SHA-256 und CMS/PKCS#7 inkl. signierter Attribute (contentType, messageDigest, signingTime), unsichtbares Signaturfeld auf Seite 1, Zertifikatskette eingebettet — in Adobe/Foxit prüfbar.
+EHRLICHE GRENZEN: kein PAdES-B-T (kein Zeitstempel-Server — offline-first), kein LTV, kein signingCertificateV2-Attribut (von node-forge nicht unterstützt). PDFs mit vorhandener Signatur werden abgelehnt (kein inkrementelles Update in v1).
+Eingabe: 'path'/'dataBase64' + Zertifikat als 'p12Path' (lokal) oder 'p12Base64' (remote) + 'password'. Optional 'reason'/'location'/'contactInfo'.
+Ausgabe: 'outputPath' oder 'dataBase64'. Returns: { signerSubject, warnings, ... }.`,
+    inputSchema: {
+      ...srcIn,
+      p12Path: z.string().optional().describe("Lokaler Pfad zur P12/PFX-Zertifikatsdatei (stdio-Modus)."),
+      p12Base64: z.string().optional().describe("P12/PFX-Zertifikat als base64 (remote/HTTP-Modus)."),
+      password: z.string().describe("Passwort der P12/PFX-Datei."),
+      reason: z.string().optional().describe("Grund der Signatur (/Reason, optional)."),
+      location: z.string().optional().describe("Ort der Signatur (/Location, optional)."),
+      contactInfo: z.string().optional().describe("Kontaktinfo (/ContactInfo, optional)."),
+      ...outOpt,
+    },
+    annotations: writeAnn,
+  }, guard(async (a: { path?: string; dataBase64?: string; p12Path?: string; p12Base64?: string; password: string; reason?: string; location?: string; contactInfo?: string; outputPath?: string }) => {
+    if (a.p12Path && a.p12Base64) throw new pdf.ToolError("Bitte entweder 'p12Path' ODER 'p12Base64' angeben, nicht beide.");
+    let p12Bytes: Uint8Array;
+    if (a.p12Base64) p12Bytes = enforceSize(b64ToBytes(a.p12Base64), "P12/PFX");
+    else if (a.p12Path) {
+      try { p12Bytes = enforceSize(new Uint8Array(await readFile(a.p12Path)), "P12/PFX"); }
+      catch (e) { throw new pdf.ToolError(`Zertifikat nicht lesbar: '${a.p12Path}' (${e instanceof Error ? e.message : String(e)}).`); }
+    } else throw new pdf.ToolError("Zertifikat fehlt: 'p12Path' (lokal) oder 'p12Base64' (remote) angeben.");
+
+    const r = await sign.signPdf(await loadPdf(a), p12Bytes, a.password, {
+      reason: a.reason, location: a.location, contactInfo: a.contactInfo,
+    });
+    const summary = r.warnings.length
+      ? `Signiert als '${r.signerSubject}' — ${r.warnings.length} Hinweis(e):\n- ${r.warnings.join("\n- ")}`
+      : `Signiert als '${r.signerSubject}' (adbe.pkcs7.detached, SHA-256).`;
+    return ok({ signerSubject: r.signerSubject, warnings: r.warnings, ...(await emitPdf(r.bytes, a.outputPath)) }, summary);
   }));
 
   // --- Designer-Tools (WYSIWYG-Designs der PWA, *.pbdesign.json) ---------------
@@ -533,7 +587,7 @@ Eingabe: 'path' oder 'json'. Ausgabe: 'outputPath' (geschrieben) ODER 'text' (HT
 }
 
 function buildServer(): McpServer {
-  const server = new McpServer({ name: "pagebound-pdf-mcp-server", version: "1.4.0" });
+  const server = new McpServer({ name: "pagebound-pdf-mcp-server", version: "1.5.0" });
   registerTools(server);
   return server;
 }

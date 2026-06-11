@@ -89,6 +89,8 @@ src/Pagebound.Web/wwwroot/js/wysiwyg-editor.js
 src/Pagebound.Web/wwwroot/js/wysiwyg-editor.js.map
 src/Pagebound.Web/wwwroot/js/designs-bridge.js
 src/Pagebound.Web/wwwroot/js/designs-bridge.js.map
+src/Pagebound.Web/wwwroot/js/sign-bridge.js
+src/Pagebound.Web/wwwroot/js/sign-bridge.js.map
 src/Pagebound.Web/wwwroot/js/pdf.worker.min.mjs
 
 # --- Playwright ------------------------------------------------------------

@@ -162,6 +162,25 @@ export async function compressDataUrl(dataUrl: string, maxDim = 2000, quality = 
   }
 }
 
+/** Schneidet ein Bild zu (Anteile 0..0.45 je Kante) und liefert die neue Data-URL. */
+export async function cropDataUrl(dataUrl: string, left: number, top: number, right: number, bottom: number): Promise<string> {
+  const img = new Image();
+  await new Promise<void>((res, rej) => { img.onload = () => res(); img.onerror = () => rej(new Error("img")); img.src = dataUrl; });
+  const clampPct = (v: number) => Math.min(0.45, Math.max(0, v || 0));
+  const l = clampPct(left), t = clampPct(top), r = clampPct(right), b = clampPct(bottom);
+  const sx = Math.round(img.naturalWidth * l);
+  const sy = Math.round(img.naturalHeight * t);
+  const sw = Math.max(1, Math.round(img.naturalWidth * (1 - l - r)));
+  const sh = Math.max(1, Math.round(img.naturalHeight * (1 - t - b)));
+  const canvas = document.createElement("canvas");
+  canvas.width = sw;
+  canvas.height = sh;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return dataUrl;
+  ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+  return dataUrl.startsWith("data:image/png") ? canvas.toDataURL("image/png") : canvas.toDataURL("image/jpeg", 0.9);
+}
+
 // --- Tastatur-Shortcuts + Overlay-Interaktionen (Pointer-basiert = Touch-fähig) --
 
 let editorRef: DotNetRef | null = null;
@@ -242,10 +261,55 @@ function wireOverlayInteractions(): void {
   });
 }
 
+// Touch-Fallback fürs Block-Umsortieren: HTML5-Drag&Drop feuert auf Touch nicht,
+// daher zieht ein Touch-Pointer am Grip-Handle hier per Pointer Events. Während
+// der Geste markiert elementFromPoint den Ziel-Block (pb-drop-target), am Ende
+// meldet ein DotNet-Callback Quelle/Ziel. Maus bleibt beim nativen HTML5-DnD.
+function wireTouchBlockReorder(): void {
+  if ((document as any).__pbTouchReorderWired) return;
+  (document as any).__pbTouchReorderWired = true;
+
+  document.addEventListener("pointerdown", (e: PointerEvent) => {
+    if (!editorRef || e.pointerType !== "touch") return;
+    const handle = (e.target as HTMLElement | null)?.closest?.(".pb-drag-handle") as HTMLElement | null;
+    if (!handle) return;
+    const source = handle.closest(".pb-block") as HTMLElement | null;
+    if (!source?.dataset.blk) return;
+    e.preventDefault();
+    let targetBlock: HTMLElement | null = null;
+    let targetPage: HTMLElement | null = null;
+    try { handle.setPointerCapture(e.pointerId); } catch { /* synthetische Events */ }
+
+    const clearMark = () => document.querySelectorAll(".pb-block.pb-drop-target").forEach((el) => el.classList.remove("pb-drop-target"));
+    const onMove = (ev: PointerEvent) => {
+      const under = document.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement | null;
+      const block = under?.closest?.(".pb-block") as HTMLElement | null;
+      targetPage = (under?.closest?.(".pb-page") as HTMLElement | null) ?? targetPage;
+      clearMark();
+      targetBlock = block && block !== source ? block : null;
+      if (targetBlock) targetBlock.classList.add("pb-drop-target");
+    };
+    const onUp = () => {
+      handle.removeEventListener("pointermove", onMove);
+      handle.removeEventListener("pointerup", onUp);
+      handle.removeEventListener("pointercancel", onUp);
+      clearMark();
+      const pageIdx = targetPage?.id?.startsWith("pb-page-") ? parseInt(targetPage.id.slice("pb-page-".length), 10) : -1;
+      if (targetBlock?.dataset.blk || pageIdx >= 0) {
+        void editorRef?.invokeMethodAsync("OnBlockTouchDrop", source.dataset.blk, targetBlock?.dataset.blk ?? null, pageIdx);
+      }
+    };
+    handle.addEventListener("pointermove", onMove);
+    handle.addEventListener("pointerup", onUp);
+    handle.addEventListener("pointercancel", onUp);
+  });
+}
+
 export function registerFileDrop(dotnetRef: DotNetRef): void {
   editorRef = dotnetRef;
   wireShortcuts();
   wireOverlayInteractions();
+  wireTouchBlockReorder();
   const stage = document.querySelector(".pb-doc-stage") as HTMLElement | null;
   if (!stage || (stage as any).__pbDropWired) return;
   (stage as any).__pbDropWired = true;

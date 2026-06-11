@@ -13,9 +13,11 @@
 import {
   PDFDocument,
   PDFArray,
+  PDFBool,
   PDFDict,
   PDFHexString,
   PDFName,
+  PDFNumber,
   PDFString,
   PDFRef,
   PDFTextField,
@@ -29,6 +31,7 @@ import {
   BlendMode,
   LineCapStyle
 } from "pdf-lib";
+import fontkit from "@pdf-lib/fontkit";
 import * as pdfjsLib from "pdfjs-dist";
 
 // Eigene Worker-Konfig — diese Bridge ist ein separater IIFE-Bundle, der
@@ -715,8 +718,13 @@ export async function getMetadata(pdfBytes: Uint8Array): Promise<DocMeta> {
 // EHRLICHER SCOPE: bringt die PDF per pdf-lib in die NÄHE von PDF/A-2b, ist
 // aber KEINE Konformitätsgarantie. Schritte: XMP-Metadaten (pdfaid 2/B),
 // sRGB-OutputIntent (GTS_PDFA1), /OpenAction + /Names/JavaScript + /AA
-// entfernen, AcroForm optional flatten, Trailer-ID setzen. Nicht eingebettete
-// Schriften werden NICHT repariert, nur als warnings gemeldet.
+// entfernen, AcroForm optional flatten, Trailer-ID setzen.
+// Font-Härtung (embedFonts, Default true): nicht eingebettete Standard-14-
+// Fonts der Familien Helvetica/Times/Courier werden durch metrisch kompatible
+// Liberation-Fonts (SIL OFL 1.1) ersetzt; die TTFs werden zur Laufzeit per
+// fetch aus wwwroot/fonts/liberation/ geladen (bewusst NICHT ins JS-Bundle
+// eingebettet — 12 TTFs ≈ 4,3 MB). Andere nicht eingebettete Schriften werden
+// weiterhin NICHT repariert, nur als warnings gemeldet.
 // Bewusste Code-Duplikation mit mcp/src/pdfa.ts (gleiches Muster wie design.ts).
 // C#-Seite: Pagebound.Infrastructure.Pdf.JsPdfArchiveService.
 // ============================================================================
@@ -840,7 +848,178 @@ function collectFontWarnings(doc: PDFDocument): string[] {
   );
 }
 
-export async function convertToPdfA(pdfBytes: Uint8Array, flattenForm: boolean): Promise<PdfAResultDto> {
+// --- Standard-14 → Liberation (metrisch kompatible Ersatzschriften) ----------
+// Quelle der TTFs: https://github.com/liberationfonts/liberation-fonts
+// Release 2.1.5, Lizenz: SIL OFL 1.1 (wwwroot/fonts/liberation/LICENSE-OFL.txt).
+// Liberation Sans/Serif/Mono sind metrisch kompatibel zu Arial/Helvetica,
+// Times New Roman/Times und Courier (New). Symbol/ZapfDingbats: kein Ersatz.
+const LIBERATION_MAP: Record<string, { file: string; label: string }> = {
+  "Helvetica": { file: "LiberationSans-Regular.ttf", label: "Liberation Sans" },
+  "Helvetica-Bold": { file: "LiberationSans-Bold.ttf", label: "Liberation Sans Bold" },
+  "Helvetica-Oblique": { file: "LiberationSans-Italic.ttf", label: "Liberation Sans Italic" },
+  "Helvetica-BoldOblique": { file: "LiberationSans-BoldItalic.ttf", label: "Liberation Sans Bold Italic" },
+  "Times-Roman": { file: "LiberationSerif-Regular.ttf", label: "Liberation Serif" },
+  "Times-Bold": { file: "LiberationSerif-Bold.ttf", label: "Liberation Serif Bold" },
+  "Times-Italic": { file: "LiberationSerif-Italic.ttf", label: "Liberation Serif Italic" },
+  "Times-BoldItalic": { file: "LiberationSerif-BoldItalic.ttf", label: "Liberation Serif Bold Italic" },
+  "Courier": { file: "LiberationMono-Regular.ttf", label: "Liberation Mono" },
+  "Courier-Bold": { file: "LiberationMono-Bold.ttf", label: "Liberation Mono Bold" },
+  "Courier-Oblique": { file: "LiberationMono-Italic.ttf", label: "Liberation Mono Italic" },
+  "Courier-BoldOblique": { file: "LiberationMono-BoldItalic.ttf", label: "Liberation Mono Bold Italic" },
+};
+
+// WinAnsiEncoding (CP1252): Codes 0x80–0x9F weichen von Unicode/Latin-1 ab.
+// Nicht belegte Codes zeigen laut PDF-Spec auf "bullet" (U+2022).
+const WINANSI_OVERRIDES: Record<number, number> = {
+  0x80: 0x20ac, 0x82: 0x201a, 0x83: 0x0192, 0x84: 0x201e, 0x85: 0x2026,
+  0x86: 0x2020, 0x87: 0x2021, 0x88: 0x02c6, 0x89: 0x2030, 0x8a: 0x0160,
+  0x8b: 0x2039, 0x8c: 0x0152, 0x8e: 0x017d, 0x91: 0x2018, 0x92: 0x2019,
+  0x93: 0x201c, 0x94: 0x201d, 0x95: 0x2022, 0x96: 0x2013, 0x97: 0x2014,
+  0x98: 0x02dc, 0x99: 0x2122, 0x9a: 0x0161, 0x9b: 0x203a, 0x9c: 0x0153,
+  0x9e: 0x017e, 0x9f: 0x0178,
+};
+
+const winAnsiToUnicode = (code: number): number => {
+  if (code === 0x7f) return 0x2022; // nicht belegt → bullet
+  if (code >= 0x80 && code <= 0x9f) return WINANSI_OVERRIDES[code] ?? 0x2022;
+  if (code === 0xa0) return 0x0020; // nbsp → Breite des Leerzeichens
+  if (code === 0xad) return 0x002d; // soft hyphen → Breite des Bindestrichs
+  return code;
+};
+
+/** Lädt eine Liberation-TTF per fetch aus wwwroot/fonts/liberation/ (Base-URI-relativ, kein CDN). */
+async function loadLiberationTtf(file: string): Promise<Uint8Array> {
+  const url = new URL(`fonts/liberation/${file}`, document.baseURI);
+  const res = await fetch(url.toString());
+  if (!res.ok) {
+    throw new Error(`Ersatzschrift '${file}' nicht ladbar (${res.status}) — fehlt wwwroot/fonts/liberation/?`);
+  }
+  return new Uint8Array(await res.arrayBuffer());
+}
+
+/** Encoding-Eintrag eines Font-Dicts: dürfen wir gefahrlos WinAnsi setzen? */
+function encodingAllowsWinAnsi(dict: PDFDict, ctx: PDFDocument["context"]): boolean {
+  const encRaw = dict.get(PDFName.of("Encoding"));
+  if (!encRaw) return true;
+  const enc = encRaw instanceof PDFRef ? ctx.lookup(encRaw) : encRaw;
+  if (enc instanceof PDFName) {
+    const n = enc.decodeText();
+    return n === "WinAnsiEncoding" || n === "StandardEncoding" || n === "PDFDocEncoding";
+  }
+  if (enc instanceof PDFDict) {
+    if (enc.has(PDFName.of("Differences"))) return false; // Custom-Mapping nicht überschreiben
+    const base = enc.lookupMaybe(PDFName.of("BaseEncoding"), PDFName)?.decodeText();
+    return base === undefined || base === "WinAnsiEncoding" || base === "StandardEncoding" || base === "PDFDocEncoding";
+  }
+  return false;
+}
+
+/**
+ * Bettet für nicht eingebettete Standard-14-Fonts der Familien Helvetica/Times/
+ * Courier metrisch kompatible Liberation-Schriften ein. Technik: pdf-lib
+ * embedFont(ttf, {subset:false}) erzeugt FontDescriptor + FontFile2; das
+ * BESTEHENDE Font-Dict wird in ein einfaches TrueType-Font-Dict mit
+ * WinAnsiEncoding + Widths-Array umgeschrieben (Referenzen in den Resources
+ * bleiben unverändert gültig). Die pdf-lib-eigenen Type0-Hilfsobjekte werden
+ * wieder aus dem Kontext entfernt. Liefert Hinweis-/Warnungstexte.
+ * Identische Engine wie mcp/src/pdfa.ts (bewusste Duplikation).
+ */
+async function embedStandard14Replacements(doc: PDFDocument): Promise<string[]> {
+  const notes: string[] = [];
+  const ctx = doc.context;
+  const fontType = PDFName.of("Font");
+
+  const descriptorHasFontFile = (fd: PDFDict | undefined): boolean =>
+    !!fd && (fd.has(PDFName.of("FontFile")) || fd.has(PDFName.of("FontFile2")) || fd.has(PDFName.of("FontFile3")));
+
+  // 1) Kandidaten sammeln: einfache Standard-14-Fonts ohne Font-Programm.
+  const candidates = new Map<string, PDFDict[]>(); // Std14-Name → Font-Dicts
+  for (const [, obj] of doc.context.enumerateIndirectObjects()) {
+    if (!(obj instanceof PDFDict)) continue;
+    if (obj.get(PDFName.of("Type")) !== fontType) continue;
+    const subtype = obj.lookupMaybe(PDFName.of("Subtype"), PDFName)?.decodeText();
+    if (subtype !== "Type1" && subtype !== "MMType1" && subtype !== "TrueType") continue;
+    const base = cleanFontName(obj.lookupMaybe(PDFName.of("BaseFont"), PDFName)?.decodeText() ?? "");
+    const replacement = LIBERATION_MAP[base];
+    if (!replacement) continue;
+    const fd = obj.lookupMaybe(PDFName.of("FontDescriptor"), PDFDict);
+    if (descriptorHasFontFile(fd)) continue; // bereits eingebettet
+    if (!encodingAllowsWinAnsi(obj, ctx)) {
+      notes.push(`Schrift "${base}" hat ein eigenes Encoding (Differences/MacRoman) — Ersatz-Einbettung übersprungen, Schrift bleibt nicht eingebettet.`);
+      continue;
+    }
+    const list = candidates.get(base) ?? [];
+    list.push(obj);
+    candidates.set(base, list);
+  }
+  if (candidates.size === 0) return notes;
+
+  doc.registerFontkit(fontkit);
+
+  // 2) Je Familie/Schnitt eine Liberation-TTF einbetten und Widths berechnen.
+  const embedded: {
+    std14: string; label: string; dicts: PDFDict[];
+    fontRef: PDFRef; widths: number[];
+  }[] = [];
+  for (const [std14, dicts] of candidates) {
+    const { file, label } = LIBERATION_MAP[std14];
+    const ttf = await loadLiberationTtf(file);
+    const font = await doc.embedFont(ttf, { subset: false });
+    const widths: number[] = [];
+    for (let code = 32; code <= 255; code++) {
+      let w = 0;
+      try { w = Math.round(font.widthOfTextAtSize(String.fromCodePoint(winAnsiToUnicode(code)), 1000)); }
+      catch { w = 0; }
+      widths.push(w);
+    }
+    embedded.push({ std14, label, dicts, fontRef: font.ref, widths });
+  }
+
+  // 3) flush() materialisiert die Type0-Objekte (Descriptor + FontFile2) im Kontext.
+  await doc.flush();
+
+  for (const item of embedded) {
+    const t0 = ctx.lookup(item.fontRef);
+    if (!(t0 instanceof PDFDict)) continue; // defensiv — sollte nie passieren
+    const baseFont = t0.get(PDFName.of("BaseFont"));
+    const descendants = t0.lookupMaybe(PDFName.of("DescendantFonts"), PDFArray);
+    const cidRef = descendants?.get(0);
+    const cidDict = cidRef instanceof PDFRef ? ctx.lookup(cidRef) : undefined;
+    if (!(cidDict instanceof PDFDict) || !(baseFont instanceof PDFName)) continue;
+    const fdRef = cidDict.get(PDFName.of("FontDescriptor"));
+    const fdDict = fdRef instanceof PDFRef ? ctx.lookup(fdRef) : undefined;
+    if (!(fdRef instanceof PDFRef) || !(fdDict instanceof PDFDict)) continue;
+
+    // Flags für einfache TrueType-Fonts mit WinAnsiEncoding: nonsymbolic
+    // (Bit 6) statt symbolic (Bit 3) — pdf-lib setzt für CID-Fonts symbolic.
+    const flags = fdDict.lookupMaybe(PDFName.of("Flags"), PDFNumber)?.asNumber() ?? 32;
+    fdDict.set(PDFName.of("Flags"), PDFNumber.of((flags & ~4) | 32));
+
+    // pdf-lib-Hilfsobjekte (Type0-Dict, CIDFont-Dict, ToUnicode-CMap) wieder
+    // entfernen — Descriptor + FontFile2 bleiben referenziert.
+    const toUniRef = t0.get(PDFName.of("ToUnicode"));
+    ctx.delete(item.fontRef);
+    if (cidRef instanceof PDFRef) ctx.delete(cidRef);
+    if (toUniRef instanceof PDFRef) ctx.delete(toUniRef);
+
+    const widthsRef = ctx.register(ctx.obj(item.widths));
+
+    // 4) Bestehende Font-Dicts in place auf das eingebettete TrueType umbiegen.
+    for (const dict of item.dicts) {
+      dict.set(PDFName.of("Subtype"), PDFName.of("TrueType"));
+      dict.set(PDFName.of("BaseFont"), baseFont);
+      dict.set(PDFName.of("Encoding"), PDFName.of("WinAnsiEncoding"));
+      dict.set(PDFName.of("FirstChar"), PDFNumber.of(32));
+      dict.set(PDFName.of("LastChar"), PDFNumber.of(255));
+      dict.set(PDFName.of("Widths"), widthsRef);
+      dict.set(PDFName.of("FontDescriptor"), fdRef);
+    }
+    notes.push(`Schrift "${item.std14}" wurde durch "${item.label}" ersetzt und eingebettet (metrisch kompatibel, SIL OFL 1.1).`);
+  }
+  return notes;
+}
+
+export async function convertToPdfA(pdfBytes: Uint8Array, flattenForm: boolean, embedFonts: boolean = true): Promise<PdfAResultDto> {
   // Bewusst OHNE ignoreEncryption: PDF/A verbietet Verschlüsselung; eine
   // verschlüsselte Eingabe soll mit klarer Fehlermeldung scheitern.
   const doc = await PDFDocument.load(pdfBytes);
@@ -925,13 +1104,177 @@ export async function convertToPdfA(pdfBytes: Uint8Array, flattenForm: boolean):
     ctx.trailerInfo.ID = ctx.obj([id, id]);
   }
 
-  // --- 6) Font-Embedding-Prüfung (nur melden, nichts reparieren) -------------
+  // --- 6) Font-Härtung: Standard-14 → Liberation einbetten (optional) --------
+  if (embedFonts) {
+    warnings.push(...await embedStandard14Replacements(doc));
+  }
+
+  // --- 7) Font-Embedding-Prüfung (nur melden, nichts reparieren) -------------
   warnings.push(...collectFontWarnings(doc));
 
   // Klassische xref-Struktur für maximale Validator-Kompatibilität; pdf-lib
   // verändert das Info-Dict beim Save nicht → bleibt konsistent zum XMP-Paket.
   const bytes = await doc.save({ useObjectStreams: false });
   return { dataBase64: bytesToBase64(bytes), warnings };
+}
+
+// ============================================================================
+// PDF/UA-Vorbereitung + Prüfbericht (Best Effort) — Entsprechung zum MCP-Tool
+// pdf_ua_prepare (mcp/src/pdfua.ts, bewusste Duplikation).
+// ----------------------------------------------------------------------------
+// EHRLICHER SCOPE: setzt die maschinenlesbare KENNZEICHNUNG, die PDF/UA-1
+// verlangt (/MarkInfo Marked, /Lang, /DisplayDocTitle, XMP pdfuaid:part=1)
+// und liefert einen ehrlichen Bericht — KEINE Konformitätsgarantie. Echtes
+// Tagging (Strukturbaum, Lesereihenfolge, Alternativtexte) kann NICHT
+// synthetisiert werden und wird nur gemeldet.
+// C#-Seite: Pagebound.Infrastructure.Pdf.JsPdfArchiveService.PreparePdfUaAsync.
+// ============================================================================
+
+const UA_LANG_RE = /^[a-zA-Z]{2,3}(-[a-zA-Z0-9]{2,8})*$/;
+
+function buildUaXmp(meta: {
+  title?: string; author?: string; subject?: string;
+  createDate: string; modifyDate: string;
+}): string {
+  const lines: string[] = [];
+  lines.push(`<pdfuaid:part>1</pdfuaid:part>`);
+  if (meta.title) {
+    lines.push(`<dc:title><rdf:Alt><rdf:li xml:lang="x-default">${xmlEscape(meta.title)}</rdf:li></rdf:Alt></dc:title>`);
+  }
+  if (meta.author) {
+    lines.push(`<dc:creator><rdf:Seq><rdf:li>${xmlEscape(meta.author)}</rdf:li></rdf:Seq></dc:creator>`);
+  }
+  if (meta.subject) {
+    lines.push(`<dc:description><rdf:Alt><rdf:li xml:lang="x-default">${xmlEscape(meta.subject)}</rdf:li></rdf:Alt></dc:description>`);
+  }
+  lines.push(`<xmp:CreateDate>${meta.createDate}</xmp:CreateDate>`);
+  lines.push(`<xmp:ModifyDate>${meta.modifyDate}</xmp:ModifyDate>`);
+  lines.push(`<xmp:MetadataDate>${meta.modifyDate}</xmp:MetadataDate>`);
+
+  const padding = (" ".repeat(99) + "\n").repeat(20);
+  return (
+    `<?xpacket begin="﻿" id="W5M0MpCehiHzreSzNTczkc9d"?>\n` +
+    `<x:xmpmeta xmlns:x="adobe:ns:meta/">\n` +
+    ` <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">\n` +
+    `  <rdf:Description rdf:about=""\n` +
+    `    xmlns:pdfuaid="http://www.aiim.org/pdfua/ns/id/"\n` +
+    `    xmlns:dc="http://purl.org/dc/elements/1.1/"\n` +
+    `    xmlns:xmp="http://ns.adobe.com/xap/1.0/">\n` +
+    lines.map((l) => `   ${l}`).join("\n") + "\n" +
+    `  </rdf:Description>\n` +
+    ` </rdf:RDF>\n` +
+    `</x:xmpmeta>\n` +
+    padding +
+    `<?xpacket end="w"?>`
+  );
+}
+
+/** Zählt Bild-XObjects (unique Referenzen) über die /Resources aller Seiten. */
+function countImageXObjects(doc: PDFDocument): number {
+  const seen = new Set<string>();
+  for (const page of doc.getPages()) {
+    const res = page.node.Resources();
+    const xobjects = res?.lookupMaybe(PDFName.of("XObject"), PDFDict);
+    if (!xobjects) continue;
+    for (const [name] of xobjects.entries()) {
+      const raw = xobjects.get(name);
+      const obj = xobjects.lookupMaybe(name, PDFDict);
+      const subtype = obj?.lookupMaybe(PDFName.of("Subtype"), PDFName)?.decodeText();
+      if (subtype === "Image") seen.add(String(raw ?? name));
+    }
+  }
+  return seen.size;
+}
+
+/** Zählt Strukturelemente mit /Alt-Eintrag (Alternativtexte) im ganzen Dokument. */
+function countStructElemsWithAlt(doc: PDFDocument): number {
+  let count = 0;
+  for (const [, obj] of doc.context.enumerateIndirectObjects()) {
+    if (obj instanceof PDFDict && obj.has(PDFName.of("S")) && obj.has(PDFName.of("Alt"))) count++;
+  }
+  return count;
+}
+
+/**
+ * Zählt Font-Dicts ohne /ToUnicode. Descendant-CIDFonts (CIDFontType0/2)
+ * werden übersprungen — das ToUnicode-Mapping trägt ihr Type0-Parent.
+ */
+function countFontsWithoutToUnicode(doc: PDFDocument): number {
+  const fontType = PDFName.of("Font");
+  let count = 0;
+  for (const [, obj] of doc.context.enumerateIndirectObjects()) {
+    if (!(obj instanceof PDFDict) || obj.get(PDFName.of("Type")) !== fontType) continue;
+    const subtype = obj.lookupMaybe(PDFName.of("Subtype"), PDFName)?.decodeText();
+    if (subtype === "CIDFontType0" || subtype === "CIDFontType2") continue;
+    if (!obj.has(PDFName.of("ToUnicode"))) count++;
+  }
+  return count;
+}
+
+/**
+ * Bereitet eine PDF Richtung PDF/UA-1 vor (Kennzeichnung) und erstellt einen
+ * ehrlichen Prüfbericht (warnings = Berichtszeilen). KEINE Konformitäts-
+ * garantie — echtes Tagging liegt außerhalb des Scopes.
+ */
+export async function preparePdfUa(pdfBytes: Uint8Array, lang: string): Promise<PdfAResultDto> {
+  const langCode = (lang ?? "de-DE").trim() || "de-DE";
+  if (!UA_LANG_RE.test(langCode)) {
+    throw new Error(`Ungültiger Sprachcode '${langCode}' — erwartet wird BCP-47 (z. B. "de-DE", "en-US").`);
+  }
+
+  // Bewusst OHNE ignoreEncryption — verschlüsselte Eingaben sollen klar scheitern.
+  const doc = await PDFDocument.load(pdfBytes);
+  const report: string[] = [];
+  const catalog = doc.catalog;
+  const ctx = doc.context;
+
+  // --- 1) Kennzeichnung setzen ------------------------------------------------
+  const markInfo = catalog.lookupMaybe(PDFName.of("MarkInfo"), PDFDict) ?? ctx.obj({});
+  markInfo.set(PDFName.of("Marked"), PDFBool.True);
+  catalog.set(PDFName.of("MarkInfo"), markInfo);
+
+  catalog.set(PDFName.of("Lang"), PDFString.of(langCode));
+
+  const viewerPrefs = catalog.lookupMaybe(PDFName.of("ViewerPreferences"), PDFDict) ?? ctx.obj({});
+  viewerPrefs.set(PDFName.of("DisplayDocTitle"), PDFBool.True);
+  catalog.set(PDFName.of("ViewerPreferences"), viewerPrefs);
+
+  const nowIso = new Date().toISOString();
+  const xmp = buildUaXmp({
+    title: doc.getTitle() || undefined,
+    author: doc.getAuthor() || undefined,
+    subject: doc.getSubject() || undefined,
+    createDate: doc.getCreationDate()?.toISOString() ?? nowIso,
+    modifyDate: doc.getModificationDate()?.toISOString() ?? nowIso,
+  });
+  const xmpStream = ctx.stream(new TextEncoder().encode(xmp), { Type: "Metadata", Subtype: "XML" });
+  catalog.set(PDFName.of("Metadata"), ctx.register(xmpStream));
+
+  report.push(`Kennzeichnung gesetzt: /MarkInfo (Marked), /Lang "${langCode}", /DisplayDocTitle, XMP pdfuaid:part=1.`);
+
+  // --- 2) Prüfbericht (nur melden, nichts reparieren) --------------------------
+  const tagged = catalog.has(PDFName.of("StructTreeRoot"));
+  if (!tagged) {
+    report.push("Dokument ist nicht getaggt (kein /StructTreeRoot) — echtes Tagging (Strukturbaum, Lesereihenfolge, Rollen) kann nicht synthetisiert werden; ohne Tags ist PDF/UA-Konformität nicht erreichbar.");
+  }
+
+  if (!doc.getTitle()) {
+    report.push("Kein Dokumenttitel gesetzt — PDF/UA verlangt einen Titel (dc:title), der per /DisplayDocTitle angezeigt wird. Vorher im Metadaten-Werkzeug setzen.");
+  }
+
+  const imageCount = countImageXObjects(doc);
+  if (imageCount > 0) {
+    const altCount = tagged ? countStructElemsWithAlt(doc) : 0;
+    report.push(`${imageCount} Bild-XObject(s) gefunden, ${altCount} Strukturelement(e) mit Alternativtext (/Alt) — Bilder ohne /Alt sind für Screenreader unzugänglich.`);
+  }
+
+  const fontsNoUni = countFontsWithoutToUnicode(doc);
+  if (fontsNoUni > 0) {
+    report.push(`${fontsNoUni} Schrift(en) ohne /ToUnicode-Mapping — Textextraktion/Vorlesen kann unzuverlässig sein (Standard-Encodings mildern das teilweise).`);
+  }
+
+  const bytes = await doc.save({ useObjectStreams: false });
+  return { dataBase64: bytesToBase64(bytes), warnings: report };
 }
 
 export async function stampPdf(pdfBytes: Uint8Array, opts: StampOptions): Promise<Uint8Array> {

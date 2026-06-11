@@ -111,6 +111,35 @@
             // Resize-Drag einmalig verdrahten; Sync-Scroll bleibt aus, bis der
             // Nutzer den Schalter umlegt.
             await JS.InvokeVoidAsync("pageboundSplit.initResize", _container, _gutter, _leftPane);
+            if (_compareMode) _ = AutoCompareWhenBothLoadedAsync();
+        }
+    }
+
+    // Im Vergleichsmodus (?compare=1) startet der Diff automatisch, sobald beide
+    // Panes ein PDF geladen haben — einmalig; danach übernimmt der Button.
+    // ReaderPane hat kein Load-Event, daher ein leichtgewichtiger Poll.
+    private async Task AutoCompareWhenBothLoadedAsync()
+    {
+        try
+        {
+            for (var i = 0; i < 600 && !_disposed; i++) // max. ~5 Minuten
+            {
+                await Task.Delay(500);
+                if (_diff is not null || _diffError is not null) return; // manuell zuvorgekommen
+                if (_leftReader?.LoadedPdfBytes is not null && _rightReader?.LoadedPdfBytes is not null)
+                {
+                    await InvokeAsync(async () =>
+                    {
+                        await CompareAsync();
+                        StateHasChanged();
+                    });
+                    return;
+                }
+            }
+        }
+        catch
+        {
+            // Seite verlassen während des Polls — ignorieren.
         }
     }
 
@@ -154,8 +183,11 @@
         _diffError = null;
     }
 
+    private bool _disposed;
+
     public async ValueTask DisposeAsync()
     {
+        _disposed = true;
         // Beim Verlassen der Seite die globalen Listener der Bridge abräumen.
         try
         {

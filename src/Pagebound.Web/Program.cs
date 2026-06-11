@@ -59,6 +59,7 @@ builder.Services.AddScoped<IEditorDraftService, EditorDraftService>();
 builder.Services.AddScoped<IDesignFolderService, BrowserDesignFolderService>();
 builder.Services.AddScoped<IBatchRuleStore, BatchRuleStore>();
 builder.Services.AddScoped<IPdfArchiveService, JsPdfArchiveService>();
+builder.Services.AddScoped<IPdfSignService, JsPdfSignService>();
 
 var host = builder.Build();
 

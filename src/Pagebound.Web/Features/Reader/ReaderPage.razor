@@ -1,7 +1,8 @@
-@page "/reader"
+﻿@page "/reader"
 @using Pagebound.Web.Features.PdfTools
 @inject ILocalizationService L
 @inject NavigationManager Nav
+@inject IJSRuntime JS
 @implements IDisposable
 
 @*
@@ -40,6 +41,15 @@
         @L.T("reader.tab.tools")
     </button>
 </div>
+
+@if (_pendingResult is not null)
+{
+    <div class="border-b border-pb-border bg-pb-surface px-4 sm:px-6 lg:px-8 py-2 flex flex-wrap items-center gap-2 text-xs" role="status">
+        <span class="min-w-0 truncate">@L.T("reader.tools.result", new Dictionary<string, object> { ["name"] = _pendingResultName ?? "PDF" })</span>
+        <button type="button" class="btn-side is-primary" @onclick="OpenPendingResult">@L.T("reader.tools.openResult")</button>
+        <button type="button" class="btn-side" @onclick="@(() => _pendingResult = null)">@L.T("reader.tools.dismissResult")</button>
+    </div>
+}
 
 <div id="reader-tabpanel-doc" role="tabpanel" aria-labelledby="reader-tab-doc"
      class="@(_toolsTabActive ? "hidden" : null)">
@@ -90,6 +100,45 @@
         _toolsTabActive = true;
     }
 
+    // Werkzeug-Ergebnisse (Downloads aus dem „Werkzeuge"-Tab) zur Übernahme in
+    // den Reader anbieten — beobachtet die zentrale Download-Bridge.
+    private byte[]? _pendingResult;
+    private string? _pendingResultName;
+    private DotNetObjectReference<ReaderPage>? _selfRef;
+
+    [JSInvokable]
+    public Task OnPdfDownloaded(string filename, string base64)
+    {
+        // Nur Ergebnisse aus dem Werkzeuge-Tab anbieten — Downloads aus dem
+        // Dokument-Tab (z. B. signiertes PDF speichern) nicht doppelt andienen.
+        if (_toolsTabActive)
+        {
+            _pendingResult = Convert.FromBase64String(base64);
+            _pendingResultName = filename;
+            StateHasChanged();
+        }
+        return Task.CompletedTask;
+    }
+
+    private async Task OpenPendingResult()
+    {
+        var bytes = _pendingResult;
+        var name = _pendingResultName ?? "ergebnis.pdf";
+        _pendingResult = null;
+        if (bytes is null || _pane is null) return;
+        ShowDocumentTab();
+        await _pane.OpenBytesAsync(bytes, name);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _selfRef = DotNetObjectReference.Create(this);
+            await JS.InvokeVoidAsync("pageboundShortcuts.registerDownloadObserver", _selfRef);
+        }
+    }
+
     protected override void OnInitialized()
     {
         Nav.LocationChanged += OnLocationChanged;
@@ -99,6 +148,15 @@
     public void Dispose()
     {
         Nav.LocationChanged -= OnLocationChanged;
+        try
+        {
+            _ = JS.InvokeVoidAsync("pageboundShortcuts.unregisterDownloadObserver");
+        }
+        catch
+        {
+            // Teardown während Navigation — ignorieren.
+        }
+        _selfRef?.Dispose();
     }
 
     private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs args)

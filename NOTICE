@@ -54,6 +54,21 @@ wwwroot/tessdata/ (eng.traineddata.gz, deu.traineddata.gz), distributed via the
 @tesseract.js-data packages, so OCR loads its models locally without a CDN.
 
 --------------------------------------------------------------------------------
+Liberation Fonts (Liberation Sans / Serif / Mono)
+--------------------------------------------------------------------------------
+Digitized data copyright (c) 2010 Google Corporation
+    with Reserved Font Arimo, Tinos and Cousine.
+Copyright (c) 2012 Red Hat, Inc.
+    with Reserved Font Name Liberation.
+Licensed under the SIL Open Font License, Version 1.1
+https://github.com/liberationfonts/liberation-fonts (release 2.1.5)
+Bundled self-hosted as TTF files under mcp/fonts/ and
+src/Pagebound.Web/wwwroot/fonts/liberation/ (full license text alongside as
+LICENSE-OFL.txt). Used to embed metrically compatible replacements for the
+non-embedded PDF standard-14 fonts (Helvetica/Times/Courier) during PDF/A
+conversion — loaded locally at runtime, no CDN requests.
+
+--------------------------------------------------------------------------------
 Markdig
 --------------------------------------------------------------------------------
 Copyright Alexandre Mutel

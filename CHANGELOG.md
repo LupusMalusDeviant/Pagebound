@@ -56,12 +56,20 @@ Liste fasst den aktuellen Funktionsumfang zusammen.
 - **Formular-Builder** (`/form-builder`): Felder (Text/Checkbox) per Klick auf gerenderten PDF-Seiten platzieren, per Pointer ziehen/skalieren (Maus/Touch/Stift), Namen editieren — Export als echtes AcroForm-PDF (ausfüllbar in jedem Reader); schließt die Roadmap-Lücke „visuelles Drag-Platzieren" (D1)
 - **PDF → PDF/A (Best Effort)**: XMP-Metadaten (pdfaid 2/B), sRGB-OutputIntent (eingebettetes CC0-ICC-Profil), Entfernen von OpenAction/JavaScript/AA, optionales Formular-Flatten, Trailer-ID; **nicht eingebettete Schriften werden als Warnung gemeldet, nicht repariert** — keine Konformitätsgarantie, extern prüfen (z. B. veraPDF). In den PDF-Werkzeugen und als MCP-Tool `pdf_to_pdfa` (22 Tools)
 
+- **PDF/A-Härtung**: Nicht eingebettete Standard-14-Schriften (Helvetica/Times/Courier) werden jetzt optional durch metrisch kompatible **Liberation-Fonts** ersetzt und eingebettet (SIL OFL 1.1, self-hosted, PWA lädt sie nur bei Bedarf) — die häufigste PDF/A-Warnung verschwindet damit; Symbol/ZapfDingbats und Sonder-Encodings bleiben ehrliche Warnungen
+- **PDF/UA (Kennzeichnung + Bericht)**: setzt MarkInfo/Lang/DisplayDocTitle + XMP `pdfuaid`, prüft und meldet Tagging-Status (StructTreeRoot), Titel, Alt-Texte und ToUnicode — explizit ohne Konformitätsgarantie, echtes Tagging bleibt außerhalb des Scopes. In den PDF-Werkzeugen und als MCP-Tool `pdf_ua_prepare`
+- **Zertifikatsbasierte PDF-Signatur (P12/PFX)**: klassische PDF-32000-Signatur (`adbe.pkcs7.detached`, SHA-256, CMS mit signierten Attributen) — in Adobe/Foxit prüfbar; Zertifikat und Passwort verlassen den Browser nie. In den PDF-Werkzeugen und als MCP-Tool `pdf_sign`. Ehrliche Grenzen: kein PAdES-B-T (kein Zeitstempel-Server — offline-first), kein LTV, ohne signingCertificateV2; bereits signierte PDFs werden abgelehnt
+- **Vergleichsmodus startet automatisch**, sobald in der Split-View beide PDFs geladen sind (`/split?compare=1`)
+- **Werkzeug-Ergebnisse zurück in den Reader**: Nach einer Aktion im „Werkzeuge"-Tab bietet ein Banner „Im Reader öffnen" an — das Ergebnis ersetzt das geöffnete Dokument ohne Datei-Dialog
+- **Touch-Umsortieren von Blöcken** im Designer (Pointer-Drag am Grip-Handle mit Ziel-Markierung; Maus nutzt weiter natives Drag & Drop)
+- **Bild-Zuschnitt** im Designer: vier Kanten-Regler mit Live-Vorschau (clip-path), „Anwenden" backt den Zuschnitt per Canvas ein (Undo-fähig)
+
 ### UI-Konsolidierung
 - **Split-View & Vergleich zusammengeführt**: `/compare` leitet auf die Split-View im Vergleichsmodus um (`/split?compare=1`); eine gemeinsame Diff-Engine/-Anzeige statt zweier Implementierungen, ein Navigationseintrag statt zwei
 - **PDF-Werkzeuge im Reader**: Tab-Leiste „Dokument | Werkzeuge" direkt im Reader-Fenster — das geöffnete PDF wird in die Werkzeuge übernommen (kein erneutes Laden); `/tools` bleibt als eigenständige Seite erhalten (gleiche Komponente)
 
 ### MCP-Server
-- Tokenloser MCP-Server für LLM-Agenten (stdio + Streamable HTTP), 21 Tools (inkl. `pdf_extract_tables`), gehostet unter `…/mcp` mit Größen-/Seiten-Limits
+- Tokenloser MCP-Server für LLM-Agenten (stdio + Streamable HTTP), 24 Tools (inkl. `pdf_sign`, `pdf_to_pdfa`, `pdf_ua_prepare`), gehostet unter `…/mcp` mit Größen-/Seiten-Limits
 - **Designer-Tools** (`design_catalog`, `design_create`, `design_validate`, `design_render_html`): Pagebound-Designs im PWA-kompatiblen Format (`*.pbdesign.json`) auflisten, aus Vorlagen erzeugen (Titel/Theme/Layout überschreibbar), validieren/normalisieren und als druckbares Standalone-HTML rendern
 
 ### Plattform

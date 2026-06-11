@@ -246,6 +246,25 @@
                         <span class="text-pb-fg-muted">@L.T("editor.props.borderPx")</span>
                     </div>
                     <label class="mb-2 flex items-center gap-2 text-xs"><input type="checkbox" @bind="_selected.ShadowEnabled" /> @L.T("editor.props.shadow")</label>
+
+                    @if (!string.IsNullOrEmpty(_selected.Src))
+                    {
+                        <div class="mb-2 rounded border border-pb-border p-2">
+                            <div class="mb-1 text-xs font-semibold text-pb-fg-muted">@L.T("editor.props.crop")</div>
+                            <label class="block text-xs">@L.T("editor.props.crop.left"): @_cropL%</label>
+                            <input type="range" min="0" max="45" class="mb-1 w-full" @bind="_cropL" @bind:event="oninput" />
+                            <label class="block text-xs">@L.T("editor.props.crop.right"): @_cropR%</label>
+                            <input type="range" min="0" max="45" class="mb-1 w-full" @bind="_cropR" @bind:event="oninput" />
+                            <label class="block text-xs">@L.T("editor.props.crop.top"): @_cropT%</label>
+                            <input type="range" min="0" max="45" class="mb-1 w-full" @bind="_cropT" @bind:event="oninput" />
+                            <label class="block text-xs">@L.T("editor.props.crop.bottom"): @_cropB%</label>
+                            <input type="range" min="0" max="45" class="mb-2 w-full" @bind="_cropB" @bind:event="oninput" />
+                            <div class="flex gap-1">
+                                <button class="btn-side flex-1 is-primary" disabled="@(_cropL + _cropT + _cropR + _cropB == 0)" @onclick="ApplyCrop">@L.T("editor.props.crop.apply")</button>
+                                <button class="btn-side" @onclick="@(() => { _cropL = _cropT = _cropR = _cropB = 0; })">@L.T("common.reset")</button>
+                            </div>
+                        </div>
+                    }
                 }
 
                 @if (_selected.Type is EditorBlockType.QrCode)
@@ -575,6 +594,7 @@
                     {
                         var blk = b;
                         <div class="pb-block @(_selected==blk ? "pb-selected" : "") @(_dropBlock == blk && _dragBlock is not null && _dragBlock != blk ? "pb-drop-target" : "")" @key="blk.Id"
+                             data-blk="@blk.Id"
                              style="@(string.IsNullOrEmpty(blk.Background) ? null : $"background:{blk.Background}")"
                              @onclick:stopPropagation="true" @onclick="@(() => SelectBlock(page, blk))"
                              @ondragenter="@(() => { if (_dragBlock is not null) _dropBlock = blk; })"
@@ -606,7 +626,7 @@
                                     <div class="pb-img-wrap align-@blk.Align">
                                         @if (!string.IsNullOrEmpty(blk.Src))
                                         {
-                                            <img class="pb-img" src="@blk.Src" alt="@blk.Alt" style="@ImageStyle(blk)" />
+                                            <img class="pb-img" src="@blk.Src" alt="@blk.Alt" style="@(ImageStyle(blk) + CropPreviewCss(blk))" />
                                         }
                                         else
                                         {
@@ -1507,7 +1527,13 @@
     }
 
     // --- Auswahl --------------------------------------------------------------
-    private void SelectBlock(EditorPage page, EditorBlock b) { _selected = b; _selectedPage = page; _selectedOverlay = null; }
+    private void SelectBlock(EditorPage page, EditorBlock b)
+    {
+        if (_selected != b) _cropL = _cropT = _cropR = _cropB = 0;
+        _selected = b;
+        _selectedPage = page;
+        _selectedOverlay = null;
+    }
     private void SelectPage(EditorPage page) { _selectedPage = page; _selected = null; _selectedOverlay = null; }
     private void SelectOverlay(EditorPage page, EditorOverlay ov) { _selectedOverlay = ov; _selectedPage = page; _selected = null; }
     private void DeselectIfBackground() { _selected = null; _selectedOverlay = null; }
@@ -1782,6 +1808,51 @@
         {
             _status = L.T("editor.series.error");
         }
+    }
+
+    // --- Bild zuschneiden (Crop wird fest eingebacken, Undo via PushUndo) -------
+    private int _cropL, _cropT, _cropR, _cropB;
+
+    /// <summary>Live-Vorschau des Zuschnitts am selektierten Bild (clip-path; erst „Anwenden" backt ihn ein).</summary>
+    private string? CropPreviewCss(EditorBlock b)
+        => _selected == b && (_cropL + _cropT + _cropR + _cropB) > 0
+            ? $";clip-path:inset({_cropT}% {_cropR}% {_cropB}% {_cropL}%)"
+            : null;
+
+    private async Task ApplyCrop()
+    {
+        if (_selected?.Src is null || _cropL + _cropT + _cropR + _cropB == 0) return;
+        var cropped = await JS.InvokeAsync<string>("pageboundWysiwyg.cropDataUrl",
+            _selected.Src, _cropL / 100.0, _cropT / 100.0, _cropR / 100.0, _cropB / 100.0);
+        PushUndo();
+        _selected.Src = cropped;
+        _cropL = _cropT = _cropR = _cropB = 0;
+    }
+
+    /// <summary>Touch-Fallback des Block-Umsortierens (JS-Bridge): Quelle auf Ziel-Block
+    /// oder ans Ende der Zielseite verschieben.</summary>
+    [JSInvokable]
+    public async Task OnBlockTouchDrop(string blockId, string? targetBlockId, int pageIndex)
+    {
+        EditorBlock? dragged = null;
+        foreach (var p in _doc.Pages)
+            dragged ??= p.Blocks.FirstOrDefault(x => x.Id == blockId);
+        if (dragged is null) return;
+        _dragBlock = dragged;
+        if (targetBlockId is not null)
+        {
+            foreach (var p in _doc.Pages)
+            {
+                var target = p.Blocks.FirstOrDefault(x => x.Id == targetBlockId);
+                if (target is not null) { await OnBlockDrop(p, target); break; }
+            }
+        }
+        else if (pageIndex >= 0 && pageIndex < _doc.Pages.Count)
+        {
+            await OnPageAreaDrop(_doc.Pages[pageIndex]);
+        }
+        _dragBlock = null;
+        StateHasChanged();
     }
 
     /// <summary>Liest eine Bilddatei und re-encodiert sie platzsparend (JS-Canvas).</summary>

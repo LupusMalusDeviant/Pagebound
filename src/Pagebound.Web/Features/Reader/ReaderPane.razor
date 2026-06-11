@@ -1,4 +1,4 @@
-@using System.Globalization
+﻿@using System.Globalization
 @using Markdig
 @using Microsoft.AspNetCore.Components.Forms
 @using Microsoft.AspNetCore.Components.Web
@@ -1575,14 +1575,12 @@
         var hash = await Hasher.ComputeAsync(buffer, HashAlgorithm.Sha256, CancellationToken.None).ConfigureAwait(false);
         buffer.Position = 0;
         _currentPdfId = PdfId.FromHash(hash);
-
         _handle = await Renderer.LoadAsync(buffer, new LoadOptions(), CancellationToken.None).ConfigureAwait(false);
         _currentPage = 1;
         _redactions.Clear();
         _continuous = false;
         _continuousPages.Clear();
         _continuousRenderedCount = 0;
-
         _annotations = await Annotations.GetForDocumentAsync(_currentPdfId.Value, CancellationToken.None).ConfigureAwait(false);
 
         // FA-072/073: Wenn ein zentraler Sidecar-Workspace gesetzt ist, dort nach
@@ -1611,7 +1609,6 @@
                 // Best-effort — Workspace-Probleme dürfen das Öffnen nicht blockieren.
             }
         }
-
         await RecomputeSignatureStatusesAsync().ConfigureAwait(false);
 
         // FA-060: Library-Tracking + Persistenz der Bytes für späteres One-Click-Open.
@@ -1668,7 +1665,6 @@
         {
             // Tracking + Persistenz sind beide non-essential; Fehler schlucken wir leise.
         }
-
         try
         {
             _outline = await Renderer.GetOutlineAsync(_handle, CancellationToken.None).ConfigureAwait(false);
@@ -1690,8 +1686,30 @@
         {
             SetFormFields(Array.Empty<PdfFormField>());
         }
-
         await RenderCurrentPageAsync().ConfigureAwait(false);
+    }
+
+    /// <summary>Öffnet PDF-Bytes direkt im Pane (z. B. ein Werkzeug-Ergebnis aus
+    /// dem „Werkzeuge"-Tab — UI-Konsolidierung: Ergebnis zurück in den Reader).</summary>
+    public async Task OpenBytesAsync(byte[] bytes, string filename)
+    {
+        _errorMessage = null;
+        _isLoading = true;
+        ClearSearchState();
+        ResetAnnotationState();
+        try
+        {
+            await LoadPdfBytesAsync(bytes, filename).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Öffnen fehlgeschlagen: {ex.Message}";
+        }
+        finally
+        {
+            _isLoading = false;
+            await InvokeAsync(StateHasChanged).ConfigureAwait(false);
+        }
     }
 
     /// <summary>
