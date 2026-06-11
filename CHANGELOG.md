@@ -64,9 +64,15 @@ Liste fasst den aktuellen Funktionsumfang zusammen.
 - **Touch-Umsortieren von Blöcken** im Designer (Pointer-Drag am Grip-Handle mit Ziel-Markierung; Maus nutzt weiter natives Drag & Drop)
 - **Bild-Zuschnitt** im Designer: vier Kanten-Regler mit Live-Vorschau (clip-path), „Anwenden" backt den Zuschnitt per Canvas ein (Undo-fähig)
 
+### Mobile-UX (drastische Überarbeitung)
+- **Daumenfreundliche Bottom-Navigation** auf dem Handy (≤940px): fixierte untere Leiste mit Start · Reader · Designer · Library · Mehr; „Mehr" öffnet die Schiene für Sekundäres (Split, Formular-Builder, Stapel) und zuletzt geöffnete Dateien — die Topbar-Hamburger entfällt dort
+- **Tap-Flächen** durchgehend auf ≥40–44 px vergrößert (Buttons, Formularfelder, Nav-Einträge, Reader-/Werkzeug-Bedienflächen) — vorher waren ~70 % der interaktiven Elemente zu klein
+- **Reader & Werkzeuge endgültig zusammengelegt**: `/tools` leitet auf `/reader?tab=tools` um, der standalone-Navigationseintrag entfällt — die Werkzeuge haben jetzt genau einen Ort (Reader-Subtab); die Umschaltung „Dokument | Werkzeuge" ist ein segmentierter Schalter (volle Breite auf dem Handy)
+- Safe-Area-Insets (Notch/Home-Indikator) berücksichtigt
+
 ### UI-Konsolidierung
 - **Split-View & Vergleich zusammengeführt**: `/compare` leitet auf die Split-View im Vergleichsmodus um (`/split?compare=1`); eine gemeinsame Diff-Engine/-Anzeige statt zweier Implementierungen, ein Navigationseintrag statt zwei
-- **PDF-Werkzeuge im Reader**: Tab-Leiste „Dokument | Werkzeuge" direkt im Reader-Fenster — das geöffnete PDF wird in die Werkzeuge übernommen (kein erneutes Laden); `/tools` bleibt als eigenständige Seite erhalten (gleiche Komponente)
+- **PDF-Werkzeuge im Reader**: Tab-Leiste „Dokument | Werkzeuge" direkt im Reader-Fenster — das geöffnete PDF wird in die Werkzeuge übernommen (kein erneutes Laden); `/tools` leitet dorthin um (Werkzeuge an einem Ort)
 
 ### MCP-Server
 - Tokenloser MCP-Server für LLM-Agenten (stdio + Streamable HTTP), 24 Tools (inkl. `pdf_sign`, `pdf_to_pdfa`, `pdf_ua_prepare`), gehostet unter `…/mcp` mit Größen-/Seiten-Limits

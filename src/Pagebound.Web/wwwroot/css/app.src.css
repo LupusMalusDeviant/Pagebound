@@ -514,6 +514,65 @@ body.pb-app-bg { background: var(--bg-base); }
 }
 
 /* =============================================================================
+   MOBILE — Bottom-Nav + Touch-Targets (drastische Handy-UX, ≤940px)
+   ----------------------------------------------------------------------------
+   Daumenfreundliche Primärnavigation als fixierte untere Leiste; die Schiene
+   (Rail) bleibt als „Mehr"-Drawer für Sekundäres (Split, Formular, Stapel) und
+   die zuletzt geöffneten Dateien. Alle Bedien­elemente bekommen ≥40–44 px
+   Tap-Fläche (WCAG 2.5.5 / Apple-HIG).
+   ============================================================================= */
+.botnav { display: none; }
+
+@media (max-width: 940px) {
+  .botnav {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    z-index: 75;
+    background: color-mix(in oklch, var(--bg-base) 92%, transparent);
+    backdrop-filter: blur(12px);
+    border-top: 1px solid var(--line);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  .botnav-item {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 3px; min-height: 54px; padding: 7px 2px 6px;
+    border: 0; background: none; cursor: pointer;
+    color: var(--ink-4);
+    font-family: var(--font-ui); font-size: 0.64rem; font-weight: 500; letter-spacing: 0.01em;
+    transition: color var(--speed);
+  }
+  .botnav-item .ic { width: 1.3rem; height: 1.3rem; }
+  .botnav-item:active { background: var(--bg-hover); }
+  .botnav-item[aria-current="page"], .botnav-item.is-on { color: var(--accent); }
+
+  /* Platz für die Bottom-Nav schaffen, Inhalt scrollt frei darüber. */
+  .main { padding-bottom: calc(54px + env(safe-area-inset-bottom, 0px)); }
+
+  /* „Mehr" in der Bottom-Nav öffnet die Schiene — die Topbar-Hamburger entfällt. */
+  .menu-btn { display: none !important; }
+
+  /* --- Touch-Targets ------------------------------------------------------- */
+  .btn { min-height: 44px; }
+  .btn.sm { min-height: 40px; }
+  .btn-side { min-height: 40px; }
+  .btn-fmt { min-width: 40px; min-height: 40px; }
+  .theme-toggle button { min-height: 44px; }
+  .nav-sub .nav-item { min-height: 44px; }
+  /* Formularfelder gut tippbar (Checkbox/Radio/Range/Color/File ausgenommen). */
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]),
+  select, textarea { min-height: 44px; }
+  /* Rail-Drawer auf Mobile breiter & angenehmer. */
+  .rail { width: min(86vw, 340px); }
+  .rail .nav-item { min-height: 48px; }
+  .lib-file { min-height: 44px; }
+  .coll-label .focusable { min-height: 40px; padding: 0 0.3em; }
+  /* Topbar-Icon-Buttons (Einstellungen, Sprache) gut tippbar. */
+  .icon-btn { min-height: 44px; min-width: 44px; }
+}
+
+/* =============================================================================
    SCREENS — screens.css (Editorial)
    ============================================================================= */
 .ed { max-width: 1000px; margin: 0 auto; padding: 0 var(--sp-6) var(--sp-8); }
@@ -582,6 +641,25 @@ body.pb-app-bg { background: var(--bg-base); }
 @media (max-width: 640px) {
   .feat-list { grid-template-columns: 1fr; }
   .toc-item { grid-template-columns: 2.4rem 1fr; gap: var(--sp-3); }
+}
+
+/* Segmentierte Umschaltleiste (Reader: Dokument | Werkzeuge). Kompakt am Desktop,
+   volle Breite + große Tap-Flächen auf dem Handy. */
+.pb-segbar { display: flex; gap: var(--sp-2); padding: var(--sp-2) var(--sp-6); border-bottom: 1px solid var(--line); }
+.pb-seg {
+  display: inline-flex; align-items: center; justify-content: center; gap: 0.45em;
+  padding: 0.5em 1em; min-height: 40px;
+  border: 1px solid var(--line); border-radius: var(--radius-s);
+  background: var(--bg-raised); color: var(--ink-3);
+  font-family: var(--font-ui); font-weight: 600; font-size: 0.9rem; cursor: pointer;
+  transition: color var(--speed), border-color var(--speed), background var(--speed);
+}
+.pb-seg .ic { width: 1.05em; height: 1.05em; }
+.pb-seg:hover { color: var(--ink); }
+.pb-seg.is-on { color: var(--accent-ink); background: var(--accent); border-color: transparent; }
+@media (max-width: 640px) {
+  .pb-segbar { padding: var(--sp-2) var(--sp-4); gap: var(--sp-2); }
+  .pb-seg { flex: 1; min-height: 46px; font-size: 0.95rem; }
 }
 
 /* Tools (editorial register) */

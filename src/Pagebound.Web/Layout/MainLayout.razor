@@ -130,6 +130,26 @@
     <main class="main" id="main" tabindex="-1">
         @Body
     </main>
+
+    @* BOTTOM-NAV — daumenfreundliche Primärnavigation (nur Mobile, ≤940px) *@
+    <nav class="botnav" aria-label="@L.T("nav.heading")">
+        <button type="button" class="botnav-item" aria-current="@(_route == "" ? "page" : null)" @onclick="@(() => Go(""))">
+            <Icon Name="home" /><span>@L.T("nav.start")</span>
+        </button>
+        <button type="button" class="botnav-item" aria-current="@(IsPdfRoute(_route) && _route != "editor" ? "page" : null)" @onclick="@(() => Go("reader"))">
+            <Icon Name="reader" /><span>@L.T("nav.reader")</span>
+        </button>
+        <button type="button" class="botnav-item" aria-current="@(_route == "editor" ? "page" : null)" @onclick="@(() => Go("editor"))">
+            <Icon Name="layout" /><span>@L.T("nav.editor")</span>
+        </button>
+        <button type="button" class="botnav-item" aria-current="@(_route == "library" ? "page" : null)" @onclick="@(() => Go("library"))">
+            <Icon Name="library" /><span>@L.T("nav.library")</span>
+        </button>
+        <button type="button" class="botnav-item @(_railOpen ? "is-on" : "")" aria-expanded="@(_railOpen ? "true" : "false")"
+                aria-controls="app-rail" @onclick="@(() => _railOpen = !_railOpen)">
+            <Icon Name="menu" /><span>@L.T("nav.more")</span>
+        </button>
+    </nav>
 </div>
 
 <SettingsPanel Open="_settingsOpen" OnClose="OnSettingsClosedAsync" />
@@ -138,12 +158,11 @@
     private sealed record NavDef(string Ix, string Route, string LabelKey);
 
     // Subtabs der „PDF"-Gruppe. Start + Designer stehen separat als Top-Level.
-    // „Vergleich" ist in der Split-View aufgegangen (Konsolidierung) —
-    // die Route /compare existiert weiter und leitet auf /split?compare=1 um.
+    // „Werkzeuge" sind im Reader aufgegangen (Subtab „Werkzeuge") — /tools leitet
+    // dorthin um. „Vergleich" ist in der Split-View aufgegangen; /compare → /split?compare=1.
     private static readonly NavDef[] PdfGroup =
     {
         new("", "reader",  "nav.reader"),
-        new("", "tools",   "nav.tools"),
         new("", "form-builder", "nav.formbuilder"),
         new("", "split",   "nav.split"),
         new("", "batch",   "nav.batch"),

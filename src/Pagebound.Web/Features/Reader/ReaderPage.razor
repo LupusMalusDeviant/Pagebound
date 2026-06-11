@@ -24,21 +24,20 @@
 
 <PageTitle>@L.T("reader.pageTitle")</PageTitle>
 
-<div class="border-b border-pb-border px-4 sm:px-6 lg:px-8 py-2 flex items-center gap-2"
-     role="tablist" aria-label="@L.T("reader.tabs.aria")">
+<div class="pb-segbar" role="tablist" aria-label="@L.T("reader.tabs.aria")">
     <button type="button" role="tab" id="reader-tab-doc"
             aria-selected="@((!_toolsTabActive).ToString().ToLowerInvariant())"
             aria-controls="reader-tabpanel-doc"
             class="@TabClass(!_toolsTabActive)"
             @onclick="ShowDocumentTab">
-        @L.T("reader.tab.document")
+        <Icon Name="reader" /> @L.T("reader.tab.document")
     </button>
     <button type="button" role="tab" id="reader-tab-tools"
             aria-selected="@(_toolsTabActive.ToString().ToLowerInvariant())"
             aria-controls="reader-tabpanel-tools"
             class="@TabClass(_toolsTabActive)"
             @onclick="ShowToolsTab">
-        @L.T("reader.tab.tools")
+        <Icon Name="tools" /> @L.T("reader.tab.tools")
     </button>
 </div>
 
@@ -81,9 +80,7 @@
     private int _toolsPanelKey;
 
     private static string TabClass(bool active) =>
-        active
-            ? "rounded border border-pb-accent px-3 py-1 text-sm text-pb-accent font-medium"
-            : "rounded border border-pb-border px-3 py-1 text-sm text-pb-fg-muted hover:text-pb-fg";
+        active ? "pb-seg is-on" : "pb-seg";
 
     private void ShowDocumentTab() => _toolsTabActive = false;
 
@@ -174,6 +171,12 @@
     private void UpdateFromQuery()
     {
         _pdfHash = ExtractQueryValue(Nav.Uri, "pdf");
+        // /tools leitet auf /reader?tab=tools um (Reader+Werkzeuge zusammengelegt):
+        // Werkzeuge-Subtab direkt vorauswählen.
+        if (string.Equals(ExtractQueryValue(Nav.Uri, "tab"), "tools", StringComparison.OrdinalIgnoreCase))
+        {
+            ShowToolsTab();
+        }
     }
 
     private static string? ExtractQueryValue(string fullUri, string key)
