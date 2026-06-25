@@ -29,7 +29,7 @@ Pagebound ist ein quelloffenes PDF-Werkzeug, das den Adobe Acrobat Reader im All
 - **Annotationen einbrennen (Flatten)** — Highlights, Notizen, Stift, Formen und Signaturen fest in die PDF brennen → eigenständige „flache" Datei
 - **Schwärzen / Redaktion** — Bereiche dauerhaft schwärzen; der Inhalt darunter wird **entfernt** (echte Redaktion, nicht nur überdeckt), optional mit **Audit-Report** (SHA-256 vorher/nachher + Resttext-Prüfung)
 - **Signieren** — PNG-Signatur platzieren (Drag/Resize) + Signer-Daten + Hash-Integritäts-Badge
-- **Formulare & Metadaten** — AcroForms ausfüllen (Text/Checkbox/Radio/Dropdown/Listbox, editierbar/geflattet), **Formularfelder anlegen** (Text/Checkbox) und **Dokument-Metadaten** (Titel/Autor/Betreff/Stichwörter) lesen & setzen — alles in /tools
+- **Formulare & Metadaten** — AcroForms ausfüllen (Text/Checkbox/Radio/Dropdown/Listbox, editierbar/geflattet), **Formularfelder anlegen** (Text/Checkbox) und **Dokument-Metadaten** (Titel/Autor/Betreff/Stichwörter) lesen & setzen — alles in /tools, dort in **Kategorie-Tabs** (Seiten / Export / Stempel / Sicherheit / Standards) gegliedert
 - **Seiten-Werkzeuge** — Merge, Split, Neu-Sortieren, Löschen, Drehen, JPEG-Komprimierung
 - **Stempeln** — diagonales Text-Wasserzeichen und/oder Seitenzahlen (Bates) auf jede Seite
 - **Bilder → PDF** — PNG/JPG zu PDF (Seitengröße wählbar, Reihenfolge per Drag & Drop)

@@ -4,6 +4,27 @@ Alle nennenswerten Änderungen an Pagebound werden in dieser Datei dokumentiert.
 Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/de/1.1.0/),
 die Versionierung folgt [Semantic Versioning](https://semver.org/lang/de/).
 
+## [0.11.0-beta] — 2026-06-25
+
+Sammelrelease seit 0.9.0: neue Werkzeuge (Formular-Builder, P12-Signatur,
+PDF/A & PDF/UA), Designer-HTML/Mindmaps, eine drastisch verbesserte Handy-UX
+und die Bündelung der PDF-Werkzeuge in Desktop-typische Kategorie-Tabs.
+
+### Hinzugefügt
+- **Formular-Builder** als eigene Seite (`/form-builder`) sowie Anlegen von Formularfeldern (Text/Checkbox) in den Werkzeugen
+- **PDF/A** (Best Effort) inkl. Liberation-Font-Einbettung und ehrlichem Warnbericht
+- **PDF/UA-Kennzeichnung** (MarkInfo/Lang/DisplayDocTitle/XMP) mit Lücken-Bericht
+- **Zertifikatsbasierte Signatur (P12/PFX)** — `adbe.pkcs7.detached`, abgegrenzt von der optischen Bild-Signatur
+- **Designer**: HTML-Import mit Stil-Hybrid, editierbare D3-Mindmaps, interaktiver HTML-Export
+- **MCP**: Mindmap-Unterstützung + interaktiver HTML-Render im Designer-MCP (jetzt 24 Tools)
+
+### Geändert
+- **Werkzeuge in Kategorie-Tabs gruppiert** (Seiten / Export / Stempel / Sicherheit / Standards) — statt ~12 gestapelter Leisten ist nur noch eine Kategorie gleichzeitig sichtbar (Desktop-App-Bedienung)
+- **Drastisch verbesserte Handy-UX**: Bottom-Navigation, größere Touch-Targets, Reader und Werkzeuge final zusammengeführt
+
+### Infrastruktur
+- `deploy.sh` räumt verwaiste Docker-Images nach dem Deploy automatisch auf (`docker image prune -f`)
+
 ## [0.9.0-beta] — 2026-06-11
 
 Pagebound ist im Alltag voll nutzbar und live unter
