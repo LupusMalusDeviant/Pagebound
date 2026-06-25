@@ -138,6 +138,23 @@
 
     @if (_handle is not null && _pages.Count > 0)
     {
+        @* Kategorie-Tabs (Desktop-App-Muster) — bündeln die Werkzeug-Leisten, damit
+           nie mehr als die Leisten einer Kategorie gleichzeitig sichtbar sind. *@
+        <div class="pb-segbar max-w-4xl mx-auto mt-4" role="tablist" aria-label="@L.T("tools.categories.aria")">
+            @foreach (var cat in ToolCategories)
+            {
+                var c = cat;
+                <button type="button" role="tab"
+                        aria-selected="@((_activeCategory == c.Category).ToString().ToLowerInvariant())"
+                        class="@(_activeCategory == c.Category ? "pb-seg is-on" : "pb-seg")"
+                        @onclick="@(() => _activeCategory = c.Category)">
+                    @L.T(c.LabelKey)
+                </button>
+            }
+        </div>
+
+        @if (_activeCategory == ToolCategory.Pages)
+        {
         <div class="max-w-4xl mx-auto mt-4 rounded-lg pb-glass p-3 flex flex-wrap items-center gap-2 text-sm">
             <span class="text-pb-fg-muted">@L.T("tools.selection.label")</span>
             <button type="button"
@@ -204,7 +221,10 @@
                         : L.T("tools.save.changes"))
             </button>
         </div>
+        }
 
+        @if (_activeCategory == ToolCategory.Export)
+        {
         @* Compress-Bar (FA-026) — eigene Reihe weil destruktiv (verliert Vektor-Text)
            und unabhängig von den Pages-Edits oben. *@
         <div class="max-w-4xl mx-auto mt-2 rounded-lg pb-glass p-3 flex flex-wrap items-center gap-2 text-sm">
@@ -238,9 +258,10 @@
                         aria-label="@L.T("common.close")">✕</button>
             </div>
         }
+        }
 
         @* Encrypt-Bar (FA-027) — bis zum WASM-Perf-Umbau (WebCrypto/qpdf) ausgeblendet. *@
-        @if (EncryptionUiEnabled)
+        @if (EncryptionUiEnabled && _activeCategory == ToolCategory.Security)
         {
         <div class="max-w-4xl mx-auto mt-2 rounded-lg pb-glass p-3 flex flex-wrap items-center gap-2 text-sm">
             <span class="text-pb-fg-muted">@L.T("tools.encrypt.label")</span>
@@ -272,6 +293,8 @@
         <p class="max-w-4xl mx-auto mt-1 text-xs text-pb-fg-muted">@L.T("tools.encrypt.note")</p>
         }
 
+        @if (_activeCategory == ToolCategory.Export)
+        {
         @* Konvertieren (FA-030 PNG/JPG, FA-031 Text, FA-032 HTML) *@
         <div class="max-w-4xl mx-auto mt-2 rounded-lg pb-glass p-3 flex flex-wrap items-center gap-2 text-sm">
             <span class="text-pb-fg-muted">@L.T("tools.convert.label")</span>
@@ -303,7 +326,10 @@
             </div>
         }
         <p class="max-w-4xl mx-auto mt-1 text-xs text-pb-fg-muted">@L.T("tools.convert.note")</p>
+        }
 
+        @if (_activeCategory == ToolCategory.Stamp)
+        {
         @* Formularfelder anlegen (Roadmap D1) *@
         <div class="max-w-4xl mx-auto mt-2 rounded-lg pb-glass p-3 space-y-2 text-sm">
             <div class="flex flex-wrap items-center gap-2">
@@ -361,7 +387,10 @@
             </button>
             <p class="text-xs text-pb-fg-muted">@L.T("tools.metadata.note")</p>
         </div>
+        }
 
+        @if (_activeCategory == ToolCategory.Standards)
+        {
         @* PDF/A (Best Effort) — MCP-Parität: pdf_to_pdfa. Keine Konformitätsgarantie. *@
         <div class="max-w-4xl mx-auto mt-2 rounded-lg pb-glass p-3 space-y-2 text-sm">
             <div class="flex flex-wrap items-center gap-2">
@@ -402,7 +431,10 @@
             }
             <p class="text-xs text-pb-fg-muted">@L.T("tools.pdfa.note")</p>
         </div>
+        }
 
+        @if (_activeCategory == ToolCategory.Security)
+        {
         @* Signieren (Zertifikat, P12) — MCP-Parität: pdf_sign. Kryptografische
            Signatur (adbe.pkcs7.detached); Abgrenzung zur optischen Bild-Signatur
            mit Hash-Badge im Reader siehe tools.sign.note. *@
@@ -472,7 +504,10 @@
             }
             <p class="text-xs text-pb-fg-muted">@L.T("tools.sign.note")</p>
         </div>
+        }
 
+        @if (_activeCategory == ToolCategory.Standards)
+        {
         @* PDF/UA (Kennzeichnung + Bericht) — MCP-Parität: pdf_ua_prepare.
            Best Effort: setzt MarkInfo/Lang/DisplayDocTitle/XMP pdfuaid und
            meldet ehrlich, was fehlt (Tagging kann NICHT synthetisiert werden). *@
@@ -518,7 +553,10 @@
             }
             <p class="text-xs text-pb-fg-muted">@L.T("tools.pdfua.note")</p>
         </div>
+        }
 
+        @if (_activeCategory == ToolCategory.Stamp)
+        {
         @* Wasserzeichen + Seitenzahlen / Bates *@
         <div class="max-w-4xl mx-auto mt-2 rounded-lg pb-glass p-3 flex flex-wrap items-center gap-2 text-sm">
             <span class="text-pb-fg-muted">@L.T("tools.stamp.label")</span>
@@ -553,7 +591,10 @@
             </div>
         }
         <p class="max-w-4xl mx-auto mt-1 text-xs text-pb-fg-muted">@L.T("tools.stamp.note")</p>
+        }
 
+        @if (_activeCategory == ToolCategory.Pages)
+        {
         <div class="mt-6 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
             @{
                 var visiblePages = _pages.Where(p => !p.Deleted).ToList();
@@ -625,6 +666,7 @@
                 — <button type="button" class="text-pb-accent hover:underline" @onclick="UndoDeletes">@L.T("tools.deleted.undo")</button>
             </div>
         }
+        }
     }
     else if (_handle is null && !_isLoading)
     {
@@ -640,6 +682,24 @@
     // FA-027: Verschlüsselung läuft über WebCrypto (Bridge encryptPdf) — ~15 ms
     // statt ~30 s Freeze, im Browser gegen PDF.js verifiziert (öffnet mit Passwort).
     private const bool EncryptionUiEnabled = true;
+
+    // UX: Werkzeug-Leisten in Desktop-typische Kategorie-Tabs gruppiert, damit nie
+    // mehr als die Leisten einer Kategorie gleichzeitig sichtbar sind (vorher 12
+    // gestapelt). Reine Sichtbarkeits-Steuerung — keine Zustands-/Logikänderung.
+    private enum ToolCategory { Pages, Export, Stamp, Security, Standards }
+
+    private ToolCategory _activeCategory = ToolCategory.Pages;
+
+    private sealed record ToolCategoryDef(ToolCategory Category, string LabelKey);
+
+    private static readonly ToolCategoryDef[] ToolCategories =
+    {
+        new(ToolCategory.Pages,     "tools.category.pages"),
+        new(ToolCategory.Export,    "tools.category.export"),
+        new(ToolCategory.Stamp,     "tools.category.stamp"),
+        new(ToolCategory.Security,  "tools.category.security"),
+        new(ToolCategory.Standards, "tools.category.standards"),
+    };
 
     /// <summary>Bytes eines bereits geladenen PDFs (z. B. aus dem Reader-Tab) — wird beim ersten Render übernommen.</summary>
     [Parameter] public byte[]? InitialPdfBytes { get; set; }
