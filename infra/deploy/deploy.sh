@@ -31,6 +31,12 @@ echo "→ Images ziehen + Container (neu)starten (pagebound + pagebound-mcp)"
 docker compose -f "$APP_DIR/docker-compose.yml" pull
 docker compose -f "$APP_DIR/docker-compose.yml" up -d
 
+# Verwaiste (dangling) Images aufräumen — beim `pull` ersetzte alte Layer bleiben
+# sonst liegen und füllen die Platte. `|| true`, damit ein Prune-Fehler (z. B.
+# paralleler Build) den Deploy unter `set -e` nicht abbricht.
+echo "→ Verwaiste Docker-Images aufräumen"
+docker image prune -f || true
+
 # 2) Caddy-Site-Block synchronisieren -----------------------------------------
 # Entfernt einen evtl. vorhandenen Block der Domain (brace-aware, egal ob
 # zusätzliche handle{}-Unterblöcke enthalten sind) und hängt den frischen Block
