@@ -92,6 +92,12 @@ const builds = [
   },
   {
     ...sharedOptions,
+    globalName: "pageboundMind",
+    entryPoints: [resolve(__dirname, "wwwroot/js/mind-bridge.ts")],
+    outfile: resolve(__dirname, "wwwroot/js/mind-bridge.js")
+  },
+  {
+    ...sharedOptions,
     globalName: "pageboundDesigns",
     entryPoints: [resolve(__dirname, "wwwroot/js/designs-bridge.ts")],
     outfile: resolve(__dirname, "wwwroot/js/designs-bridge.js")

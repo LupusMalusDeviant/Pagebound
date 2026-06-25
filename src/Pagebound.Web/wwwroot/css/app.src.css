@@ -245,6 +245,66 @@ textarea, select {
   border-color: var(--ctl-border) !important;
 }
 
+/* Datei-Auswahl app-weit als eindeutig klickbares Bedienelement: der native
+   „Datei auswählen"-Knopf bekommt Akzent-Button-Optik, das Feld selbst eine
+   sichtbare Umrandung + Pointer-Cursor. Behebt, dass leere File-Inputs nicht
+   als Bedienelement erkennbar waren (gilt für Theme/Bild/CSV/JSON/HTML-Import). */
+input[type="file"] {
+  cursor: pointer;
+  border: 1px solid var(--ctl-border);
+  border-radius: var(--radius-s);
+  background: var(--bg);
+  color: var(--ink-2);
+  padding: 0.3em 0.4em;
+  transition: border-color var(--speed), background var(--speed);
+}
+input[type="file"]:hover  { border-color: var(--accent) !important; background: var(--bg-hover); }
+input[type="file"]:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
+input[type="file"]::file-selector-button,
+input[type="file"]::-webkit-file-upload-button {
+  cursor: pointer;
+  margin-right: 0.6em;
+  padding: calc(0.34em * var(--d)) calc(0.75em * var(--d));
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: var(--accent); color: var(--accent-ink);
+  font-family: var(--font-ui); font-weight: 700; font-size: 0.78rem;
+  transition: background var(--speed);
+}
+input[type="file"]:hover::file-selector-button,
+input[type="file"]:hover::-webkit-file-upload-button {
+  background: color-mix(in oklch, var(--accent) 88%, white);
+}
+
+/* Interaktives D3-Mindmap-Widget (nur im Editor sichtbar; im Druck zeigt
+   stattdessen das statische SVG-Bild des Blocks). */
+.pb-mind-live {
+  display: inline-block;
+  height: 360px;
+  min-width: 200px;
+  vertical-align: top;
+  border: 1px solid var(--ctl-border);
+  border-radius: 8px;
+  background: #F9F8F6;
+  overflow: hidden;
+}
+/* Statisches Mindmap-SVG: am Bildschirm immer aus (dort zeigt das D3-Live-Widget),
+   nur im Druck/PDF sichtbar. !important, da .pb-img gleiche Spezifität hat. */
+.pb-mind-static-hidden { display: none !important; }
+@media print {
+  .pb-mind-static-hidden { display: inline-block !important; }
+  .pb-mind-live { display: none !important; }
+}
+
+/* Einzelfolien-Ansicht: nur die aktuelle Seite zeigen (übrige nur ausgeblendet,
+   bleiben im DOM für Export/Überlauf-Messung). Mehr Platz zum Editieren. */
+.pb-single .pb-page { display: none; }
+.pb-single .pb-page.pb-current { display: block; }
+@media print {
+  /* Im Druck/PDF wieder alle Seiten zeigen (Einzelansicht ist nur Editier-Hilfe). */
+  .pb-single .pb-page { display: block !important; }
+}
+
 /* =============================================================================
    PRIMITIVES
    ============================================================================= */

@@ -24,7 +24,28 @@ public enum EditorBlockType
     Table,
     Spacer,
     Columns,
-    QrCode
+    QrCode,
+    Mindmap
+}
+
+/// <summary>
+/// Ein Knoten eines <see cref="EditorBlockType.Mindmap"/>-Baums. Bewusst veränderlich
+/// (der Baum-Editor mutiert Label/Children direkt). <see cref="Id"/> bleibt über
+/// Neu-Zeichnungen stabil, damit die Auswahl im Editor erhalten bleibt.
+/// </summary>
+public sealed class MindmapNode
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+    public string Label { get; set; } = string.Empty;
+    public List<MindmapNode> Children { get; set; } = new();
+
+    /// <summary>Tiefenkopie inkl. aller Ids (für Undo-Schnappschüsse und Block-Duplikate).</summary>
+    public MindmapNode Clone() => new()
+    {
+        Id = Id,
+        Label = Label,
+        Children = Children.Select(c => c.Clone()).ToList()
+    };
 }
 
 /// <summary>Typ eines frei platzierbaren Overlay-Elements.</summary>
@@ -141,6 +162,10 @@ public sealed class EditorBlock
     public List<List<string>>? Rows { get; set; }
     public bool HeaderRow { get; set; } = true;
 
+    // Mindmap: Wurzel des bearbeitbaren Knoten-Baums. Das gerenderte Bild liegt in
+    // <see cref="Src"/> (data-URL) — wird bei jeder Änderung neu gezeichnet.
+    public MindmapNode? Mind { get; set; }
+
     public EditorBlock Clone() => CloneCore(Guid.NewGuid().ToString("N"));
 
     /// <summary>Exakte Kopie inkl. Id — für Undo-Schnappschüsse (kein Duplizieren).</summary>
@@ -169,7 +194,8 @@ public sealed class EditorBlock
         ColumnsHtml = ColumnsHtml is null ? null : new List<string>(ColumnsHtml),
         ColumnGapPx = ColumnGapPx,
         Rows = Rows?.Select(r => new List<string>(r)).ToList(),
-        HeaderRow = HeaderRow
+        HeaderRow = HeaderRow,
+        Mind = Mind?.Clone()
     };
 }
 

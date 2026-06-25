@@ -182,6 +182,7 @@
             <button class="btn-side" @onclick="@(() => AddBlock(EditorBlockType.Table))">@L.T("editor.add.table")</button>
             <button class="btn-side" @onclick="@(() => AddBlock(EditorBlockType.Columns))">@L.T("editor.add.columns")</button>
             <button class="btn-side" @onclick="@(() => AddBlock(EditorBlockType.QrCode))">@L.T("editor.add.qr")</button>
+            <button class="btn-side" @onclick="@(() => AddBlock(EditorBlockType.Mindmap))">@L.T("editor.add.mindmap")</button>
         </div>
 
         @* ---- Frei platzieren (Overlays über dem Block-Fluss) ---- *@
@@ -274,6 +275,36 @@
                            value="@_selected.Text" @onchange="@(e => OnQrTextChanged(e.Value?.ToString() ?? ""))" />
                     <label class="mb-1 block text-xs">@L.T("editor.props.imageWidth"): @_selected.WidthPercent%</label>
                     <input type="range" min="10" max="100" step="5" class="mb-1 w-full" @bind="_selected.WidthPercent" @bind:event="oninput" />
+                }
+
+                @if (_selected.Type is EditorBlockType.Mindmap && _selected.Mind is not null)
+                {
+                    var mindSel = FindMindNode(_selected.Mind, _mindNodeId) ?? _selected.Mind;
+                    <label class="mb-1 block text-xs">@L.T("editor.props.imageWidth"): @_selected.WidthPercent%</label>
+                    <input type="range" min="20" max="100" step="5" class="mb-2 w-full" @bind="_selected.WidthPercent" @bind:event="oninput" />
+
+                    <label class="mb-1 block text-xs">@L.T("editor.props.mind.node")</label>
+                    <select class="mb-2 w-full rounded border border-pb-border bg-pb-bg px-2 py-1 text-xs"
+                            value="@mindSel.Id" @onchange="OnMindNodeSelect">
+                        @foreach (var (node, depth) in FlattenMind(_selected.Mind))
+                        {
+                            <option value="@node.Id">@(MindIndent(depth) + MindShort(node.Label))</option>
+                        }
+                    </select>
+
+                    <label class="mb-1 block text-xs">@L.T("editor.props.mind.label")</label>
+                    <input class="mb-2 w-full rounded border border-pb-border bg-pb-bg px-2 py-1 text-xs"
+                           value="@mindSel.Label" @onchange="OnMindLabelChange" />
+
+                    <div class="mb-1 grid grid-cols-2 gap-1">
+                        <button class="btn-side" @onclick="MindAddChild">+ @L.T("editor.props.mind.child")</button>
+                        <button class="btn-side" disabled="@(mindSel == _selected.Mind)" @onclick="MindAddSibling">+ @L.T("editor.props.mind.sibling")</button>
+                        <button class="btn-side" title="@L.T("editor.block.up")" @onclick="@(() => MindMove(-1))">@Ic("up")</button>
+                        <button class="btn-side" title="@L.T("editor.block.down")" @onclick="@(() => MindMove(1))">@Ic("down")</button>
+                        <button class="btn-side" disabled="@(!CanMindOutdent(mindSel))" @onclick="MindOutdent">@L.T("editor.props.mind.outdent")</button>
+                        <button class="btn-side" disabled="@(!CanMindIndent(mindSel))" @onclick="MindIndentNode">@L.T("editor.props.mind.indent")</button>
+                    </div>
+                    <button class="btn-side w-full text-[#dc2626]" disabled="@(mindSel == _selected.Mind)" @onclick="MindDelete">@L.T("editor.props.mind.delete")</button>
                 }
 
                 @if (_selected.Type is EditorBlockType.Columns)
@@ -482,14 +513,20 @@
         }
 
         <div class="mb-1 text-xs font-medium text-pb-fg-muted">@L.T("editor.export.label")</div>
-        <div class="mb-3 grid grid-cols-3 gap-1">
+        <div class="mb-1 grid grid-cols-3 gap-1">
             <button class="btn-side is-primary" @onclick="ExportPdf">@L.T("editor.export.pdf")</button>
             <button class="btn-side" @onclick="ExportHtml">@L.T("editor.export.html")</button>
             <button class="btn-side" @onclick="ExportJson">@L.T("editor.export.json")</button>
         </div>
+        <button class="btn-side mb-1 w-full" @onclick="ExportInteractiveHtml" title="@L.T("editor.export.interactiveHint")">@L.T("editor.export.interactive")</button>
+        <p class="mb-3 text-[11px] leading-snug text-pb-fg-muted">@L.T("editor.export.interactiveNote")</p>
 
         <label class="mb-1 block text-xs font-medium text-pb-fg-muted">@L.T("editor.import.label")</label>
-        <InputFile class="mb-3 w-full text-xs" OnChange="OnImportDocument" accept="application/json,.json" />
+        <InputFile class="mb-2 w-full text-xs" OnChange="OnImportDocument" accept="application/json,.json" />
+
+        <label class="mb-1 block text-xs font-medium text-pb-fg-muted">@L.T("editor.import.html.label")</label>
+        <InputFile class="mb-1 w-full text-xs" OnChange="OnImportHtml" accept="text/html,.html,.htm" />
+        <p class="mb-3 text-[11px] leading-snug text-pb-fg-muted">@L.T("editor.import.html.hint")</p>
     </aside>
 
     @* ---- Hauptbereich: Rich-Text-Leiste + Seiten-Leinwand ------------- *@
@@ -542,17 +579,29 @@
                     <option value="150">150 %</option>
                 </select>
             </label>
+            <span class="mx-1 h-4 w-px bg-pb-border"></span>
+            <button class="btn-fmt @(_singleSlide ? "is-on" : "")" @onclick="ToggleSingleSlide" title="@L.T("editor.slide.singleHint")">@L.T("editor.slide.single")</button>
+            @if (_singleSlide)
+            {
+                <button class="btn-fmt" disabled="@(_slideIndex <= 0)" @onclick="@(() => GoSlide(-1))" title="@L.T("editor.slide.prev")">‹</button>
+                <span class="text-xs text-pb-fg-muted">@(_slideIndex + 1) / @_doc.Pages.Count</span>
+                <button class="btn-fmt" disabled="@(_slideIndex >= _doc.Pages.Count - 1)" @onclick="@(() => GoSlide(1))" title="@L.T("editor.slide.next")">›</button>
+            }
             <span class="ml-auto hidden text-xs text-pb-fg-muted xl:inline">@L.T("editor.fmt.hint")</span>
         </div>
 
-        <div class="pb-doc-stage flex-1" @onclick="DeselectIfBackground">
+        <div class="pb-doc-stage flex-1 @(_singleSlide ? "pb-single" : "")" @onclick="DeselectIfBackground">
             <div class="pb-zoom">
-            @{ var dim = EditorLayouts.For(_doc.Layout); }
+            @{
+                var dim = EditorLayouts.For(_doc.Layout);
+                if (_slideIndex >= _doc.Pages.Count) _slideIndex = _doc.Pages.Count - 1;
+                if (_slideIndex < 0) _slideIndex = 0;
+            }
             @for (int pi = 0; pi < _doc.Pages.Count; pi++)
             {
                 var page = _doc.Pages[pi];
                 var pageIndex = pi;
-                <div class="pb-page @(_selectedPage == page ? "pb-page-selected" : "")" id="pb-page-@pageIndex"
+                <div class="pb-page @(_selectedPage == page ? "pb-page-selected" : "") @(_singleSlide && pageIndex == _slideIndex ? "pb-current" : "")" id="pb-page-@pageIndex"
                      style="@PageStyle(page, dim)"
                      @onclick:stopPropagation="true" @onclick="@(() => SelectPage(page))"
                      @ondragover:preventDefault="true"
@@ -643,6 +692,18 @@
                                         else
                                         {
                                             <div style="border:1px dashed #9ca3af;color:#9ca3af;padding:24px;text-align:center">QR</div>
+                                        }
+                                    </div>
+                                    break;
+                                case EditorBlockType.Mindmap:
+                                    <div class="pb-img-wrap align-@blk.Align">
+                                        @* Editor zeigt immer nur das interaktive D3-Widget. Das statische SVG
+                                           ist ausschließlich für Druck/Export da (am Bildschirm ausgeblendet). *@
+                                        <div class="pb-mind-live no-print" id="mind-@blk.Id" style="width:@(blk.WidthPercent)%"
+                                             @onclick:stopPropagation="true" @ondblclick:stopPropagation="true"></div>
+                                        @if (!string.IsNullOrEmpty(blk.Src))
+                                        {
+                                            <img class="pb-img pb-mind-static-hidden" src="@blk.Src" alt="Mindmap" data-mind="@blk.Id" style="width:@(blk.WidthPercent)%" />
                                         }
                                     </div>
                                     break;
@@ -781,6 +842,11 @@
     private int _dropPageIdx = -1;
     private DotNetObjectReference<DesignerPage>? _selfRef;
 
+    // Einzelfolien-Ansicht: zeigt nur die aktuelle Seite (mehr Platz zum Editieren).
+    // CSS blendet die übrigen Seiten nur aus — sie bleiben im DOM (Export/Messung intakt).
+    private bool _singleSlide;
+    private int _slideIndex;
+
     // Mobile: Sidebar als Drawer + Zoom der Seiten-Leinwand ("auto" = an Breite anpassen).
     private bool _sidebarOpen;
     private string _zoomMode = "auto";
@@ -880,7 +946,49 @@
         // Zoom nach jedem Render anwenden (Layout/Modus können sich geändert haben;
         // die Bridge schreibt nur einen Style-Wert — vernachlässigbar günstig).
         await JS.InvokeVoidAsync("pageboundWysiwyg.setZoom", _zoomMode, EditorLayouts.For(_doc.Layout).WidthMm);
+        await SyncMindWidgetAsync();
         await MeasureOverflowAsync();
+    }
+
+    // --- Interaktive D3-Mindmap-Widgets (alle Mindmap-Blöcke, im Editor live) ----
+    private readonly HashSet<string> _mountedMinds = new();
+
+    /// <summary>Hält die Live-D3-Widgets aller Mindmap-Blöcke synchron: montiert/
+    /// aktualisiert jedes, demontiert entfernte. mount() ist idempotent (gleicher
+    /// Baum → nur Auswahl-Highlight), daher pro Render günstig. Nur der gewählte
+    /// Block bekommt die Knoten-Hervorhebung.</summary>
+    private async Task SyncMindWidgetAsync()
+    {
+        if (_selfRef is null) return;
+        var current = new HashSet<string>();
+        foreach (var b in _doc.Pages.SelectMany(p => p.Blocks)
+                     .Where(b => b.Type == EditorBlockType.Mindmap && b.Mind is not null))
+        {
+            var elId = $"mind-{b.Id}";
+            current.Add(elId);
+            var json = JsonSerializer.Serialize(b.Mind, ImportJsonOptions);
+            var selId = _selected == b ? _mindNodeId : null;
+            await JS.InvokeVoidAsync("pageboundMind.mount", elId, b.Id, json, selId, _selfRef);
+        }
+        foreach (var gone in _mountedMinds.Where(m => !current.Contains(m)).ToList())
+            await JS.InvokeVoidAsync("pageboundMind.unmount", gone);
+        _mountedMinds.Clear();
+        _mountedMinds.UnionWith(current);
+    }
+
+    /// <summary>Klick auf einen Knoten im Live-Widget → Block + Knoten auswählen.</summary>
+    [JSInvokable]
+    public Task OnMindNodeClicked(string blockId, string nodeId)
+    {
+        var block = _doc.Pages.SelectMany(p => p.Blocks)
+            .FirstOrDefault(b => b.Id == blockId && b.Type == EditorBlockType.Mindmap);
+        if (block is null) return Task.CompletedTask;
+        _selectedPage = _doc.Pages.First(p => p.Blocks.Contains(block));
+        _selected = block;
+        _selectedOverlay = null;
+        _mindNodeId = nodeId;
+        StateHasChanged();
+        return Task.CompletedTask;
     }
 
     /// <summary>Misst nach jedem Render, ob Seiteninhalt das Papierformat sprengt (würde im Druck abgeschnitten).</summary>
@@ -1182,6 +1290,41 @@
         }
     }
 
+    // --- HTML-Import (Texte aus einer hochgeladenen HTML-Datei übernehmen) -------
+    private async Task OnImportHtml(InputFileChangeEventArgs e)
+    {
+        try
+        {
+            const long max = 32 * 1024 * 1024;
+            await using var stream = e.File.OpenReadStream(max);
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms);
+            var html = Encoding.UTF8.GetString(ms.ToArray());
+            // Strukturextraktion (Überschriften/Absätze/Listen/Tabellen/Bilder) im
+            // Browser-DOM; das Ergebnis ist EditorDocument-förmig und durchläuft
+            // dieselbe Säuberung wie der JSON-Import (Skripte/Styles fliegen raus).
+            var json = await JS.InvokeAsync<string>("pageboundWysiwyg.importHtmlToDocument", html);
+            var doc = await ParseDesignJsonAsync(json);
+            if (doc is null || doc.Pages.Count == 0) throw new JsonException();
+            doc.Id = Guid.NewGuid().ToString("N");
+            doc.Title = string.IsNullOrWhiteSpace(doc.Title) ? StripExtension(e.File.Name) : doc.Title;
+            PushUndo();
+            _doc = doc;
+            AfterDocReplaced();
+            _status = L.T("editor.import.done");
+        }
+        catch
+        {
+            _status = L.T("editor.import.error");
+        }
+    }
+
+    private static string StripExtension(string name)
+    {
+        var dot = name.LastIndexOf('.');
+        return dot > 0 ? name[..dot] : name;
+    }
+
     /// <summary>Parst + säubert eine Dokument-JSON aus Fremdquellen (Datei-Import,
     /// Design-Ordner). Liefert <c>null</c>, wenn die Datei kein gültiges Dokument ist.</summary>
     private async Task<EditorDocument?> ParseDesignJsonAsync(string json)
@@ -1232,6 +1375,7 @@
                 if (b.FontSizePt is int pt) b.FontSizePt = Math.Clamp(pt, 6, 120);
                 if (b.Src is not null && !b.Src.StartsWith("data:image/", StringComparison.OrdinalIgnoreCase))
                     b.Src = null;
+                if (b.Mind is not null) SanitizeMindNode(b.Mind, 0);
             }
             foreach (var ov in page.Overlays)
             {
@@ -1250,6 +1394,19 @@
                     ov.Src = null;
             }
         }
+    }
+
+    /// <summary>Begrenzt einen importierten Mindmap-Baum: Labels als Klartext (kein
+    /// HTML), Tiefe ≤ 8, ≤ 100 Kinder je Knoten, gültige Ids. Schützt vor
+    /// manipulierten/übergroßen Bäumen aus Fremddateien.</summary>
+    private static void SanitizeMindNode(MindmapNode n, int depth)
+    {
+        n.Label = (n.Label ?? string.Empty).Replace('<', ' ').Replace('>', ' ').Trim();
+        if (n.Label.Length > 200) n.Label = n.Label[..200];
+        if (string.IsNullOrWhiteSpace(n.Id)) n.Id = Guid.NewGuid().ToString("N");
+        if (depth >= 8) { n.Children.Clear(); return; }
+        if (n.Children.Count > 100) n.Children = n.Children.Take(100).ToList();
+        foreach (var c in n.Children) SanitizeMindNode(c, depth + 1);
     }
 
     /// <summary>Säubert alle Rich-Text-Felder eines importierten Dokuments über den
@@ -1530,11 +1687,36 @@
     private void SelectBlock(EditorPage page, EditorBlock b)
     {
         if (_selected != b) _cropL = _cropT = _cropR = _cropB = 0;
+        if (_selected != b && b.Type is EditorBlockType.Mindmap) _mindNodeId = b.Mind?.Id;
         _selected = b;
         _selectedPage = page;
         _selectedOverlay = null;
     }
-    private void SelectPage(EditorPage page) { _selectedPage = page; _selected = null; _selectedOverlay = null; }
+    private void SelectPage(EditorPage page)
+    {
+        _selectedPage = page; _selected = null; _selectedOverlay = null;
+        if (_singleSlide) { var i = _doc.Pages.IndexOf(page); if (i >= 0) _slideIndex = i; }
+    }
+
+    // --- Einzelfolien-Ansicht ----------------------------------------------------
+    private void ToggleSingleSlide()
+    {
+        _singleSlide = !_singleSlide;
+        if (_singleSlide)
+        {
+            var i = _selectedPage is null ? 0 : _doc.Pages.IndexOf(_selectedPage);
+            _slideIndex = Math.Clamp(i < 0 ? 0 : i, 0, Math.Max(0, _doc.Pages.Count - 1));
+            _selectedPage = _doc.Pages[_slideIndex];
+        }
+    }
+
+    private void GoSlide(int dir)
+    {
+        _slideIndex = Math.Clamp(_slideIndex + dir, 0, _doc.Pages.Count - 1);
+        _selectedPage = _doc.Pages[_slideIndex];
+        _selected = null;
+        _selectedOverlay = null;
+    }
     private void SelectOverlay(EditorPage page, EditorOverlay ov) { _selectedOverlay = ov; _selectedPage = page; _selected = null; }
     private void DeselectIfBackground() { _selected = null; _selectedOverlay = null; }
 
@@ -1635,9 +1817,24 @@
                 b.Align = "center";
                 b.Src = await JS.InvokeAsync<string>("pageboundWysiwyg.makeQr", b.Text, 512);
                 break;
+            case EditorBlockType.Mindmap:
+                b.WidthPercent = 80;
+                b.Align = "center";
+                b.Mind = new MindmapNode
+                {
+                    Label = L.T("editor.mind.rootDefault"),
+                    Children =
+                    {
+                        new MindmapNode { Label = L.T("editor.mind.branchDefault") + " 1" },
+                        new MindmapNode { Label = L.T("editor.mind.branchDefault") + " 2" }
+                    }
+                };
+                b.Src = await JS.InvokeAsync<string>("pageboundMind.renderMindmapDataUrl", JsonSerializer.Serialize(b.Mind, ImportJsonOptions));
+                break;
         }
         page.Blocks.Add(b);
         _selected = b;
+        if (b.Mind is not null) _mindNodeId = b.Mind.Id;
         _selectedOverlay = null;
         if (type is EditorBlockType.Heading or EditorBlockType.Paragraph) _focusBlockId = b.Id;
     }
@@ -1647,6 +1844,151 @@
         if (_selected is null || _selected.Type != EditorBlockType.QrCode) return;
         _selected.Text = text;
         _selected.Src = await JS.InvokeAsync<string>("pageboundWysiwyg.makeQr", text, 512);
+    }
+
+    // --- Mindmap-Block: bearbeitbarer Knoten-Baum -------------------------------
+    private string? _mindNodeId;
+
+    /// <summary>Knoten in Vorlauf-Reihenfolge mit Tiefe (für Dropdown + Operationen).</summary>
+    private static IEnumerable<(MindmapNode node, int depth)> FlattenMind(MindmapNode root)
+    {
+        IEnumerable<(MindmapNode, int)> Rec(MindmapNode n, int d)
+        {
+            yield return (n, d);
+            foreach (var c in n.Children)
+                foreach (var x in Rec(c, d + 1))
+                    yield return x;
+        }
+        return Rec(root, 0);
+    }
+
+    private static MindmapNode? FindMindNode(MindmapNode root, string? id)
+        => id is null ? null : FlattenMind(root).Select(t => t.node).FirstOrDefault(n => n.Id == id);
+
+    private static MindmapNode? FindMindParent(MindmapNode root, string id)
+        => FlattenMind(root).Select(t => t.node).FirstOrDefault(n => n.Children.Any(c => c.Id == id));
+
+    private static string MindIndent(int depth) => depth == 0 ? "" : new string(' ', depth * 3) + "└ ";
+    private static string MindShort(string label)
+        => string.IsNullOrEmpty(label) ? "—" : (label.Length > 42 ? label[..42] + "…" : label);
+
+    private bool CanMindIndent(MindmapNode node)
+    {
+        if (_selected?.Mind is null || node == _selected.Mind) return false;
+        var parent = FindMindParent(_selected.Mind, node.Id);
+        return parent is not null && parent.Children.IndexOf(node) > 0; // braucht einen Vorgänger-Geschwisterknoten
+    }
+
+    private bool CanMindOutdent(MindmapNode node)
+    {
+        if (_selected?.Mind is null || node == _selected.Mind) return false;
+        var parent = FindMindParent(_selected.Mind, node.Id);
+        return parent is not null && parent != _selected.Mind; // Eltern dürfen nicht die Wurzel sein
+    }
+
+    private MindmapNode? CurrentMindNode()
+        => _selected?.Mind is null ? null : FindMindNode(_selected.Mind, _mindNodeId) ?? _selected.Mind;
+
+    private void OnMindNodeSelect(ChangeEventArgs e) => _mindNodeId = e.Value?.ToString();
+
+    private Task OnMindLabelChange(ChangeEventArgs e) => MindRename(e.Value?.ToString() ?? string.Empty);
+
+    private async Task RerenderMindAsync()
+    {
+        if (_selected?.Mind is null) return;
+        var json = JsonSerializer.Serialize(_selected.Mind, ImportJsonOptions);
+        _selected.Src = await JS.InvokeAsync<string>("pageboundMind.renderMindmapDataUrl", json);
+    }
+
+    private async Task MindRename(string label)
+    {
+        var node = CurrentMindNode();
+        if (node is null) return;
+        PushUndo();
+        node.Label = label;
+        await RerenderMindAsync();
+    }
+
+    private async Task MindAddChild()
+    {
+        var node = CurrentMindNode();
+        if (node is null) return;
+        PushUndo();
+        var child = new MindmapNode { Label = L.T("editor.mind.branchDefault") };
+        node.Children.Add(child);
+        _mindNodeId = child.Id;
+        await RerenderMindAsync();
+    }
+
+    private async Task MindAddSibling()
+    {
+        if (_selected?.Mind is null) return;
+        var node = CurrentMindNode();
+        if (node is null || node == _selected.Mind) return;
+        var parent = FindMindParent(_selected.Mind, node.Id);
+        if (parent is null) return;
+        PushUndo();
+        var sibling = new MindmapNode { Label = L.T("editor.mind.branchDefault") };
+        parent.Children.Insert(parent.Children.IndexOf(node) + 1, sibling);
+        _mindNodeId = sibling.Id;
+        await RerenderMindAsync();
+    }
+
+    private async Task MindDelete()
+    {
+        if (_selected?.Mind is null) return;
+        var node = CurrentMindNode();
+        if (node is null || node == _selected.Mind) return;
+        var parent = FindMindParent(_selected.Mind, node.Id);
+        if (parent is null) return;
+        PushUndo();
+        parent.Children.Remove(node);
+        _mindNodeId = parent.Id;
+        await RerenderMindAsync();
+    }
+
+    private async Task MindMove(int dir)
+    {
+        if (_selected?.Mind is null) return;
+        var node = CurrentMindNode();
+        if (node is null || node == _selected.Mind) return;
+        var parent = FindMindParent(_selected.Mind, node.Id);
+        if (parent is null) return;
+        var i = parent.Children.IndexOf(node);
+        var j = i + dir;
+        if (j < 0 || j >= parent.Children.Count) return;
+        PushUndo();
+        (parent.Children[i], parent.Children[j]) = (parent.Children[j], parent.Children[i]);
+        await RerenderMindAsync();
+    }
+
+    /// <summary>Einrücken: Knoten wird Kind seines vorherigen Geschwisterknotens.</summary>
+    private async Task MindIndentNode()
+    {
+        if (_selected?.Mind is null) return;
+        var node = CurrentMindNode();
+        if (node is null || !CanMindIndent(node)) return;
+        var parent = FindMindParent(_selected.Mind, node.Id)!;
+        var i = parent.Children.IndexOf(node);
+        var prev = parent.Children[i - 1];
+        PushUndo();
+        parent.Children.RemoveAt(i);
+        prev.Children.Add(node);
+        await RerenderMindAsync();
+    }
+
+    /// <summary>Ausrücken: Knoten wird Geschwister seines Elternknotens (eine Ebene höher).</summary>
+    private async Task MindOutdent()
+    {
+        if (_selected?.Mind is null) return;
+        var node = CurrentMindNode();
+        if (node is null || !CanMindOutdent(node)) return;
+        var parent = FindMindParent(_selected.Mind, node.Id)!;
+        var grand = FindMindParent(_selected.Mind, parent.Id)!;
+        PushUndo();
+        parent.Children.Remove(node);
+        grand.Children.Insert(grand.Children.IndexOf(parent) + 1, node);
+        await RerenderMindAsync();
     }
 
     private async Task ColumnAdd(EditorBlock b)
@@ -2030,13 +2372,24 @@
 
     private async Task ExportPdf()
     {
+        // Klarer Hinweis: PDF ist statisch — interaktive Elemente (Mindmaps, Folien-
+        // Navigation) erscheinen als Standbild. Nur bei vorhandenen Mindmaps warnen.
+        if (DocumentHasInteractive() &&
+            !await JS.InvokeAsync<bool>("confirm", L.T("editor.export.pdfWarn")))
+            return;
         await JS.InvokeVoidAsync("pageboundWysiwyg.blurActive");
         await SyncAllAsync();
         _selected = null;
+        var wasSingle = _singleSlide;
+        _singleSlide = false; // alle Seiten in den Druck aufnehmen
         StateHasChanged();
         await JS.InvokeVoidAsync("pageboundWysiwyg.setPageSize", EditorLayouts.For(_doc.Layout).CssPageSize);
         await JS.InvokeVoidAsync("pageboundWysiwyg.triggerPrint");
+        _singleSlide = wasSingle;
     }
+
+    private bool DocumentHasInteractive()
+        => _doc.Pages.Any(p => p.Blocks.Any(b => b.Type == EditorBlockType.Mindmap));
 
     private async Task ExportHtml()
     {
@@ -2058,6 +2411,54 @@
         var html = BuildStandaloneHtml(_doc.Title, dim, pages);
         await DownloadTextAsync(SafeName(_doc.Title) + ".html", html, "text/html");
     }
+
+    /// <summary>Interaktiver HTML-Export: Folien-Layouts werden ein Deck mit
+    /// Navigation (Pfeiltasten/Buttons), Mindmaps bleiben als Live-D3-Widget
+    /// bedienbar (Zoom/Auf-/Zuklappen). Kein PDF — vollständig dynamisch.</summary>
+    private async Task ExportInteractiveHtml()
+    {
+        await JS.InvokeVoidAsync("pageboundWysiwyg.blurActive");
+        await SyncAllAsync();
+        _selected = null;
+        var wasSingle = _singleSlide;
+        _singleSlide = false; // alle Seiten rendern (DOM-Quelle des Exports)
+        StateHasChanged();
+        await Task.Yield();
+
+        var dim = EditorLayouts.For(_doc.Layout);
+        var allBlocks = _doc.Pages.SelectMany(p => p.Blocks).ToList();
+        var anyMind = allBlocks.Any(b => b.Type == EditorBlockType.Mindmap && b.Mind is not null);
+
+        var pages = new List<(string Style, string Inner)>();
+        for (var i = 0; i < _doc.Pages.Count; i++)
+        {
+            var inner = await JS.InvokeAsync<string>("pageboundWysiwyg.getCleanHtml", $"pb-page-{i}");
+            inner = ReplaceMindImages(inner, allBlocks);
+            pages.Add((PageThemeAndColorCss(_doc.Pages[i]), inner));
+        }
+
+        // D3-Bundle nur einbetten, wenn Mindmaps vorhanden sind (sonst kein Ballast).
+        var mindJs = anyMind ? await JS.InvokeAsync<string>("pageboundWysiwyg.fetchText", "js/mind-bridge.js") : "";
+        var isDeck = _doc.Layout == PageLayout.Slide16x9 && _doc.Pages.Count > 1;
+        var html = BuildInteractiveHtml(_doc.Title, dim, pages, isDeck, mindJs);
+        await DownloadTextAsync(SafeName(_doc.Title) + "-interaktiv.html", html, "text/html");
+
+        _singleSlide = wasSingle;
+    }
+
+    /// <summary>Ersetzt statische Mindmap-Bilder (&lt;img data-mind="…"&gt;) im
+    /// Export-HTML durch Live-Container mit base64-kodierten Baumdaten.</summary>
+    private string ReplaceMindImages(string html, List<EditorBlock> allBlocks)
+        => System.Text.RegularExpressions.Regex.Replace(html,
+            "<img\\b[^>]*\\bdata-mind=\"([^\"]+)\"[^>]*>",
+            m =>
+            {
+                var blk = allBlocks.FirstOrDefault(b => b.Id == m.Groups[1].Value);
+                if (blk?.Mind is null) return m.Value; // Bild als Fallback behalten
+                var json = JsonSerializer.Serialize(blk.Mind, ImportJsonOptions);
+                var b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(json));
+                return $"<div class=\"pb-mind-host\" data-mind-tree=\"{b64}\"></div>";
+            });
 
     private async Task ExportJson()
     {
@@ -2110,6 +2511,65 @@
         foreach (var (style, inner) in pages)
         {
             sb.Append("<div class=\"pb-page\" style=\"").Append(style).Append("\">").Append(inner).Append("</div>");
+        }
+        sb.Append("</body></html>");
+        return sb.ToString();
+    }
+
+    /// <summary>Standalone-HTML mit Interaktivität: Folien-Deck (Navigation) und
+    /// Live-D3-Mindmaps. Druck/PDF aus dieser Datei zeigt weiterhin Standbilder.</summary>
+    private static string BuildInteractiveHtml(string title, PageDimensions dim, List<(string Style, string Inner)> pages, bool isDeck, string mindBundleJs)
+    {
+        var safeTitle = System.Net.WebUtility.HtmlEncode(string.IsNullOrWhiteSpace(title) ? "Dokument" : title);
+        var sb = new StringBuilder();
+        sb.Append("<!doctype html><html lang=\"de\"><head><meta charset=\"utf-8\">");
+        sb.Append("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">");
+        sb.Append("<title>").Append(safeTitle).Append("</title><style>");
+        sb.Append("@page{size:").Append(dim.CssPageSize).Append(";margin:0}");
+        sb.Append("body{margin:0;background:#e5e7eb;color:#111827;font-family:Georgia,'Times New Roman',serif}");
+        sb.Append(".pb-page{box-sizing:border-box;position:relative;background:#fff;width:").Append(dim.CssWidth)
+          .Append(";min-height:").Append(dim.CssHeight).Append(";padding:").Append(dim.CssMargin).Append(";margin:0 auto 12px;")
+          .Append("color:var(--doc-color-body,#111827);font-family:var(--doc-font-body,Georgia,'Times New Roman',serif)}");
+        sb.Append(".pb-page-bg{position:absolute;inset:0;pointer-events:none}");
+        sb.Append(".pb-block{position:relative;margin:0 0 8px}.pb-block:last-child{margin-bottom:0}");
+        sb.Append(".pb-h1,.pb-h2,.pb-h3{font-family:var(--doc-font-heading,inherit);color:var(--doc-color-heading,inherit)}");
+        sb.Append(".pb-h1{font-size:22pt;font-weight:700}.pb-h2{font-size:16pt;font-weight:700}.pb-h3{font-size:13pt;font-weight:700}");
+        sb.Append(".pb-para{font-size:11pt;line-height:1.5}.pb-spacer{width:100%}");
+        sb.Append(".pb-img{display:inline-block;max-width:100%;height:auto}.pb-img-wrap.align-center{text-align:center}.pb-img-wrap.align-right{text-align:right}");
+        sb.Append(".pb-cols{display:flex;align-items:flex-start}.pb-col{flex:1 1 0;min-width:0;font-size:11pt}");
+        sb.Append(".pb-overlay{position:absolute;box-sizing:border-box}.pb-ov-text{word-wrap:break-word}");
+        sb.Append(".pb-ov-img{display:block;width:100%;height:auto}.pb-ov-shape{width:100%;height:100%}.pb-ov-shape.is-ellipse{border-radius:50%}");
+        sb.Append(".pb-shape-rect{width:100%;border:1.5px solid currentColor}.pb-shape-rect.is-filled{background:currentColor;border:none}");
+        sb.Append(".pb-shape-line{border-top:1.5px solid currentColor}.pb-shape-divider{border-top:1px solid var(--doc-color-accent,#d1d5db);margin:6px 0}");
+        sb.Append(".pb-table{width:100%;border-collapse:collapse;font-size:10.5pt}.pb-table td,.pb-table th{border:1px solid #9ca3af;padding:4px 8px;text-align:left}.pb-table th{background:var(--doc-color-accent-soft,#f3f4f6);color:#111827}");
+        sb.Append(".align-center{text-align:center}.align-right{text-align:right}.align-justify{text-align:justify}");
+        // Live-Mindmap-Container
+        sb.Append(".pb-mind-host{display:inline-block;width:100%;height:").Append(isDeck ? "66vh" : "480px")
+          .Append(";min-height:320px;border:1px solid #d6d3cb;border-radius:10px;background:#F9F8F6;overflow:hidden;vertical-align:top}");
+        if (isDeck)
+        {
+            sb.Append("body{background:#1f2937}");
+            sb.Append(".pb-page{display:none;box-shadow:0 12px 48px rgba(0,0,0,.45)}");
+            sb.Append(".pb-page.active{display:block}");
+            sb.Append(".deck-nav{position:fixed;left:0;right:0;bottom:0;display:flex;justify-content:center;align-items:center;gap:18px;padding:10px;background:rgba(17,24,39,.9);color:#fff;font-family:system-ui,sans-serif;z-index:50}");
+            sb.Append(".deck-nav button{font:inherit;cursor:pointer;border:1px solid #6b7280;background:#374151;color:#fff;border-radius:8px;padding:6px 18px;font-size:18px;line-height:1}");
+            sb.Append(".deck-nav button:disabled{opacity:.4;cursor:default}");
+            sb.Append("@media print{.deck-nav{display:none}.pb-page{display:block !important}}");
+        }
+        sb.Append("*{-webkit-print-color-adjust:exact;print-color-adjust:exact}");
+        sb.Append("</style></head><body").Append(isDeck ? " class=\"pb-deck\"" : "").Append(">");
+        foreach (var (style, inner) in pages)
+            sb.Append("<div class=\"pb-page\" style=\"").Append(style).Append("\">").Append(inner).Append("</div>");
+        if (isDeck)
+        {
+            sb.Append("<div class=\"deck-nav\"><button id=\"deck-prev\" aria-label=\"prev\">‹</button>")
+              .Append("<span id=\"deck-counter\"></span><button id=\"deck-next\" aria-label=\"next\">›</button></div>");
+            sb.Append("<script>(function(){var s=[].slice.call(document.querySelectorAll('.pb-page'));if(!s.length)return;var i=0;var c=document.getElementById('deck-counter');var p=document.getElementById('deck-prev'),n=document.getElementById('deck-next');function show(x){i=Math.max(0,Math.min(s.length-1,x));s.forEach(function(e,k){e.classList.toggle('active',k===i);});c.textContent=(i+1)+' / '+s.length;p.disabled=i===0;n.disabled=i===s.length-1;}p.onclick=function(){show(i-1);};n.onclick=function(){show(i+1);};document.addEventListener('keydown',function(e){if(e.key==='ArrowRight'||e.key===' '){e.preventDefault();show(i+1);}if(e.key==='ArrowLeft')show(i-1);});show(0);})();</script>");
+        }
+        if (!string.IsNullOrEmpty(mindBundleJs))
+        {
+            sb.Append("<script>").Append(mindBundleJs).Append("</script>");
+            sb.Append("<script>try{pageboundMind.mountAllViewers();}catch(e){}</script>");
         }
         sb.Append("</body></html>");
         return sb.ToString();

@@ -45,6 +45,9 @@ COPY --from=jsbuild /web/wwwroot/js/split-bridge.js           /src/Pagebound.Web
 COPY --from=jsbuild /web/wwwroot/js/workspace-bridge.js       /src/Pagebound.Web/wwwroot/js/workspace-bridge.js
 COPY --from=jsbuild /web/wwwroot/js/tweaks-bridge.js          /src/Pagebound.Web/wwwroot/js/tweaks-bridge.js
 COPY --from=jsbuild /web/wwwroot/js/wysiwyg-editor.js         /src/Pagebound.Web/wwwroot/js/wysiwyg-editor.js
+COPY --from=jsbuild /web/wwwroot/js/mind-bridge.js            /src/Pagebound.Web/wwwroot/js/mind-bridge.js
+COPY --from=jsbuild /web/wwwroot/js/designs-bridge.js         /src/Pagebound.Web/wwwroot/js/designs-bridge.js
+COPY --from=jsbuild /web/wwwroot/js/sign-bridge.js            /src/Pagebound.Web/wwwroot/js/sign-bridge.js
 COPY --from=jsbuild /web/wwwroot/js/pdf.worker.min.mjs        /src/Pagebound.Web/wwwroot/js/pdf.worker.min.mjs
 
 WORKDIR /src/Pagebound.Web

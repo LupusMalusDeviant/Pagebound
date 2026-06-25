@@ -442,6 +442,12 @@ export function readValues(ids: string[]): Record<string, string> {
   return out;
 }
 
+/** Lädt eine Text-Ressource (z. B. ein JS-Bundle) zum Inlinen in den HTML-Export. */
+export async function fetchText(url: string): Promise<string> {
+  try { const r = await fetch(url, { cache: "no-store" }); return r.ok ? await r.text() : ""; }
+  catch { return ""; }
+}
+
 /** Entfernt den Fokus vom aktiven Element (löst dessen blur-Sync aus). */
 export function blurActive(): void {
   const el = document.activeElement as HTMLElement | null;
@@ -503,6 +509,661 @@ export function sanitizeHtmlBatch(values: string[]): string[] {
     sanitizeNode(tpl.content as unknown as Element);
     return tpl.innerHTML;
   });
+}
+
+// =============================================================================
+// HTML-Datei-Import (PF-02-Erweiterung)
+// ----------------------------------------------------------------------------
+// Wandelt eine hochgeladene HTML-Datei in ein EditorDocument-förmiges JSON, das
+// C# über die bestehende Import-/Sanitize-Pipeline (ParseDesignJsonAsync) lädt.
+// Fokus auf Textstruktur: Überschriften, Absätze, Listen, Tabellen und Bilder
+// werden auf die nativen Block-Typen abgebildet. Skripte, Styles, Layout-
+// Frameworks (Tailwind o. Ä.), Icons und interaktive Elemente werden verworfen —
+// das DOM wird per `DOMParser` robust geparst (verträgt auch fehlerhaftes HTML).
+// =============================================================================
+
+/** Inline-Tags, die als Auszeichnung erhalten bleiben (auf Standard-Tags gemappt). */
+const INLINE_MAP: Record<string, string> = {
+  B: "strong", STRONG: "strong", I: "em", EM: "em", U: "u", S: "s", STRIKE: "s",
+  SUB: "sub", SUP: "sup", CODE: "code", MARK: "mark", SMALL: "small",
+};
+
+/** Elemente, deren Inhalt beim Import komplett ignoriert wird (kein Textinhalt). */
+const IMPORT_SKIP_TAGS = new Set([
+  "SCRIPT", "STYLE", "NOSCRIPT", "SVG", "CANVAS", "IFRAME", "OBJECT", "EMBED",
+  "NAV", "BUTTON", "INPUT", "SELECT", "TEXTAREA", "HEAD", "LINK", "META",
+  "AUDIO", "VIDEO", "FORM", "TEMPLATE", "DIALOG", "BASE",
+]);
+
+function escImportHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+function escImportAttr(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+function sanitizeImportHref(href: string | null): string | null {
+  const v = (href ?? "").trim();
+  const low = v.toLowerCase();
+  if (low.startsWith("http://") || low.startsWith("https://") || low.startsWith("mailto:") || low.startsWith("tel:")) return v;
+  return null;
+}
+
+function isInlineTag(tag: string): boolean {
+  return tag === "BR" || tag === "A" || tag === "SPAN" || tag in INLINE_MAP;
+}
+
+/** Serialisiert einen Knoten zu sauberem Inline-HTML (nur Whitelist-Auszeichnung). */
+function serializeInline(node: Node): string {
+  if (node.nodeType === Node.TEXT_NODE) return escImportHtml(node.textContent ?? "");
+  if (node.nodeType !== Node.ELEMENT_NODE) return "";
+  const el = node as Element;
+  const tag = el.tagName;
+  if (tag === "BR") return "<br>";
+  if (IMPORT_SKIP_TAGS.has(tag)) return "";
+  const inner = Array.from(el.childNodes).map(serializeInline).join("");
+  if (tag === "A") {
+    const href = sanitizeImportHref(el.getAttribute("href"));
+    return href && inner.trim() ? `<a href="${escImportAttr(href)}">${inner}</a>` : inner;
+  }
+  const mapped = INLINE_MAP[tag];
+  if (mapped) return inner.trim() ? `<${mapped}>${inner}</${mapped}>` : ""; // leere Icons (<i class="fa…">) verwerfen
+  return inner; // unbekanntes/Block-Element im Inline-Kontext: nur Inhalt übernehmen
+}
+
+function cleanInlineHtml(parent: Element): string {
+  return Array.from(parent.childNodes).map(serializeInline).join("").replace(/\s+/g, " ").trim();
+}
+
+/** Knoten eines Mindmap-Baums (Im-/Export-Form, deckt sich mit C# MindmapNode). */
+interface MNode { id: string; label: string; children: MNode[]; }
+
+// Medien-Job: nachgelagert aufgelöste Bildquelle (externes Bild, gerastertes
+// SVG/Canvas oder gezeichneter Mindmap-Baum). `place` schreibt die data-URL zurück.
+type MediaJob =
+  | { kind: "url"; src: string; place: (d: string | null) => void }
+  | { kind: "svg"; el: Element; place: (d: string | null) => void }
+  | { kind: "canvas"; el: HTMLCanvasElement; place: (d: string | null) => void }
+  | { kind: "mindmap"; tree: MNode; place: (d: string | null) => void };
+
+// Walk-Kontext: gesammelte Medien-Jobs + optionales `win` für getComputedStyle.
+// Ist `win` gesetzt (Rich-Modus über iframe), übernimmt der Walker zusätzlich
+// Farben/Boxen/Schriftgrößen, rastert Grafiken und erkennt Mindmaps (→ `trees`).
+interface ImportCtx { jobs: MediaJob[]; win: Window | null; trees: MNode[]; }
+
+const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+// --- Stil-Helfer (nur Rich-Modus) -------------------------------------------
+function rgbToHex(rgb: string | null | undefined): string | null {
+  const m = (rgb ?? "").match(/rgba?\(([^)]+)\)/i);
+  if (!m) return null;
+  const p = m[1].split(",").map((s) => parseFloat(s.trim()));
+  if (p.length >= 4 && p[3] < 0.06) return null; // transparent
+  const h = (n: number) => Math.max(0, Math.min(255, Math.round(n || 0))).toString(16).padStart(2, "0");
+  return "#" + h(p[0]) + h(p[1]) + h(p[2]);
+}
+function pxToPt(px: string | null | undefined): number | undefined {
+  const v = parseFloat(px ?? "");
+  if (!isFinite(v) || v <= 0) return undefined;
+  return Math.max(6, Math.min(120, Math.round(v * 0.75)));
+}
+function alignOf(v: string | null | undefined): string {
+  return v === "center" || v === "right" || v === "justify" ? v : "left";
+}
+/** Block-Eigenschaften (Ausrichtung, Schriftgröße) aus den berechneten Stilen. */
+function styleProps(el: Element, win: Window | null): any {
+  if (!win) return {};
+  const cs = win.getComputedStyle(el);
+  const out: any = {};
+  const a = alignOf(cs.textAlign); if (a !== "left") out.align = a;
+  const pt = pxToPt(cs.fontSize); if (pt) out.fontSizePt = pt;
+  return out;
+}
+/** Bäckt Textfarbe/-gewicht/-stil als Inline-<span> ein (block.Color wird vom
+ *  Renderer für Texte nicht angewandt — der Sanitizer behält aber `style`). */
+function decorateText(el: Element, win: Window | null, inner: string): string {
+  if (!win || !inner) return inner;
+  const cs = win.getComputedStyle(el);
+  const parts: string[] = [];
+  const color = rgbToHex(cs.color);
+  if (color && color.toLowerCase() !== "#000000") parts.push(`color:${color}`);
+  const weight = parseInt(cs.fontWeight, 10) || 400;
+  if (weight >= 600) parts.push(`font-weight:${Math.min(weight, 800)}`);
+  if (cs.fontStyle === "italic") parts.push("font-style:italic");
+  return parts.length ? `<span style="${parts.join(";")}">${inner}</span>` : inner;
+}
+/** Erkennt eine „Box" (Hintergrund/Rahmen) und liefert passendes Inline-CSS. */
+function computeBox(el: Element, win: Window | null): { hasBox: boolean; css: string } {
+  if (!win) return { hasBox: false, css: "" };
+  const cs = win.getComputedStyle(el);
+  const out: string[] = [];
+  const bg = rgbToHex(cs.backgroundColor);
+  if (bg) out.push(`background:${bg}`);
+  const sides = ["Top", "Right", "Bottom", "Left"];
+  let maxW = 0, bColor = "", bSide = "";
+  for (const s of sides) {
+    const w = parseFloat((cs as any)[`border${s}Width`]) || 0;
+    if (w > maxW) { maxW = w; bColor = rgbToHex((cs as any)[`border${s}Color`]) || ""; bSide = s.toLowerCase(); }
+  }
+  if (maxW >= 1 && bColor) {
+    const allEq = sides.every((s) => Math.abs((parseFloat((cs as any)[`border${s}Width`]) || 0) - maxW) < 0.5);
+    out.push(allEq ? `border:${Math.min(maxW, 8)}px solid ${bColor}`
+                   : `border-${bSide}:${Math.min(maxW, 8)}px solid ${bColor}`);
+  }
+  const radius = parseFloat(cs.borderTopLeftRadius) || 0;
+  if (radius >= 1) out.push(`border-radius:${Math.min(radius, 24)}px`);
+  const pad = parseFloat(cs.paddingTop) || 0;
+  if (pad >= 4) out.push(`padding:${Math.min(pad, 32)}px`);
+  return { hasBox: !!bg || (maxW >= 1 && !!bColor), css: out.join(";") };
+}
+
+function buildImportList(el: Element): string {
+  const tag = el.tagName === "OL" ? "ol" : "ul";
+  let items = "";
+  for (const li of Array.from(el.children)) {
+    if (li.tagName !== "LI") continue;
+    const inner = cleanInlineHtml(li);
+    if (inner) items += `<li>${inner}</li>`;
+  }
+  return items ? `<${tag}>${items}</${tag}>` : "";
+}
+
+function buildImportTable(el: Element): any | null {
+  const rows: string[][] = [];
+  let headerRow = false;
+  const trs = Array.from(el.querySelectorAll("tr"));
+  for (let r = 0; r < trs.length; r++) {
+    const cells = Array.from(trs[r].children).filter((c) => c.tagName === "TD" || c.tagName === "TH");
+    if (cells.length === 0) continue;
+    if (rows.length === 0 && cells.some((c) => c.tagName === "TH")) headerRow = true;
+    rows.push(cells.map((c) => cleanInlineHtml(c)));
+  }
+  if (rows.length === 0) return null;
+  const cols = Math.max(...rows.map((r) => r.length));
+  for (const r of rows) while (r.length < cols) r.push("");
+  return { type: "Table", rows, headerRow };
+}
+
+function pushImportImage(el: Element, blocks: any[], ctx: ImportCtx): void {
+  const src = (el.getAttribute("src") ?? "").trim();
+  if (!src) return;
+  const alt = (el.getAttribute("alt") ?? "").trim();
+  if (src.startsWith("data:image/")) { blocks.push({ type: "Image", src, alt, widthPercent: 100 }); return; }
+  // Externe Bilder werden best-effort eingebettet; der Block wird verworfen, wenn das scheitert.
+  const block: any = { type: "Image", src: null, alt, widthPercent: 100 };
+  blocks.push(block);
+  ctx.jobs.push({ kind: "url", src, place: (d) => { block.src = d; } });
+}
+
+/** SVG/Canvas-Grafik einreihen. Wurde ein Mindmap-Baum extrahiert, entsteht statt
+ *  eines Bildes ein bearbeitbarer Mindmap-Block; sonst ein (etwas schmaleres) Bild. */
+function rasterizeGraphic(el: Element, blocks: any[], ctx: ImportCtx): void {
+  // Mindmap erkannt (Baumdaten aus dem Script) → bearbeitbarer Mindmap-Block.
+  if (el.tagName !== "CANVAS" && ctx.trees.length > 0) {
+    const tree = ctx.trees.shift()!;
+    const block: any = { type: "Mindmap", mind: tree, src: null, widthPercent: 80 };
+    blocks.push(block);
+    ctx.jobs.push({ kind: "mindmap", tree, place: (d) => { block.src = d; } });
+    return;
+  }
+  const block: any = { type: "Image", src: null, alt: "", widthPercent: 70 };
+  blocks.push(block);
+  if (el.tagName === "CANVAS") ctx.jobs.push({ kind: "canvas", el: el as HTMLCanvasElement, place: (d) => { block.src = d; } });
+  else ctx.jobs.push({ kind: "svg", el, place: (d) => { block.src = d; } });
+}
+
+/** Läuft die direkten Kinder eines Containers ab und sammelt Blöcke (mit Inline-Puffer für Streutext). */
+function walkImportBlocks(root: Element, blocks: any[], ctx: ImportCtx, pageSet: Set<Element>, self: Element): void {
+  let inlineBuf = "";
+  const flush = () => {
+    const t = inlineBuf.replace(/\s+/g, " ").trim();
+    if (t) blocks.push({ type: "Paragraph", text: t });
+    inlineBuf = "";
+  };
+  for (const node of Array.from(root.childNodes)) {
+    if (node.nodeType === Node.TEXT_NODE) { inlineBuf += escImportHtml(node.textContent ?? ""); continue; }
+    if (node.nodeType !== Node.ELEMENT_NODE) continue;
+    const el = node as Element;
+    const tag = el.tagName;
+    if (pageSet.has(el) && el !== self) continue;       // gehört zu einer anderen Seite → Grenze
+    if (IMPORT_SKIP_TAGS.has(tag)) continue;
+    if (isInlineTag(tag)) { inlineBuf += serializeInline(el); continue; }
+    flush();                                            // Block-Element beendet den Inline-Lauf
+    handleImportBlock(el, blocks, ctx, pageSet, self);
+  }
+  flush();
+}
+
+/** Emittiert einen Textblock (Absatz) mit optionaler Stil-/Box-Übernahme. */
+function pushTextBlock(el: Element, blocks: any[], ctx: ImportCtx, bold = false): void {
+  let inner = cleanInlineHtml(el);
+  if (!inner) return;
+  if (bold) inner = `<strong>${inner}</strong>`;
+  if (ctx.win) {
+    inner = decorateText(el, ctx.win, inner);
+    const box = computeBox(el, ctx.win);
+    if (box.hasBox) inner = `<div style="${box.css}">${inner}</div>`;
+    blocks.push({ type: "Paragraph", text: inner, ...styleProps(el, ctx.win) });
+  } else {
+    blocks.push({ type: "Paragraph", text: inner });
+  }
+}
+
+function handleImportBlock(el: Element, blocks: any[], ctx: ImportCtx, pageSet: Set<Element>, self: Element): void {
+  const tag = el.tagName;
+  // Grafiken zuerst: gerendertes SVG/Canvas (Mindmap, Diagramme) → Bild.
+  if (ctx.win) {
+    const g = (tag === "SVG" || tag === "CANVAS") ? el : el.querySelector?.("svg, canvas");
+    if (g) { rasterizeGraphic(g, blocks, ctx); return; }
+  }
+  switch (tag) {
+    case "H1": case "H2": case "H3": case "H4": case "H5": case "H6": {
+      const inner = cleanInlineHtml(el);
+      if (!inner) return;
+      blocks.push({ type: "Heading", level: Math.min(3, Number(tag[1])),
+        text: decorateText(el, ctx.win, inner), ...styleProps(el, ctx.win) });
+      return;
+    }
+    case "P": case "BLOCKQUOTE": case "FIGCAPTION": case "PRE": case "DD": case "DT":
+      pushTextBlock(el, blocks, ctx); return;
+    case "SUMMARY":
+      pushTextBlock(el, blocks, ctx, true); return;
+    case "UL": case "OL": {
+      const list = buildImportList(el);
+      if (list) blocks.push({ type: "Paragraph", text: list, ...styleProps(el, ctx.win) });
+      return;
+    }
+    case "TABLE": {
+      const tbl = buildImportTable(el);
+      if (tbl) blocks.push(tbl);
+      return;
+    }
+    case "IMG": pushImportImage(el, blocks, ctx); return;
+    case "HR": blocks.push({ type: "Shape", shape: "divider", color: "#d1d5db", heightPx: 2 }); return;
+    default: {
+      // Container, der selbst wie eine gestaltete Text-Box aussieht (Hintergrund/
+      // Rahmen) und keine eigenständigen Blöcke enthält → als eine Box übernehmen.
+      if (ctx.win) {
+        const box = computeBox(el, ctx.win);
+        const leaf = box.hasBox && !el.querySelector("h1,h2,h3,h4,h5,h6,table,ul,ol,img,svg,canvas") && !!(el.textContent ?? "").trim();
+        if (leaf) {
+          let inner = cleanInlineHtml(el);
+          if (inner) {
+            inner = decorateText(el, ctx.win, inner);
+            blocks.push({ type: "Paragraph", text: `<div style="${box.css}">${inner}</div>`, ...styleProps(el, ctx.win) });
+          }
+          return;
+        }
+      }
+      walkImportBlocks(el, blocks, ctx, pageSet, self); // gewöhnlicher Container (div, section, details, figure …)
+      return;
+    }
+  }
+}
+
+/** Bestimmt die Seiten-Container (Slides/Sektionen → je eine Seite). */
+function collectPageContainers(doc: Document): Element[] {
+  const els = Array.from(doc.querySelectorAll(
+    ".slide, [class*='slide'], section, article, [data-page], [data-slide]",
+  )) as Element[];
+  return els.filter((el) => (el.textContent ?? "").trim().length > 0);
+}
+
+/** Hintergrundfarbe einer Seite = erste deckende Hintergrundfarbe aufwärts (z. B. Karten-Fläche). */
+function pageBgOf(el: Element | null, win: Window): string | null {
+  let n: Element | null = el;
+  for (let i = 0; i < 6 && n; i++) {
+    const c = rgbToHex(win.getComputedStyle(n).backgroundColor);
+    if (c && c.toLowerCase() !== "#ffffff") return c;
+    n = n.parentElement;
+  }
+  return null;
+}
+
+/** Lädt ein externes Bild und bettet es (komprimiert) als data-URL ein. Fehler → null. */
+async function tryEmbedImage(src: string): Promise<string | null> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 8000);
+  try {
+    const url = new URL(src, location.href);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    const resp = await fetch(url.toString(), { mode: "cors", signal: ctrl.signal });
+    if (!resp.ok) return null;
+    const blob = await resp.blob();
+    if (!blob.type.startsWith("image/") || blob.size > 12_000_000) return null;
+    const dataUrl = await new Promise<string>((res, rej) => {
+      const fr = new FileReader();
+      fr.onload = () => res(String(fr.result));
+      fr.onerror = () => rej(new Error("read"));
+      fr.readAsDataURL(blob);
+    });
+    return await compressDataUrl(dataUrl);
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Rastert ein gerendertes SVG (z. B. die D3-Mindmap) zu einer PNG-data-URL.
+ *  Schneidet auf den tatsächlich gezeichneten Inhalt zu (D3 platziert den Baum
+ *  oft in einer Ecke der SVG-Fläche → sonst riesige Leerräume / Überlauf). */
+async function svgToDataUrl(svg: Element): Promise<string | null> {
+  try {
+    const svgEl = svg as SVGSVGElement;
+    const svgRect = svgEl.getBoundingClientRect();
+    if (svgRect.width < 4 || svgRect.height < 4) return null;
+    // Standard: ganze SVG-Fläche. SVG hat width/height ohne viewBox → 1 Unit = 1 px.
+    let vx = 0, vy = 0, vw = Math.round(svgRect.width), vh = Math.round(svgRect.height);
+    // Auf den gezeichneten Inhalt (innere <g>) zuschneiden, falls vorhanden.
+    const content = svgEl.querySelector("g");
+    if (content) {
+      const cr = (content as SVGGraphicsElement).getBoundingClientRect();
+      if (cr.width > 4 && cr.height > 4) {
+        const pad = 18;
+        vx = Math.max(0, Math.round(cr.left - svgRect.left) - pad);
+        vy = Math.max(0, Math.round(cr.top - svgRect.top) - pad);
+        vw = Math.min(vw - vx, Math.round(cr.width) + pad * 2);
+        vh = Math.min(vh - vy, Math.round(cr.height) + pad * 2);
+      }
+    }
+    if (vw < 4 || vh < 4) return null;
+    const clone = svgEl.cloneNode(true) as SVGSVGElement;
+    clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+    clone.setAttribute("viewBox", `${vx} ${vy} ${vw} ${vh}`);
+    clone.setAttribute("width", String(vw));
+    clone.setAttribute("height", String(vh));
+    return await svgStringToPng(new XMLSerializer().serializeToString(clone), vw, vh);
+  } catch {
+    return null;
+  }
+}
+
+/** Rastert einen SVG-String (mit bekannter Größe) zu einer PNG-data-URL (2×, weißer Grund). */
+async function svgStringToPng(svgStr: string, w: number, h: number): Promise<string | null> {
+  try {
+    if (w < 4 || h < 4) return null;
+    const url = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svgStr);
+    const img = new Image();
+    await new Promise<void>((res, rej) => { img.onload = () => res(); img.onerror = () => rej(new Error("svg")); img.src = url; });
+    const scale = 2;
+    const canvas = document.createElement("canvas");
+    canvas.width = w * scale; canvas.height = h * scale;
+    const cctx = canvas.getContext("2d");
+    if (!cctx) return null;
+    cctx.fillStyle = "#ffffff"; cctx.fillRect(0, 0, canvas.width, canvas.height);
+    cctx.scale(scale, scale);
+    cctx.drawImage(img, 0, 0);
+    return canvas.toDataURL("image/png");
+  } catch {
+    return null;
+  }
+}
+
+// =============================================================================
+// Mindmap: Extraktion (aus D3-`treeData`), Zeichnen (eigener Renderer, kein D3)
+// und Neu-Rendern aus dem C#-Editor.
+// =============================================================================
+
+function mindId(): string {
+  try { return crypto.randomUUID().replace(/-/g, ""); }
+  catch { return "n" + Math.floor(performance.now() * 1000) + Math.floor(Math.random() * 1e6); }
+}
+
+/** Normalisiert ein beliebiges Baum-Objekt ({name|label, children}) auf MNode. */
+function normMindNode(o: any, depth = 0): MNode | null {
+  if (!o || typeof o !== "object" || depth > 12) return null;
+  const label = String(o.name ?? o.label ?? o.title ?? o.text ?? "").replace(/\s+/g, " ").trim();
+  const kids = Array.isArray(o.children) ? o.children : (Array.isArray(o._children) ? o._children : []);
+  const children = kids.map((k: any) => normMindNode(k, depth + 1)).filter(Boolean) as MNode[];
+  return { id: mindId(), label, children };
+}
+
+function countMindNodes(n: MNode): number {
+  return 1 + n.children.reduce((s, c) => s + countMindNodes(c), 0);
+}
+
+/** Liest die schließende Klammer zu `s[open]` ('{') heraus (string-bewusst). */
+function readBalancedObject(s: string, open: number): string | null {
+  let depth = 0; let str = "";
+  for (let i = open; i < s.length; i++) {
+    const ch = s[i];
+    if (str) { if (ch === "\\") { i++; continue; } if (ch === str) str = ""; continue; }
+    if (ch === '"' || ch === "'" || ch === "`") { str = ch; continue; }
+    if (ch === "{") depth++;
+    else if (ch === "}") { depth--; if (depth === 0) return s.slice(open, i + 1); }
+  }
+  return null;
+}
+
+/** Extrahiert Mindmap-Bäume aus `…treeData = { … }`-Literalen der Inline-Skripte.
+ *  Ausgewertet wird im Sandbox-iframe (`win.eval`), nicht im App-Kontext. */
+function extractMindmapTrees(idoc: Document, win: Window): MNode[] {
+  const trees: MNode[] = [];
+  const scripts = Array.from(idoc.querySelectorAll("script")).map((s) => s.textContent || "");
+  for (const code of scripts) {
+    let idx = code.indexOf("treeData");
+    while (idx >= 0) {
+      const eq = code.indexOf("=", idx);
+      const brace = eq >= 0 ? code.indexOf("{", eq) : -1;
+      if (brace >= 0 && brace - eq < 24) {
+        const lit = readBalancedObject(code, brace);
+        if (lit) {
+          try {
+            const obj = (win as any).eval("(" + lit + ")");
+            const t = normMindNode(obj);
+            if (t && countMindNodes(t) >= 2) trees.push(t);
+          } catch { /* kein auswertbares Daten-Literal */ }
+        }
+      }
+      idx = code.indexOf("treeData", idx + 8);
+    }
+  }
+  // Größten Baum zuerst (typischerweise der eigentliche Inhalt).
+  trees.sort((a, b) => countMindNodes(b) - countMindNodes(a));
+  return trees;
+}
+
+/** Zeichnet einen Mindmap-Baum als horizontalen SVG-Baum (Wurzel links). */
+function buildMindmapSvg(root: MNode): { svg: string; w: number; h: number } {
+  const rowH = 36, colGap = 54, nodeH = 30, padX = 14;
+  const palette = ["#3f6651", "#4A7C59", "#C16641", "#5b7c99", "#8a6d3b", "#7c5b8a"];
+  const widthOf = (l: string) => Math.max(54, Math.min(240, (l || " ").length * 7.1 + padX * 2));
+  const depthMaxW: number[] = [];
+  const measure = (n: MNode, d: number) => { depthMaxW[d] = Math.max(depthMaxW[d] || 0, widthOf(n.label)); n.children.forEach((c) => measure(c, d + 1)); };
+  measure(root, 0);
+  const colX: number[] = []; let acc = 12;
+  for (let d = 0; d < depthMaxW.length; d++) { colX[d] = acc; acc += depthMaxW[d] + colGap; }
+  const pos = new Map<MNode, { x: number; y: number; w: number; d: number }>();
+  let leaf = 0;
+  const assign = (n: MNode, d: number): number => {
+    const w = widthOf(n.label);
+    let y: number;
+    if (!n.children.length) { y = leaf * rowH + rowH / 2; leaf++; }
+    else { const ys = n.children.map((c) => assign(c, d + 1)); y = (ys[0] + ys[ys.length - 1]) / 2; }
+    pos.set(n, { x: colX[d], y, w, d });
+    return y;
+  };
+  assign(root, 0);
+  let maxX = 0, maxY = 0;
+  pos.forEach((p) => { maxX = Math.max(maxX, p.x + p.w); maxY = Math.max(maxY, p.y + nodeH); });
+  const W = Math.ceil(maxX + 12), H = Math.ceil(maxY + 8);
+  const esc = (s: string) => String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  let links = "", nodes = "";
+  const walk = (n: MNode) => {
+    const p = pos.get(n)!;
+    for (const c of n.children) {
+      const cp = pos.get(c)!;
+      const x1 = p.x + p.w, y1 = p.y, x2 = cp.x, y2 = cp.y, mx = (x1 + x2) / 2;
+      links += `<path d="M${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}" fill="none" stroke="#9aa6a0" stroke-width="2"/>`;
+      walk(c);
+    }
+    const fill = palette[Math.min(p.d, palette.length - 1)];
+    nodes += `<g><rect x="${p.x}" y="${p.y - nodeH / 2}" width="${p.w}" height="${nodeH}" rx="${nodeH / 2}" fill="${fill}" stroke="#ffffff" stroke-width="1.5"/>`
+      + `<text x="${p.x + p.w / 2}" y="${p.y}" dominant-baseline="central" text-anchor="middle" font-family="system-ui,Segoe UI,Arial,sans-serif" font-size="13" font-weight="600" fill="#ffffff">${esc(n.label)}</text></g>`;
+  };
+  walk(root);
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`
+    + `<rect width="100%" height="100%" fill="#F9F8F6"/>${links}${nodes}</svg>`;
+  return { svg, w: W, h: H };
+}
+
+/** Vektor-SVG-data-URL eines Baums. Bevorzugt die D3-Bridge (pageboundMind);
+ *  ohne sie der eigene schlanke Renderer als Fallback. Synchron (Import-Job). */
+function renderMindmapDataUrlSafe(tree: MNode): string {
+  const pm = (globalThis as any).pageboundMind;
+  if (pm && typeof pm.renderMindmapDataUrl === "function") {
+    try { return pm.renderMindmapDataUrl(JSON.stringify(tree)); } catch { /* Fallback unten */ }
+  }
+  return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(buildMindmapSvg(tree).svg);
+}
+
+/** Zeichnet einen Mindmap-Baum (JSON) und liefert eine komprimierte PNG-data-URL.
+ *  Vom C#-Editor nach jeder Baum-Änderung aufgerufen. */
+export async function renderMindmapImage(treeJson: string): Promise<string> {
+  let root: MNode;
+  try { root = JSON.parse(treeJson); } catch { return ""; }
+  if (!root || typeof root !== "object") return "";
+  if (!Array.isArray(root.children)) root.children = [];
+  const { svg, w, h } = buildMindmapSvg(root);
+  const png = await svgStringToPng(svg, w, h);
+  if (!png) return "";
+  try { return await compressDataUrl(png); } catch { return png; }
+}
+
+/** Macht alle Folien/Sektionen sichtbar (sonst 0-Breite → Grafiken rendern nicht). */
+function forceVisible(idoc: Document): void {
+  idoc.querySelectorAll<HTMLElement>(".slide, section, article").forEach((el) => {
+    el.classList.add("active");
+    el.style.setProperty("display", "block", "important");
+    el.style.opacity = "1";
+    el.style.visibility = "visible";
+  });
+}
+
+/** Stößt bekannte Lazy-Renderer (z. B. D3-Mindmap) an. Bewusst KEINE Navigations-/
+ *  Update-Funktionen — die würden Folien wieder verstecken. Alles best-effort. */
+function triggerGraphics(win: Window): void {
+  const re = /(mind|chart|graph|diagram|tree|plot)/i;
+  const skip = /(update|nav|next|prev|slide|hide|show)/i;
+  let names: string[] = [];
+  try { names = Object.getOwnPropertyNames(win); } catch { names = []; }
+  for (const k of names) {
+    if (!re.test(k) || skip.test(k)) continue;
+    try { const fn = (win as any)[k]; if (typeof fn === "function") fn.call(win); } catch { /* egal */ }
+  }
+}
+
+/**
+ * Rich-Import: rendert die Datei in einem Sandbox-iframe (Skripte laufen, damit
+ * Tailwind & Co. echte Farben berechnen), übernimmt Stile/Boxen/Schriftgrößen
+ * auf die Block-Eigenschaften und rastert SVG/Canvas-Grafiken (D3-Mindmap) zu
+ * Bildern. Texte bleiben editierbar. Wirft bei Problemen → struktureller Fallback.
+ */
+async function importHtmlRich(html: string): Promise<string> {
+  const iframe = document.createElement("iframe");
+  iframe.setAttribute("sandbox", "allow-scripts allow-same-origin");
+  iframe.style.cssText = "position:fixed;left:-12000px;top:0;width:1100px;height:1500px;border:0;opacity:0;pointer-events:none;";
+  document.body.appendChild(iframe);
+  try {
+    const win = iframe.contentWindow as Window | null;
+    const idoc = iframe.contentDocument;
+    if (!win || !idoc) throw new Error("iframe");
+    await new Promise<void>((res) => {
+      let done = false; const fin = () => { if (!done) { done = true; res(); } };
+      iframe.addEventListener("load", () => fin(), { once: true });
+      idoc.open(); idoc.write(html ?? ""); idoc.close();
+      setTimeout(fin, 4500); // harte Obergrenze, falls kein load-Event feuert
+    });
+    await delay(600);                 // Tailwind-/CSS-Stile anwenden lassen
+    forceVisible(idoc);
+    triggerGraphics(win);
+    forceVisible(idoc);               // erneut, falls ein Trigger Sichtbarkeit verändert hat
+    await delay(550);                 // Mindmap zeichnen / Layout setzen lassen
+
+    const title = (idoc.querySelector("title")?.textContent || idoc.querySelector("h1")?.textContent || "Import")
+      .replace(/\s+/g, " ").trim().slice(0, 120) || "Import";
+
+    const ctx: ImportCtx = { jobs: [], win, trees: extractMindmapTrees(idoc, win) };
+    const pageEls = collectPageContainers(idoc);
+    const pages: any[] = [];
+    if (pageEls.length > 0) {
+      const pageSet = new Set(pageEls);
+      for (const pageEl of pageEls) {
+        const blocks: any[] = [];
+        walkImportBlocks(pageEl, blocks, ctx, pageSet, pageEl);
+        pages.push({ background: pageBgOf(pageEl, win), blocks });
+      }
+    } else {
+      const blocks: any[] = [];
+      const body = idoc.body ?? idoc.documentElement;
+      walkImportBlocks(body, blocks, ctx, new Set(), body);
+      pages.push({ background: pageBgOf(body, win), blocks });
+    }
+
+    // Medien auflösen, solange das iframe noch lebt (Rasterung liest Live-Elemente).
+    await Promise.all(ctx.jobs.map(async (j) => {
+      let url: string | null = null;
+      try {
+        if (j.kind === "url") url = await tryEmbedImage(j.src);
+        else if (j.kind === "svg") url = await svgToDataUrl(j.el);
+        else if (j.kind === "canvas") url = j.el.toDataURL("image/png");
+        else if (j.kind === "mindmap") url = renderMindmapDataUrlSafe(j.tree);
+      } catch { url = null; }
+      // Mindmaps sind Vektor-SVG (scharf im Druck) → nicht rastern/komprimieren.
+      if (url && j.kind !== "mindmap") { try { url = await compressDataUrl(url); } catch { /* Original behalten */ } }
+      j.place(url);
+    }));
+
+    for (const p of pages) p.blocks = p.blocks.filter((b: any) => !(b.type === "Image" && !b.src));
+    let result = pages.filter((p) => p.blocks.length > 0);
+    if (result.length === 0) result = [{ blocks: [] }];
+    const slideLike = pageEls.some((el) => /slide/i.test(el.className || ""));
+    return JSON.stringify({ title, layout: slideLike ? "Slide16x9" : "A4Portrait", pages: result });
+  } finally {
+    iframe.remove();
+  }
+}
+
+/** Struktureller Import ohne Stile/Grafiken (Fallback, falls Rich-Render scheitert). */
+async function importHtmlStructural(html: string): Promise<string> {
+  const dom = new DOMParser().parseFromString(html ?? "", "text/html");
+  const title = (dom.querySelector("title")?.textContent || dom.querySelector("h1")?.textContent || "Import")
+    .replace(/\s+/g, " ").trim().slice(0, 120) || "Import";
+  const ctx: ImportCtx = { jobs: [], win: null, trees: [] };
+  const pageEls = collectPageContainers(dom);
+  const pages: any[] = [];
+  if (pageEls.length > 0) {
+    const pageSet = new Set(pageEls);
+    for (const pageEl of pageEls) {
+      const blocks: any[] = [];
+      walkImportBlocks(pageEl, blocks, ctx, pageSet, pageEl);
+      pages.push({ blocks });
+    }
+  } else {
+    const blocks: any[] = [];
+    const body = dom.body ?? dom.documentElement;
+    walkImportBlocks(body, blocks, ctx, new Set(), body);
+    pages.push({ blocks });
+  }
+  await Promise.all(ctx.jobs.map(async (j) => { j.place(j.kind === "url" ? await tryEmbedImage(j.src) : null); }));
+  for (const p of pages) p.blocks = p.blocks.filter((b: any) => !(b.type === "Image" && !b.src));
+  let result = pages.filter((p) => p.blocks.length > 0);
+  if (result.length === 0) result = [{ blocks: [] }];
+  const slideLike = pageEls.some((el) => /slide/i.test(el.className || ""));
+  return JSON.stringify({ title, layout: slideLike ? "Slide16x9" : "A4Portrait", pages: result });
+}
+
+/**
+ * Importiert eine HTML-Datei als EditorDocument-JSON. Versucht den Rich-Modus
+ * (Stil-Übernahme + Grafik-Rasterung im Sandbox-iframe); fällt bei Fehlern auf
+ * den rein strukturellen Import zurück. Rückgabe läuft C#-seitig durch ParseDesignJsonAsync.
+ */
+export async function importHtmlToDocument(html: string): Promise<string> {
+  try {
+    return await importHtmlRich(html);
+  } catch {
+    return await importHtmlStructural(html);
+  }
 }
 
 /** Setzt den Cursor ans Ende eines (gerade hinzugefügten) editierbaren Blocks. */
