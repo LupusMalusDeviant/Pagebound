@@ -584,6 +584,22 @@ Eingabe: 'path' oder 'json'. Ausgabe: 'outputPath' (geschrieben) ODER 'text' (HT
       { title: normalized.title, layout: normalized.layout, pageCount: normalized.pages.length, issues, ...(await emitText(html, a.outputPath)) },
       `HTML für '${normalized.title}' gerendert (${normalized.pages.length} Seite(n)).`);
   }));
+
+  server.registerTool("design_render_interactive_html", {
+    title: "Design → interaktives HTML",
+    description: `Rendert ein Design als eigenständige, DYNAMISCHE HTML-Präsentation: Folien-Layouts (Slide16x9, mehrseitig) werden ein Deck mit Navigation (Pfeiltasten/Buttons, eine Folie je Ansicht). Mindmap-Blöcke erscheinen als scharfes Vektor-SVG (serverseitig kein Live-Widget — das hat die PWA). Nicht zum Drucken gedacht.
+Die Eingabe wird vor dem Rendern automatisch validiert/normalisiert (wie design_validate).
+Eingabe: 'path' oder 'json'. Ausgabe: 'outputPath' (geschrieben) ODER 'text' (HTML inline).`,
+    inputSchema: { ...designSrcIn, ...outOpt },
+    annotations: readAnn,
+  }, guard(async (a: { path?: string; json?: string; outputPath?: string }) => {
+    const { doc: normalized, issues } = design.validateDesign(await loadDesignJson(a));
+    const html = design.renderInteractiveHtml(normalized);
+    const deck = normalized.layout === "Slide16x9" && normalized.pages.length > 1;
+    return ok(
+      { title: normalized.title, layout: normalized.layout, pageCount: normalized.pages.length, deck, issues, ...(await emitText(html, a.outputPath)) },
+      `Interaktives HTML für '${normalized.title}' gerendert${deck ? " (Folien-Deck mit Navigation)" : ""}.`);
+  }));
 }
 
 function buildServer(): McpServer {

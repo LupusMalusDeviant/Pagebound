@@ -12,6 +12,7 @@
 // =============================================================================
 
 import { ToolError } from "./pdf.js";
+import { renderMindmapSvg, sanitizeMindNode, type MindmapNode } from "./mind.js";
 
 // --- Modell (Spiegel von Pagebound.Core.Domain) -------------------------------
 
@@ -27,7 +28,7 @@ export interface EditorTheme {
 
 export interface EditorBlock {
   id?: string;
-  type: string; // Heading | Paragraph | Image | Shape | Table | Spacer | Columns | QrCode
+  type: string; // Heading | Paragraph | Image | Shape | Table | Spacer | Columns | QrCode | Mindmap
   text?: string | null;
   level?: number;
   align?: string;
@@ -48,6 +49,7 @@ export interface EditorBlock {
   columnGapPx?: number;
   rows?: string[][] | null;
   headerRow?: boolean;
+  mind?: MindmapNode | null; // nur Mindmap-Block: Wurzel des Knoten-Baums
 }
 
 export interface EditorOverlay {
@@ -168,6 +170,11 @@ const Img = (alt: string, widthPercent = 60): EditorBlock =>
 const Spacer = (heightPx: number): EditorBlock => ({ type: "Spacer", heightPx });
 const Tbl = (headerRow: boolean, ...rows: string[][]): EditorBlock =>
   ({ type: "Table", headerRow, rows });
+let _mindId = 0;
+const mnode = (label: string, children: MindmapNode[] = []): MindmapNode =>
+  ({ id: `n${++_mindId}`, label, children });
+const Mind = (root: string, branches: string[]): EditorBlock =>
+  ({ type: "Mindmap", widthPercent: 80, align: "center", mind: mnode(root, branches.map((b) => mnode(b))) });
 const Page = (...blocks: EditorBlock[]): EditorPage => ({ blocks });
 
 function doc(title: string, layout: string, themeName: string | null, ...pages: EditorPage[]): EditorDocument {
@@ -245,6 +252,14 @@ const DESIGNS: Array<CatalogDesign & { create: Factory }> = [
     create: () => doc("Präsentation", "Slide16x9", null,
       Page(H("Titel der Präsentation", 1, "center"), FillRect("#2563eb", 4), P("Untertitel · Referent · Datum", "center")),
       Page(H("Agenda", 2), P("• Punkt eins<br>• Punkt zwei<br>• Punkt drei"))),
+  },
+  {
+    kind: "mindmap", title: "Mindmap (16:9)", layout: "Slide16x9", theme: null,
+    description: "Folie mit zentraler Mindmap (bearbeitbarer Knoten-Baum; in der PWA interaktiv).",
+    create: () => doc("Mindmap", "Slide16x9", null,
+      Page(
+        H("Thema", 2, "center"),
+        Mind("Zentrales Thema", ["Aspekt 1", "Aspekt 2", "Aspekt 3", "Aspekt 4"]))),
   },
   {
     kind: "event-flyer-din-lang", title: "Event-Flyer (DIN lang)", layout: "DinLong", theme: "Modern",
@@ -332,7 +347,7 @@ export function createDesign(kind: string, opts: { title?: string; theme?: strin
 
 // --- Validierung / Normalisierung -----------------------------------------------
 
-const BLOCK_TYPES = ["Heading", "Paragraph", "Image", "Shape", "Table", "Spacer", "Columns", "QrCode"];
+const BLOCK_TYPES = ["Heading", "Paragraph", "Image", "Shape", "Table", "Spacer", "Columns", "QrCode", "Mindmap"];
 const OVERLAY_TYPES = ["Text", "Image", "Shape"];
 const ALIGNS = new Set(["left", "center", "right", "justify"]);
 
@@ -435,6 +450,11 @@ export function validateDesign(raw: string): { doc: EditorDocument; issues: stri
       if (Array.isArray(b.columnsHtml)) {
         block.columnsHtml = b.columnsHtml.slice(0, 4).map((c) => stripDangerousHtml(String(c ?? ""), issues, where));
       }
+      if (type === "Mindmap") {
+        if (b.mind && typeof b.mind === "object") block.mind = sanitizeMindNode(b.mind, 0);
+        else issues.push(`${where}: Mindmap ohne Baum ('mind') — leerer Knoten ergänzt.`);
+        block.mind ??= sanitizeMindNode({ label: "Thema", children: [] }, 0);
+      }
       outBlocks.push(block);
     }
 
@@ -536,6 +556,12 @@ function blockHtml(b: EditorBlock): string {
       if (b.shadowEnabled) imgStyle += "box-shadow:0 6px 18px rgba(0,0,0,.25);";
       return `${open}<div class="pb-img-wrap${align}"><img class="pb-img" src="${b.src}" alt="${esc(b.alt ?? "")}" style="${imgStyle}"/></div></div>`;
     }
+    case "Mindmap": {
+      if (!b.mind) return "";
+      const { svg } = renderMindmapSvg(b.mind);
+      // Inline-SVG, auf widthPercent skaliert (vektor-scharf im Druck).
+      return `${open}<div class="pb-img-wrap${align}"><span class="pb-mind" style="display:inline-block;width:${b.widthPercent ?? 80}%">${svg}</span></div></div>`;
+    }
     case "Spacer":
       return `${open}<div class="pb-spacer" style="height:${b.heightPx ?? 24}px"></div></div>`;
     case "Shape":
@@ -568,12 +594,28 @@ function pageBgLayer(p: EditorPage): string {
   return `<div class="pb-page-bg" style="${style}"></div>`;
 }
 
-/** Rendert ein (validiertes) Design als eigenständiges HTML-Dokument — identische
- * CSS-Regeln wie der HTML-Export der PWA, druckbar via Browser (@page-Größe). */
-export function renderHtml(document: EditorDocument): string {
-  const layout = layoutOf(document.layout);
-  const vars = themeVars(document.theme);
-  const css =
+function overlayHtml(o: EditorOverlay): string {
+  let style = `left:${o.xPercent}%;top:${o.yPercent}%;width:${o.widthPercent}%;`;
+  if (o.type === "Shape") style += `height:${o.heightPercent}%;`;
+  if (o.rotationDeg) style += `transform:rotate(${o.rotationDeg}deg);`;
+  if ((o.opacityPercent ?? 100) < 100) style += `opacity:${((o.opacityPercent ?? 100) / 100).toFixed(2)};`;
+  let inner = "";
+  if (o.type === "Text") {
+    let t = `color:${o.color};`;
+    if (o.fontSizePt) t += `font-size:${o.fontSizePt}pt;`;
+    if (o.background) t += `background:${o.background};padding:2px 6px;`;
+    const align = o.align && o.align !== "left" ? ` align-${o.align}` : "";
+    inner = `<div class="pb-ov-text${align}" style="${t}">${o.text ?? ""}</div>`;
+  } else if (o.type === "Image" && o.src) {
+    inner = `<img class="pb-ov-img" src="${o.src}" alt="${esc(o.alt ?? "")}"/>`;
+  } else if (o.type === "Shape") {
+    inner = `<div class="pb-ov-shape${o.shape === "ellipse" ? " is-ellipse" : ""}" style="background:${o.color}"></div>`;
+  }
+  return inner ? `<div class="pb-overlay" style="${style}">${inner}</div>` : "";
+}
+
+function baseCss(layout: LayoutInfo): string {
+  return (
     `@page{size:${mm(layout.widthMm)} ${mm(layout.heightMm)};margin:0}` +
     "body{margin:0;background:#e5e7eb;color:#111827;font-family:Georgia,'Times New Roman',serif}" +
     `.pb-page{box-sizing:border-box;position:relative;background:#fff;width:${mm(layout.widthMm)};min-height:${mm(layout.heightMm)};padding:${mm(layout.marginMm)};margin:0 auto 12px;page-break-after:always;color:var(--doc-color-body,#111827);font-family:var(--doc-font-body,Georgia,'Times New Roman',serif);font-size:11pt;line-height:1.5}` +
@@ -585,6 +627,7 @@ export function renderHtml(document: EditorDocument): string {
     ".pb-para{font-size:11pt;line-height:1.5}" +
     ".pb-spacer{width:100%}" +
     ".pb-img{display:block;max-width:100%;height:auto}.pb-img-wrap.align-center{text-align:center}.pb-img-wrap.align-right{text-align:right}" +
+    ".pb-mind svg{display:block;width:100%;height:auto}" +
     ".pb-shape-rect{width:100%;border:1.5px solid currentColor}.pb-shape-rect.is-filled{background:currentColor;border:none}" +
     ".pb-shape-line{border-top:1.5px solid currentColor}.pb-shape-divider{border-top:1px solid var(--doc-color-accent,#d1d5db);margin:6px 0}" +
     ".pb-cols{display:flex;align-items:flex-start}.pb-col{flex:1 1 0;min-width:0;font-size:11pt}" +
@@ -592,34 +635,49 @@ export function renderHtml(document: EditorDocument): string {
     ".pb-ov-img{display:block;width:100%;height:auto}.pb-ov-shape{width:100%;height:100%}.pb-ov-shape.is-ellipse{border-radius:50%}" +
     ".pb-table{width:100%;border-collapse:collapse;font-size:10.5pt}.pb-table td,.pb-table th{border:1px solid #9ca3af;padding:4px 8px;text-align:left}.pb-table th{background:var(--doc-color-accent-soft,#f3f4f6);color:#111827}" +
     ".align-center{text-align:center}.align-right{text-align:right}.align-justify{text-align:justify}" +
-    "*{-webkit-print-color-adjust:exact;print-color-adjust:exact}";
+    "*{-webkit-print-color-adjust:exact;print-color-adjust:exact}"
+  );
+}
 
-  const overlayHtml = (o: EditorOverlay): string => {
-    let style = `left:${o.xPercent}%;top:${o.yPercent}%;width:${o.widthPercent}%;`;
-    if (o.type === "Shape") style += `height:${o.heightPercent}%;`;
-    if (o.rotationDeg) style += `transform:rotate(${o.rotationDeg}deg);`;
-    if ((o.opacityPercent ?? 100) < 100) style += `opacity:${((o.opacityPercent ?? 100) / 100).toFixed(2)};`;
-    let inner = "";
-    if (o.type === "Text") {
-      let t = `color:${o.color};`;
-      if (o.fontSizePt) t += `font-size:${o.fontSizePt}pt;`;
-      if (o.background) t += `background:${o.background};padding:2px 6px;`;
-      const align = o.align && o.align !== "left" ? ` align-${o.align}` : "";
-      inner = `<div class="pb-ov-text${align}" style="${t}">${o.text ?? ""}</div>`;
-    } else if (o.type === "Image" && o.src) {
-      inner = `<img class="pb-ov-img" src="${o.src}" alt="${esc(o.alt ?? "")}"/>`;
-    } else if (o.type === "Shape") {
-      inner = `<div class="pb-ov-shape${o.shape === "ellipse" ? " is-ellipse" : ""}" style="background:${o.color}"></div>`;
-    }
-    return inner ? `<div class="pb-overlay" style="${style}">${inner}</div>` : "";
-  };
-
-  const pages = document.pages.map((p) => {
+function pagesHtml(document: EditorDocument): string {
+  const vars = themeVars(document.theme);
+  return document.pages.map((p) => {
     const bg = p.background ?? document.theme?.pageBackground;
     const style = vars + (bg ? `background-color:${bg};` : "");
     const overlays = (p.overlays ?? []).map(overlayHtml).join("");
     return `<div class="pb-page" style="${style}">${pageBgLayer(p)}${p.blocks.map(blockHtml).join("")}${overlays}</div>`;
   }).join("");
+}
 
-  return `<!doctype html><html lang="de"><head><meta charset="utf-8"><title>${esc(document.title || "Dokument")}</title><style>${css}</style></head><body>${pages}</body></html>`;
+/** Rendert ein (validiertes) Design als eigenständiges HTML-Dokument — identische
+ * CSS-Regeln wie der HTML-Export der PWA, druckbar via Browser (@page-Größe). */
+export function renderHtml(document: EditorDocument): string {
+  const css = baseCss(layoutOf(document.layout));
+  return `<!doctype html><html lang="de"><head><meta charset="utf-8"><title>${esc(document.title || "Dokument")}</title><style>${css}</style></head><body>${pagesHtml(document)}</body></html>`;
+}
+
+/** Interaktive Variante: Folien-Layouts (Slide16x9, >1 Seite) werden ein Deck mit
+ * Navigation (Pfeiltasten/Buttons, eine Folie je Ansicht). Mindmaps bleiben als
+ * statisches Vektor-SVG (serverseitig kein Live-d3 — die PWA hat das interaktive
+ * Widget). Nicht zum Drucken — dynamische HTML-Präsentation. */
+export function renderInteractiveHtml(document: EditorDocument): string {
+  const layout = layoutOf(document.layout);
+  const isDeck = layout.name === "Slide16x9" && document.pages.length > 1;
+  let css = baseCss(layout);
+  if (isDeck) {
+    css +=
+      "body{background:#1f2937}" +
+      ".pb-page{display:none;page-break-after:auto;box-shadow:0 12px 48px rgba(0,0,0,.45)}" +
+      ".pb-page.active{display:block}" +
+      ".deck-nav{position:fixed;left:0;right:0;bottom:0;display:flex;justify-content:center;align-items:center;gap:18px;padding:10px;background:rgba(17,24,39,.9);color:#fff;font-family:system-ui,sans-serif;z-index:50}" +
+      ".deck-nav button{font:inherit;cursor:pointer;border:1px solid #6b7280;background:#374151;color:#fff;border-radius:8px;padding:6px 18px;font-size:18px;line-height:1}" +
+      ".deck-nav button:disabled{opacity:.4;cursor:default}" +
+      "@media print{.deck-nav{display:none}.pb-page{display:block !important}}";
+  }
+  const nav = isDeck
+    ? `<div class="deck-nav"><button id="deck-prev" aria-label="prev">&#8249;</button><span id="deck-counter"></span><button id="deck-next" aria-label="next">&#8250;</button></div>`
+      + `<script>(function(){var s=[].slice.call(document.querySelectorAll('.pb-page'));if(!s.length)return;var i=0;var c=document.getElementById('deck-counter');var p=document.getElementById('deck-prev'),n=document.getElementById('deck-next');function show(x){i=Math.max(0,Math.min(s.length-1,x));s.forEach(function(e,k){e.classList.toggle('active',k===i);});c.textContent=(i+1)+' / '+s.length;p.disabled=i===0;n.disabled=i===s.length-1;}p.onclick=function(){show(i-1);};n.onclick=function(){show(i+1);};document.addEventListener('keydown',function(e){if(e.key==='ArrowRight'||e.key===' '){e.preventDefault();show(i+1);}if(e.key==='ArrowLeft')show(i-1);});show(0);})();</script>`
+    : "";
+  const bodyClass = isDeck ? ' class="pb-deck"' : "";
+  return `<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${esc(document.title || "Dokument")}</title><style>${css}</style></head><body${bodyClass}>${pagesHtml(document)}${nav}</body></html>`;
 }

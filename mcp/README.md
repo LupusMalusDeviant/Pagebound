@@ -55,10 +55,11 @@ Eingaben bleiben stets unangetastet (neue Datei/neue Bytes).
 | `pdf_ua_prepare` | PDF Richtung **PDF/UA-1** vorbereiten: Kennzeichnung (`/MarkInfo`, `/Lang`, `/DisplayDocTitle`, XMP `pdfuaid:part=1`) + ehrlicher Prüfbericht (fehlendes Tagging/StructTreeRoot, Titel, Bilder ohne `/Alt`, Fonts ohne ToUnicode) — echtes Tagging wird **nicht** synthetisiert, **keine Konformitätsgarantie** |
 | `pdf_sign` | PDF mit **P12/PFX-Zertifikat** signieren (`adbe.pkcs7.detached`, SHA-256, CMS mit signierten Attributen, Kette eingebettet; **kein** Zeitstempel/PAdES-B-T, **kein** LTV, ohne signingCertificateV2; bereits signierte PDFs werden abgelehnt) |
 | `images_to_pdf` | PNG/JPG-Bilder zu einer PDF (`imagePaths` / `imagesBase64`) |
-| `design_catalog` | Designer-Bausteine auflisten: Themes, Schriften, Layouts, Vorlagen (read-only) |
-| `design_create` | Pagebound-Design (`*.pbdesign.json`) aus Vorlage erzeugen — Titel/Theme/Layout überschreibbar |
-| `design_validate` | Design-JSON validieren/normalisieren (Farben, data-URLs, HTML); meldet `issues` (read-only) |
-| `design_render_html` | Design als eigenständiges HTML rendern (Druck-CSS → „Als PDF speichern“) (read-only) |
+| `design_catalog` | Designer-Bausteine auflisten: Themes, Schriften, Layouts, Vorlagen (inkl. `mindmap`) (read-only) |
+| `design_create` | Pagebound-Design (`*.pbdesign.json`) aus Vorlage erzeugen — Titel/Theme/Layout überschreibbar; inkl. Mindmap-Blöcke (Knoten-Baum) |
+| `design_validate` | Design-JSON validieren/normalisieren (Farben, data-URLs, HTML, Mindmap-Baum); meldet `issues` (read-only) |
+| `design_render_html` | Design als eigenständiges HTML rendern (Druck-CSS → „Als PDF speichern“); Mindmaps als Vektor-SVG (read-only) |
+| `design_render_interactive_html` | Dynamische HTML-Präsentation: Folien-Deck mit Navigation (Pfeiltasten); Mindmaps als Vektor-SVG (read-only) |
 
 Damit deckt der Server die PDF-Operationen der Web-App ab, die ohne Browser-
 Canvas auskommen — Seiten-Werkzeuge (Merge/Split/Extract/Delete/Rotate/Reorder),
