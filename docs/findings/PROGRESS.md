@@ -28,7 +28,7 @@ Status: `[ ]` offen · `[x]` erledigt (mit Commit-Hash) · `[!]` blockiert (mit 
 - [x] F-21 · Seitennavigation als Sticky-Bottom-Bar — `06204a7` (Browser-verifiziert)
 
 ## Runde 4 — Kompatibilität, Performance, Privacy
-- [ ] F-07 · Sidecar: unbekannter Annotationstyp still verschluckt
+- [x] F-07 · Sidecar: unbekannter Annotationstyp still verschluckt — `93d055e` (nur Maßnahme 1)
 - [ ] F-12 · Signatur-Recompute O(Signaturen × Annotationen)
 - [ ] F-20 · Automatischer Wächter gegen externe Requests
 
@@ -46,6 +46,11 @@ Status: `[ ]` offen · `[x]` erledigt (mit Commit-Hash) · `[!]` blockiert (mit 
   folgt dem Code (eigenes try/catch um den Fallback + korrigierter Filter).
 - Bundled `wwwroot/js/*.js` sind gitignored (Build-Artefakte) → nur `.ts`
   committen, `npm run build:js` erzeugt die Bundles lokal.
+- F-07: Nur Maßnahme 1 (Erkennen + Melden) umgesetzt; Maßnahme 2 (`minAppVersion`-
+  Feld) bewusst weggelassen — es hätte das Sidecar-Schema/den Record geändert
+  (Risiko ohne klaren Nutzen), die Aufgabe erlaubt das explizite Weglassen.
+  `ISidecarService.ParseAsync` liefert nun `SidecarParseResult` statt `Sidecar?`
+  (Signaturänderung; alle 2 Aufrufer in ReaderPane angepasst).
 - F-21: Neue Tailwind-Klasse `bottom-0` war nicht im vorkompilierten `app.css` →
   `npm run build:css` (Tailwind v4) nötig, sonst `bottom: auto` und die Bar klebt
   nicht. `app.css`/`*.js`-Bundles sind gitignored; `npm run build` (Deploy) baut
