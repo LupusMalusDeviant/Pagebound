@@ -1539,6 +1539,96 @@ export async function flattenAnnotations(
 }
 
 // ============================================================================
+// Inline-Text-Bearbeitung („Text bearbeiten") — Cover + Redraw
+// ----------------------------------------------------------------------------
+// Übermalt eine alte Textregion mit einer opaken Hintergrundfarbe und zeichnet
+// den neuen Text darüber. Gleiches Muster wie flattenAnnotations/RedactAsync:
+// PDF-Bytes rein, neue Bytes raus, Original unberührt. WICHTIG (Ehrlichkeit):
+// die alten Zeichen bleiben im Content-Stream (weiterhin extrahierbar) — für
+// garantierte Entfernung ist das Schwärzen-Werkzeug (redactPdf, rastert) da.
+// Kein Reflow. x/y/w/h sind 0..1 (oben-links), fontSize ist Anteil Seitenhöhe.
+// ============================================================================
+export interface TextEditDto {
+  pageNumber: number;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  text: string;
+  fontSize: number;
+  color?: string | null;
+  bgColor?: string | null;
+}
+
+/** WinAnsi-sichere Teilmenge (wie im flatten-text-Zweig): nicht kodierbare Zeichen raus. */
+function winAnsiSafe(s: string): string {
+  return Array.from(s)
+    .filter((c) => {
+      const code = c.charCodeAt(0);
+      return code >= 0x20 && code <= 0xff && !(code >= 0x7f && code <= 0x9f);
+    })
+    .join("");
+}
+
+export async function applyTextEdits(pdfBytes: Uint8Array, edits: TextEditDto[]): Promise<Uint8Array> {
+  if (!edits || edits.length === 0) return pdfBytes;
+  const doc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
+  const pages = doc.getPages();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+
+  for (const ed of edits) {
+    const page = pages[ed.pageNumber - 1];
+    if (!page) continue;
+    const { width: pw, height: ph } = page.getSize();
+    const bg = hexToRgbColor(ed.bgColor, rgb(1, 1, 1)); // Default: weiß
+    const fg = hexToRgbColor(ed.color, rgb(0.07, 0.07, 0.07)); // Default: fast-schwarz
+
+    // 1) Alte Region übermalen (opak, kein Rahmen). Leichter Rand deckt Anti-
+    //    Aliasing-Kanten / Ober-/Unterlängen der alten Glyphen mit ab.
+    const size = Math.max(4, (ed.fontSize ?? 0.02) * ph);
+    const pad = Math.max(1, size * 0.15);
+    const rx = clampNum(ed.x * pw - pad, 0, pw);
+    const rTop = ed.y * ph - pad;
+    const rw = Math.min(ed.w * pw + 2 * pad, pw - rx);
+    const rh = ed.h * ph + 2 * pad;
+    page.drawRectangle({
+      x: rx,
+      y: ph - rTop - rh,
+      width: Math.max(0, rw),
+      height: Math.max(0, rh),
+      color: bg,
+      opacity: 1,
+    });
+
+    // 2) Neuen Text darüber (mehrzeilig via \n, wie der flatten-text-Zweig).
+    const lineH = size * 1.25;
+    const rawLines = (ed.text ?? "").split("\n");
+    const x = clampNum(ed.x * pw, 0, pw);
+    const yTopPt = clampNum(ed.y * ph, 0, Math.max(0, ph - size));
+    rawLines.forEach((rawLine, i) => {
+      const ln = rawLine.replace(/\t/g, " ");
+      if (!ln.trim()) return;
+      const y = ph - yTopPt - size - i * lineH;
+      try {
+        page.drawText(ln, { x, y, size, font, color: fg });
+      } catch {
+        const safe = winAnsiSafe(ln);
+        if (safe) {
+          try {
+            page.drawText(safe, { x, y, size, font, color: fg });
+          } catch (e) {
+            console.warn("[pagebound] edit: Textzeile nicht kodierbar, übersprungen:", e);
+          }
+        }
+      }
+    });
+  }
+
+  doc.setProducer("Pagebound Edit");
+  return await doc.save({ updateMetadata: false });
+}
+
+// ============================================================================
 // AES-256-Krypto (ISO 32000-2 /V5 /R6) über WebCrypto (FA-027)
 // ----------------------------------------------------------------------------
 // Portierung von Pagebound.Infrastructure.Pdf.Encryption.AesR6 nach WebCrypto:

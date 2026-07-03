@@ -14,7 +14,7 @@ Reihenfolge = „Empfohlene Reihenfolge" im Plan.
 **Runde 1 (PDF→DOCX) abgeschlossen.**
 
 ## Runde 2 — Inline-Edit „Text bearbeiten" (Pflicht)
-- [ ] **E-10** Bridge `applyTextEdits` (Cover + Redraw)
+- [x] **E-10** Bridge `applyTextEdits` (Cover + Redraw) — im Preview verifiziert: gültiges PDF, neuer Text gezeichnet, opake Cover-Rect; alter Text bleibt extrahierbar (Design → Ehrlichkeits-Hinweis)
 - [ ] **E-11** Infra `ApplyTextEditsAsync` (JsPdfLibManipulator)
 - [ ] **E-12** JS-Helper `findTextBlockAt`
 - [ ] **E-13** Reader-Werkzeug (Modus/Toolbar/State)
