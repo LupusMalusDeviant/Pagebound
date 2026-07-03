@@ -1169,33 +1169,36 @@
                         var txtFontCqh = (FreeTextAnnotation.GetFontSize(freeText) * 100).ToString("F3", CultureInfo.InvariantCulture);
                         var txtColor = FreeTextAnnotation.GetColor(freeText);
                         var txtContent = FreeTextAnnotation.GetText(freeText);
-                        var isEmptyText = string.IsNullOrWhiteSpace(txtContent);
+                        @* F-10: Gespeicherte Freitexte sind nie leer (leere werden nicht
+                           persistiert), daher kein Platzhalter-/Geisterbox-Zweig mehr. *@
                         <div data-pb-freetext-id="@freeText.Id.Value"
-                             class="@($"absolute cursor-move select-none touch-none whitespace-pre leading-tight rounded px-0.5 {(isEmptyText ? "outline-dashed outline-1 outline-pb-accent/60 min-w-8 min-h-4" : "hover:outline-dashed hover:outline-1 hover:outline-pb-accent/50")}")"
+                             class="absolute cursor-move select-none touch-none whitespace-pre leading-tight rounded px-0.5 hover:outline-dashed hover:outline-1 hover:outline-pb-accent/50"
                              style="@($"left:{txtLeft}%; top:{txtTop}%; font-size:{txtFontCqh}cqh; color:{txtColor}")"
                              title="@L.T("reader.text.dragTitle")"
                              @onmousedown="@((MouseEventArgs e) => HandleFreeTextMouseDownAsync(e, freeText))"
                              @onmousedown:stopPropagation
-                             @onclick:stopPropagation>@(isEmptyText ? " " : txtContent)</div>
+                             @onclick:stopPropagation>@txtContent</div>
                     }
 
-                    @* Editor-Popover für den aktuell bearbeiteten Freitext *@
-                    @if (_editingFreeText is not null && _editingFreeText.PageNumber == _currentPage)
+                    @* Editor-Popover für den aktuell bearbeiteten ODER neu platzierten
+                       (Pending, noch nicht persistierten) Freitext. *@
+                    @if (IsFreeTextEditorOpen
+                         && (_editingFreeText?.PageNumber ?? _pendingFreeTextPosition!.Value.Page) == _currentPage)
                     {
-                        var ftX = FreeTextAnnotation.GetX(_editingFreeText);
-                        var ftY = FreeTextAnnotation.GetY(_editingFreeText);
+                        var ftX = _editingFreeText is not null ? FreeTextAnnotation.GetX(_editingFreeText) : _pendingFreeTextPosition!.Value.X;
+                        var ftY = _editingFreeText is not null ? FreeTextAnnotation.GetY(_editingFreeText) : _pendingFreeTextPosition!.Value.Y;
                         var ftLeft = (ftX * 100).ToString("F2", CultureInfo.InvariantCulture);
                         var ftTop = (ftY * 100).ToString("F2", CultureInfo.InvariantCulture);
                         var ftTranslateX = ftX > 0.55 ? "calc(-100% - 8px)" : "8px";
                         var ftTranslateY = ftY > 0.65 ? "calc(-100% + 8px)" : "-8px";
-                        var ftCurrentSize = FreeTextAnnotation.GetFontSize(_editingFreeText);
-                        var ftCurrentColor = FreeTextAnnotation.GetColor(_editingFreeText);
+                        var ftCurrentSize = _editingFreeText is not null ? FreeTextAnnotation.GetFontSize(_editingFreeText) : FreeTextAnnotation.DefaultFontSize;
+                        var ftCurrentColor = _editingFreeText is not null ? FreeTextAnnotation.GetColor(_editingFreeText) : FreeTextAnnotation.DefaultColor;
                         <div class="absolute z-10 w-80 rounded-lg pb-glass-strong p-3"
                              style="@($"left:{ftLeft}%; top:{ftTop}%; transform: translate({ftTranslateX}, {ftTranslateY})")"
                              @onclick:stopPropagation
                              @onmousedown:stopPropagation>
                             <div class="flex items-center justify-between mb-2 gap-2">
-                                <span class="text-xs text-pb-fg-muted">@L.T("reader.text.editLabel", new Dictionary<string, object> { ["page"] = _editingFreeText.PageNumber })</span>
+                                <span class="text-xs text-pb-fg-muted">@L.T("reader.text.editLabel", new Dictionary<string, object> { ["page"] = _currentPage })</span>
                                 <button type="button"
                                         class="text-pb-fg-muted hover:text-pb-fg text-sm"
                                         @onclick="CancelFreeTextEditing"
@@ -1500,6 +1503,14 @@
     // Freitext-Editor-State (FA — Text-Werkzeug + Datum-Stempel)
     private Annotation? _editingFreeText;
     private string _editingFreeTextContent = string.Empty;
+    // F-10: Klickposition eines NEUEN Freitexts, der noch nicht persistiert ist.
+    // Erst beim Speichern mit nicht-leerem Text wird die Annotation erzeugt —
+    // so entstehen keine leeren Geister-Annotationen und (auf signierten
+    // Dokumenten) flackert das Signatur-Badge beim bloßen Platzieren nicht.
+    private (double X, double Y, int Page)? _pendingFreeTextPosition;
+    // Ein Freitext-Editor ist offen, wenn ein bestehender Text editiert wird
+    // ODER ein neuer (Pending-)Text platziert, aber noch nicht gespeichert ist.
+    private bool IsFreeTextEditorOpen => _editingFreeText is not null || _pendingFreeTextPosition is not null;
 
     // Schriftgrößen als Anteil der Seitenhöhe (siehe FreeTextAnnotation.DefaultFontSize).
     private static readonly (string LabelKey, double Fraction)[] FreeTextSizes =
@@ -2812,8 +2823,9 @@
             {
                 await SaveEditingAnnotationAsync();
             }
-            if (_editingFreeText is not null)
+            if (IsFreeTextEditorOpen)
             {
+                // Auch einen offenen Pending-Text (F-10) speichern/verwerfen.
                 await SaveEditingFreeTextAsync();
             }
 
@@ -2958,6 +2970,22 @@
             e.ClientY);
         if (fraction is null) return;
 
+        if (openEditor)
+        {
+            // Text-Werkzeug (F-10): NOCH NICHT persistieren. Klickposition als
+            // Pending-State halten und den Editor dagegen öffnen — erzeugt wird
+            // die Annotation erst in SaveEditingFreeTextAsync, sobald nicht-leerer
+            // Text getippt wurde. So entstehen keine leeren Geister-Annotationen
+            // und das Signatur-Badge flackert beim bloßen Platzieren nicht.
+            _pendingFreeTextPosition = (fraction.X, fraction.Y, _currentPage);
+            _editingFreeText = null;
+            _editingFreeTextContent = string.Empty;
+            _annotationMode = AnnotationMode.Select;
+            return;
+        }
+
+        // Datum-Stempel: hat sofort Text und öffnet keinen Editor → direkt
+        // persistieren (eine reale, nicht-leere Annotation).
         var newAnnotation = FreeTextAnnotation.Create(
             _currentPdfId.Value,
             _currentPage,
@@ -2968,11 +2996,6 @@
         var created = await Annotations.CreateAsync(newAnnotation, CancellationToken.None);
         _annotations = _annotations.Append(created).ToList();
 
-        if (openEditor)
-        {
-            OpenFreeTextEditor(created);
-        }
-
         // Zurück zum Select-Modus — verhindert versehentliche Mehrfach-Erstellung.
         _annotationMode = AnnotationMode.Select;
         await RecomputeSignatureStatusesAsync();
@@ -2980,18 +3003,43 @@
 
     private void OpenFreeTextEditor(Annotation annotation)
     {
+        // Ein bestehender Text wird editiert → evtl. offener Pending-State (neuer,
+        // noch nicht gespeicherter Text) ist damit hinfällig.
+        _pendingFreeTextPosition = null;
         _editingFreeText = annotation;
         _editingFreeTextContent = FreeTextAnnotation.GetText(annotation);
     }
 
     private async Task SaveEditingFreeTextAsync()
     {
-        if (_editingFreeText is null) return;
-        var current = _editingFreeText;
         var newText = _editingFreeTextContent;
 
-        // Leerer Text nach dem Schließen → Annotation wieder entfernen,
-        // sonst bleiben unsichtbare Reste auf der Seite zurück.
+        // Fall A (F-10): NEUER Freitext, noch nicht persistiert (Pending-State).
+        if (_editingFreeText is null)
+        {
+            var pending = _pendingFreeTextPosition;
+            _pendingFreeTextPosition = null;
+            _editingFreeTextContent = string.Empty;
+
+            // Nichts getippt (oder kein PDF) → gar nicht erst erzeugen: Platzieren
+            // + Abbrechen bzw. leer Speichern = 0 Storage-Writes, kein Badge-Flackern.
+            if (pending is null || _currentPdfId is null || string.IsNullOrWhiteSpace(newText))
+            {
+                return;
+            }
+
+            var newAnnotation = FreeTextAnnotation.Create(
+                _currentPdfId.Value, pending.Value.Page, pending.Value.X, pending.Value.Y, newText);
+            var created = await Annotations.CreateAsync(newAnnotation, CancellationToken.None);
+            _annotations = _annotations.Append(created).ToList();
+            await RecomputeSignatureStatusesAsync();
+            return;
+        }
+
+        // Fall B: BESTEHENDER Freitext.
+        var current = _editingFreeText;
+
+        // Leer editiert → Annotation entfernen (Edit-Pfad behält die Lösch-Logik).
         if (string.IsNullOrWhiteSpace(newText))
         {
             await DeleteEditingFreeTextAsync();
@@ -3014,7 +3062,14 @@
 
     private async Task DeleteEditingFreeTextAsync()
     {
-        if (_editingFreeText is null) return;
+        // Pending-Text (F-10, noch nicht persistiert) → nur verwerfen, es gibt
+        // nichts zu löschen und der Signatur-Hash ändert sich nicht.
+        if (_editingFreeText is null)
+        {
+            _pendingFreeTextPosition = null;
+            _editingFreeTextContent = string.Empty;
+            return;
+        }
         var idToRemove = _editingFreeText.Id;
         await Annotations.DeleteAsync(idToRemove, CancellationToken.None);
         _annotations = _annotations.Where(a => a.Id.Value != idToRemove.Value).ToList();
@@ -3023,15 +3078,13 @@
         await RecomputeSignatureStatusesAsync();
     }
 
-    private async Task CancelFreeTextEditing()
+    private void CancelFreeTextEditing()
     {
-        // Abbrechen bei nie befülltem Text = Annotation verwerfen; sonst
-        // bleibt der bestehende Text unverändert stehen.
-        if (_editingFreeText is not null && string.IsNullOrWhiteSpace(FreeTextAnnotation.GetText(_editingFreeText)))
-        {
-            await DeleteEditingFreeTextAsync();
-            return;
-        }
+        // F-10: Ein neuer (Pending-)Freitext wurde noch nicht persistiert → einfach
+        // verwerfen (kein Storage-Write). Ein bestehender Freitext bleibt
+        // unverändert stehen. Kein Löschen-bei-leer mehr nötig, da leere Freitexte
+        // gar nicht erst gespeichert werden.
+        _pendingFreeTextPosition = null;
         _editingFreeText = null;
         _editingFreeTextContent = string.Empty;
     }
@@ -3089,11 +3142,12 @@
         // Klick ohne Bewegung → Editor öffnen (Position unverändert).
         if (Math.Abs(currentX - newX) < 0.0005 && Math.Abs(currentY - newY) < 0.0005)
         {
-            // Editor-Wechsel: ist bereits ein ANDERER Freitext-Editor offen,
-            // dessen getippten Inhalt zuerst speichern. Der Freitext-Div stoppt
-            // die Event-Propagation (@onmousedown:stopPropagation), daher greift
-            // HandlePdfClickAsync hier nicht und der Inhalt ginge sonst verloren.
-            if (_editingFreeText is not null && _editingFreeText.Id.Value != freeText.Id.Value)
+            // Editor-Wechsel: ist bereits ein ANDERER Freitext-Editor offen (ein
+            // bestehender Text ODER ein neuer Pending-Text, F-10), dessen Inhalt
+            // zuerst speichern. Der Freitext-Div stoppt die Event-Propagation
+            // (@onmousedown:stopPropagation), daher greift HandlePdfClickAsync hier
+            // nicht und der Inhalt ginge sonst verloren.
+            if (IsFreeTextEditorOpen && (_editingFreeText is null || _editingFreeText.Id.Value != freeText.Id.Value))
             {
                 await SaveEditingFreeTextAsync();
             }
