@@ -12,7 +12,7 @@ Status: `[ ]` offen · `[x]` erledigt (mit Commit-Hash) · `[!]` blockiert (mit 
 - [x] F-01 · Signatur-Badge veraltet nach Freitext-Drag — `69793b3`
 - [x] F-02 · Werkzeugwechsel hinterlässt leere Geister-Annotation — `44df46c`
 - [x] F-03 · Flatten-Export bricht bei nicht-kodierbarem Zeichen ab — `0197dac`
-- [ ] F-04 · Editor-Wechsel zwischen Freitexten verwirft Inhalt
+- [x] F-04 · Editor-Wechsel zwischen Freitexten verwirft Inhalt — `4ad891b`
 - [ ] F-05 · Text-Layer und Cursor ignorieren neue Modi
 - [ ] F-06 · Eingebrannter Text verschwindet an Seiten-Unterkante
 
