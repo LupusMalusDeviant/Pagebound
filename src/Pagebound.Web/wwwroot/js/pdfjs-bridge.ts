@@ -312,6 +312,104 @@ export async function extractText(
 }
 
 // ============================================================================
+// Inline-Edit-Unterstützung: nächstliegende Textzeile an einer Klickposition
+// ----------------------------------------------------------------------------
+// Für das „Text bearbeiten"-Werkzeug: Klick (0..1) → die Zeile darunter/daneben
+// mit ihrer Bounding-Box, dem zusammengefügten Text und der (aus der Median-
+// Item-Höhe) abgeleiteten Schriftgröße. Alles als 0..1-Fractions (oben-links),
+// wie RedactionRegion/Freitext. `null`, wenn kein Text nah genug am Klick liegt.
+// ============================================================================
+export interface TextBlockDto {
+  text: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  fontSize: number;
+}
+
+export async function findTextBlockAt(
+  handleId: string,
+  pageNumber: number,
+  xFrac: number,
+  yFrac: number
+): Promise<TextBlockDto | null> {
+  const doc = requireDoc(handleId);
+  const page = await doc.getPage(pageNumber);
+  const content = await page.getTextContent();
+  const vp = page.getViewport({ scale: 1 });
+  const raw = (content.items as unknown as PdfTextItem[]).filter(
+    (it) => typeof it.str === "string" && it.str.length > 0
+  );
+  if (raw.length === 0) return null;
+
+  // Top-Left-Geometrie je Item (wie extractText).
+  const geo = raw.map((it) => ({
+    it,
+    x: it.transform[4],
+    yTop: vp.height - it.transform[5] - it.height * 0.8,
+    w: it.width,
+    h: it.height,
+  }));
+  const heights = geo.map((e) => e.h).filter((h) => h > 0).sort((a, b) => a - b);
+  const medH = heights.length ? heights[Math.floor(heights.length / 2)] : 10;
+  const rowTol = Math.max(2, medH * 0.6);
+
+  // In Zeilen clustern (y-Nähe), Zeilen-Text + BBox berechnen.
+  geo.sort((a, b) => a.yTop - b.yTop || a.x - b.x);
+  const lines: { text: string; xMin: number; xMax: number; yMin: number; yMax: number; medH: number }[] = [];
+  let bucket: typeof geo = [];
+  let curY = geo[0].yTop;
+  const flush = () => {
+    if (!bucket.length) return;
+    const sorted = bucket.slice().sort((a, b) => a.x - b.x);
+    const hs = sorted.map((e) => e.h).filter((h) => h > 0).sort((a, b) => a - b);
+    lines.push({
+      text: joinLineItems(sorted.map((e) => e.it)),
+      xMin: Math.min(...sorted.map((e) => e.x)),
+      xMax: Math.max(...sorted.map((e) => e.x + e.w)),
+      yMin: Math.min(...sorted.map((e) => e.yTop)),
+      yMax: Math.max(...sorted.map((e) => e.yTop + e.h)),
+      medH: hs.length ? hs[Math.floor(hs.length / 2)] : medH,
+    });
+    bucket = [];
+  };
+  for (const e of geo) {
+    if (bucket.length && Math.abs(e.yTop - curY) > rowTol) flush();
+    if (!bucket.length) curY = e.yTop;
+    bucket.push(e);
+  }
+  flush();
+
+  // Beste Zeile: vertikale Nähe dominiert, horizontale Nähe als Tie-Break.
+  const cx = xFrac * vp.width;
+  const cy = yFrac * vp.height;
+  let best: (typeof lines)[number] | null = null;
+  let bestScore = Infinity;
+  for (const ln of lines) {
+    const vDist = cy < ln.yMin ? ln.yMin - cy : cy > ln.yMax ? cy - ln.yMax : 0;
+    const hDist = cx < ln.xMin ? ln.xMin - cx : cx > ln.xMax ? cx - ln.xMax : 0;
+    const score = vDist * 3 + hDist;
+    if (score < bestScore) {
+      bestScore = score;
+      best = ln;
+    }
+  }
+  if (!best) return null;
+  const vGap = cy < best.yMin ? best.yMin - cy : cy > best.yMax ? cy - best.yMax : 0;
+  if (vGap > medH * 2) return null; // Klick zu weit von jeder Zeile → leerer Bereich
+
+  return {
+    text: best.text,
+    x: best.xMin / vp.width,
+    y: best.yMin / vp.height,
+    w: (best.xMax - best.xMin) / vp.width,
+    h: (best.yMax - best.yMin) / vp.height,
+    fontSize: best.medH / vp.height,
+  };
+}
+
+// ============================================================================
 // Konvertierungen (FA-030 PNG/JPG, FA-031 Text, FA-032 HTML)
 // ----------------------------------------------------------------------------
 // One-Shot-Konverter: nehmen die rohen PDF-Bytes, laden ein transientes
