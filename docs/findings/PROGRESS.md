@@ -18,7 +18,7 @@ Status: `[ ]` offen · `[x]` erledigt (mit Commit-Hash) · `[!]` blockiert (mit 
 
 ## Runde 2 — Robustheit + Export
 - [x] F-08 · Doppelklick platziert doppelt (Reentrancy-Guard) — `113d6a0`
-- [ ] F-09 · Markdown-Export lässt Freitexte weg
+- [x] F-09 · Markdown-Export lässt Freitexte weg — `32a41fa`
 - [ ] F-14 · Datum-Format aus i18n ungeprüft als Formatstring
 
 ## Runde 3 — UX/Effizienz (F-10 NACH F-02/F-04)
