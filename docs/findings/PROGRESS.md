@@ -24,7 +24,7 @@ Status: `[ ]` offen · `[x]` erledigt (mit Commit-Hash) · `[!]` blockiert (mit 
 ## Runde 3 — UX/Effizienz (F-10 NACH F-02/F-04)
 - [x] F-10 · Leere Annotation vor dem Tippen persistiert — `0162595`
 - [x] F-11 · Stil-Änderung schreibt bei jedem Swatch-Klick — `6210481` (löst F-10-Zwischenstufe)
-- [ ] F-13 · Drag-Bridge: Listener-Attach-Race bei schnellem Klick
+- [x] F-13 · Drag-Bridge: Listener-Attach-Race bei schnellem Klick — `ab8c6a4`
 - [ ] F-21 · Seitennavigation als Sticky-Bottom-Bar
 
 ## Runde 4 — Kompatibilität, Performance, Privacy
@@ -46,6 +46,9 @@ Status: `[ ]` offen · `[x]` erledigt (mit Commit-Hash) · `[!]` blockiert (mit 
   folgt dem Code (eigenes try/catch um den Fallback + korrigierter Filter).
 - Bundled `wwwroot/js/*.js` sind gitignored (Build-Artefakte) → nur `.ts`
   committen, `npm run build:js` erzeugt die Bundles lokal.
+- F-13: IST/SOLL nennt `finish()`; im Code heißt die Abschluss-Funktion `onUp()`
+  (Cleanup + C#-Callback). Fix folgt dem Code (`onUp()` in `onMove` bei
+  `e.buttons === 0`).
 - F-10: Verifiziert per Build + Tests + Logik-/Null-Safety-Analyse aller
   State-Pfade (Place/Save/Cancel/Delete/Moduswechsel/Background-Click/
   Editor-Wechsel). Kein Browser-Test des Storage-Write-Verhaltens (bräuchte
