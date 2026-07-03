@@ -598,6 +598,189 @@ export async function convertToImagesZip(
   });
 }
 
+// ============================================================================
+// PDF → DOCX (Word, OOXML) — Best-Effort Textfluss, 100 % lokal, keine Dependency
+// ----------------------------------------------------------------------------
+// PDF hat kein Absatz-/Struktur-Modell. Wir rekonstruieren aus getTextContent:
+//   Items → Zeilen (y-Cluster) → Absätze (vertikale Lücke) — dieselbe Idee wie
+//   die CSV-Heuristik, nur auf Fließtext gezielt. Weiche Zeilenumbrüche werden
+//   zu fließendem Absatztext verschmolzen (Word bricht selbst um); Schriftgröße
+//   je Absatz aus der Median-Item-Höhe (pt → half-points). Seitenumbruch je
+//   PDF-Seite. Das .docx wird von Hand als OOXML-ZIP (fflate) gebaut — keine
+//   docx-Lib, damit keine neue Laufzeit-Dependency.
+// ============================================================================
+
+const DOCX_XML_DECL = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n';
+
+/** Escapt Text für XML 1.0 und entfernt dort unzulässige Steuerzeichen. */
+function xmlEscape(s: string): string {
+  return (s ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;")
+    // XML 1.0 verbietet die meisten Steuerzeichen (außer \t \n \r) — Word würde
+    // die Datei sonst als beschädigt ablehnen.
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, "");
+}
+
+/** Fügt die (nach x sortierten) Items einer Zeile mit Wort-Spacing zusammen. */
+function joinLineItems(items: PdfTextItem[]): string {
+  if (items.length === 0) return "";
+  let text = items[0].str;
+  for (let i = 1; i < items.length; i++) {
+    const prev = items[i - 1];
+    const cur = items[i];
+    const prevEndX = prev.transform[4] + prev.width;
+    const gap = cur.transform[4] - prevEndX;
+    const avgGlyph = prev.width / Math.max(prev.str.length, 1);
+    const tol = Math.max(1, avgGlyph * 0.5);
+    const needsSpace = gap > tol && !/\s$/.test(text) && !/^\s/.test(cur.str);
+    text += (needsSpace ? " " : "") + cur.str;
+  }
+  return text.replace(/[\t ]{2,}/g, " ").trim();
+}
+
+/** Eine Seite → Absätze (Text + abgeleitete Schriftgröße in Word-half-points). */
+function pageToDocxParagraphs(items: PdfTextItem[], viewportHeight: number): { text: string; sizeHalfPt: number }[] {
+  const valid = items.filter((it) => typeof it.str === "string" && it.str.length > 0);
+  if (valid.length === 0) return [];
+
+  // Top-Left-y (oben klein) wie in extractText, damit Sortierung oben→unten stimmt.
+  const withY = valid.map((it) => ({ it, y: viewportHeight - it.transform[5] - it.height * 0.8 }));
+  const heights = valid.map((i) => i.height).filter((h) => h > 0).sort((a, b) => a - b);
+  const medH = heights.length ? heights[Math.floor(heights.length / 2)] : 10;
+  const rowTol = Math.max(2, medH * 0.6); // selbe Zeile
+  const paraGap = Math.max(medH * 1.8, rowTol * 2); // Absatzgrenze: deutlich größer als Zeilenabstand
+
+  // 1) Zeilen über y clustern
+  withY.sort((a, b) => a.y - b.y || a.it.transform[4] - b.it.transform[4]);
+  const lines: { text: string; y: number; h: number }[] = [];
+  let bucket: typeof withY = [];
+  let curY = withY[0].y;
+  const flush = () => {
+    if (!bucket.length) return;
+    const sorted = bucket.slice().sort((a, b) => a.it.transform[4] - b.it.transform[4]);
+    const lh = sorted.map((e) => e.it.height).filter((h) => h > 0).sort((a, b) => a - b);
+    const lineMedH = lh.length ? lh[Math.floor(lh.length / 2)] : medH;
+    const yMin = Math.min(...bucket.map((e) => e.y));
+    lines.push({ text: joinLineItems(sorted.map((e) => e.it)), y: yMin, h: lineMedH });
+    bucket = [];
+  };
+  for (const e of withY) {
+    if (bucket.length && Math.abs(e.y - curY) > rowTol) flush();
+    if (!bucket.length) curY = e.y;
+    bucket.push(e);
+  }
+  flush();
+
+  // 2) Zeilen zu Absätzen gruppieren (vertikale Lücke > paraGap ⇒ neuer Absatz)
+  const paras: { text: string; sizeHalfPt: number }[] = [];
+  let paraLines: { text: string; h: number }[] = [];
+  let prevY: number | null = null;
+  const pushPara = () => {
+    const text = paraLines.map((l) => l.text).join(" ").replace(/[\t ]{2,}/g, " ").trim();
+    if (!text) { paraLines = []; return; }
+    const hs = paraLines.map((l) => l.h).filter((h) => h > 0).sort((a, b) => a - b);
+    const ptH = hs.length ? hs[Math.floor(hs.length / 2)] : medH;
+    // PDF.js-Item-Höhe ≈ Schriftgröße in pt; half-points = pt*2, sinnvoll geklemmt.
+    const sizeHalfPt = Math.min(96, Math.max(12, Math.round(ptH * 2)));
+    paras.push({ text, sizeHalfPt });
+    paraLines = [];
+  };
+  for (const ln of lines) {
+    if (!ln.text) continue;
+    if (prevY !== null && ln.y - prevY > paraGap) pushPara();
+    paraLines.push({ text: ln.text, h: ln.h });
+    prevY = ln.y;
+  }
+  pushPara();
+  return paras;
+}
+
+/**
+ * PDF → DOCX: reiner Textfluss (keine 1:1-Layout-Treue), Absätze + Seitenumbrüche.
+ * Für Pixel-Treue stattdessen HTML/PNG-Export nutzen. 100 % lokal, offline.
+ */
+export async function convertToDocx(data: Uint8Array): Promise<Uint8Array> {
+  return withTransientDoc(data, async (doc) => {
+    const enc = new TextEncoder();
+    const bodyParts: string[] = [];
+
+    for (let p = 1; p <= doc.numPages; p++) {
+      const page = await doc.getPage(p);
+      const content = await page.getTextContent();
+      const items = content.items as unknown as PdfTextItem[];
+      const viewportHeight = page.getViewport({ scale: 1 }).height;
+      const paras = pageToDocxParagraphs(items, viewportHeight);
+
+      if (p > 1) {
+        // Seitenumbruch zwischen den PDF-Seiten.
+        bodyParts.push('<w:p><w:r><w:br w:type="page"/></w:r></w:p>');
+      }
+      if (paras.length === 0) {
+        bodyParts.push("<w:p/>");
+        continue;
+      }
+      for (const par of paras) {
+        bodyParts.push(
+          '<w:p><w:pPr><w:spacing w:after="120"/></w:pPr>' +
+          `<w:r><w:rPr><w:sz w:val="${par.sizeHalfPt}"/><w:szCs w:val="${par.sizeHalfPt}"/></w:rPr>` +
+          `<w:t xml:space="preserve">${xmlEscape(par.text)}</w:t></w:r></w:p>`
+        );
+      }
+    }
+    if (bodyParts.length === 0) bodyParts.push("<w:p/>");
+
+    const documentXml =
+      DOCX_XML_DECL +
+      '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>' +
+      bodyParts.join("") +
+      '<w:sectPr><w:pgSz w:w="11906" w:h="16838"/>' +
+      '<w:pgMar w:top="1417" w:right="1417" w:bottom="1417" w:left="1417" w:header="708" w:footer="708" w:gutter="0"/>' +
+      "</w:sectPr></w:body></w:document>";
+
+    const contentTypesXml =
+      DOCX_XML_DECL +
+      '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+      '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
+      '<Default Extension="xml" ContentType="application/xml"/>' +
+      '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>' +
+      '<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>' +
+      "</Types>";
+
+    const rootRels =
+      DOCX_XML_DECL +
+      '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+      '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>' +
+      "</Relationships>";
+
+    const docRels =
+      DOCX_XML_DECL +
+      '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+      '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>' +
+      "</Relationships>";
+
+    const stylesXml =
+      DOCX_XML_DECL +
+      '<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
+      '<w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:cs="Calibri"/>' +
+      '<w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr></w:rPrDefault></w:docDefaults>' +
+      '<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style>' +
+      "</w:styles>";
+
+    const files: Record<string, Uint8Array> = {
+      "[Content_Types].xml": enc.encode(contentTypesXml),
+      "_rels/.rels": enc.encode(rootRels),
+      "word/document.xml": enc.encode(documentXml),
+      "word/_rels/document.xml.rels": enc.encode(docRels),
+      "word/styles.xml": enc.encode(stylesXml),
+    };
+    return zipSync(files, { level: 6 });
+  });
+}
+
 /**
  * FA-032: PDF als eigenständiges HTML mit pixel-genauer Treue — jede Seite als
  * eingebettetes PNG (base64). Kein externer Request, offline öffenbar.
