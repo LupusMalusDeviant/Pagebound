@@ -29,7 +29,7 @@ Status: `[ ]` offen · `[x]` erledigt (mit Commit-Hash) · `[!]` blockiert (mit 
 
 ## Runde 4 — Kompatibilität, Performance, Privacy
 - [x] F-07 · Sidecar: unbekannter Annotationstyp still verschluckt — `93d055e` (nur Maßnahme 1)
-- [ ] F-12 · Signatur-Recompute O(Signaturen × Annotationen)
+- [x] F-12 · Signatur-Recompute O(Signaturen × Annotationen) — `8e324b3`
 - [ ] F-20 · Automatischer Wächter gegen externe Requests
 
 ## Runde 5 — Refactorings/Doku
