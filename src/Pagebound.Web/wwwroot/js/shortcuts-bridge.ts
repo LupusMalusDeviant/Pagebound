@@ -239,6 +239,15 @@ export function dragElementToFraction(
     Math.max(min, Math.min(max, v));
 
   const onMove = (e: PointerEvent) => {
+    // F-13: Kommt der erste pointermove OHNE gedrückte Taste, ist das ein
+    // schneller Klick, dessen pointerup schon vor dem Listener-Attach kam (die
+    // Listener werden erst nach C#→JS-Hops registriert). Dann NICHT mitziehen
+    // ("Ghost-Drag"), sondern sofort mit den aktuellen (Start-)Koordinaten
+    // abschließen — beendet zugleich das hängende pointerup sauber.
+    if (e.buttons === 0) {
+      onUp();
+      return;
+    }
     e.preventDefault();
     const rawX = (e.clientX - grabOffsetX - containerRect.left) / containerRect.width;
     const rawY = (e.clientY - grabOffsetY - containerRect.top) / containerRect.height;
