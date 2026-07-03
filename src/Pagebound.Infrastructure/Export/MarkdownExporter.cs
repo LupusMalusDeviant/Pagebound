@@ -33,7 +33,8 @@ public sealed class MarkdownExporter : IMarkdownExporter
 
         var filtered = all.Where(a =>
             (options.IncludeHighlights && a.Type == AnnotationType.Highlight) ||
-            (options.IncludeNotes && a.Type == AnnotationType.StickyNote));
+            (options.IncludeNotes && a.Type == AnnotationType.StickyNote) ||
+            (options.IncludeFreeTexts && a.Type == AnnotationType.FreeText));
 
         var grouped = filtered
             .GroupBy(a => a.PageNumber)
@@ -79,6 +80,10 @@ public sealed class MarkdownExporter : IMarkdownExporter
                 else if (annotation.Type == AnnotationType.StickyNote)
                 {
                     AppendStickyNote(sb, annotation, options);
+                }
+                else if (annotation.Type == AnnotationType.FreeText)
+                {
+                    AppendFreeText(sb, annotation, options);
                 }
             }
         }
@@ -149,9 +154,33 @@ public sealed class MarkdownExporter : IMarkdownExporter
         sb.AppendLine();
     }
 
+    private static void AppendFreeText(StringBuilder sb, Annotation annotation, MarkdownExportOptions options)
+    {
+        var text = FreeTextAnnotation.GetText(annotation);
+        sb.AppendLine("**Text:**");
+        sb.AppendLine();
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            sb.AppendLine("_(leerer Text)_");
+        }
+        else
+        {
+            // Freitext (inkl. Datum-Stempel) ist Klartext, KEIN Markdown — anders
+            // als die Sticky Note. Als Blockquote mit escapten Zeilen ausgeben,
+            // damit Sonderzeichen (#, *, [, …) nicht als Markdown interpretiert
+            // werden (siehe EscapeFreeTextLine).
+            foreach (var line in text.ReplaceLineEndings("\n").Split('\n'))
+            {
+                sb.AppendLine($"> {EscapeFreeTextLine(line)}");
+            }
+        }
+        sb.AppendLine();
+    }
+
     /// <summary>
     /// Y-Position auf der Seite (0..1) für die Sortierreihenfolge.
-    /// Highlights nutzen die Y des ersten Rect, Sticky Notes ihre Pin-Y.
+    /// Highlights nutzen die Y des ersten Rect, Sticky Notes ihre Pin-Y,
+    /// Freitexte ihre Top-Left-Y.
     /// </summary>
     private static double OrderingY(Annotation annotation)
     {
@@ -164,6 +193,10 @@ public sealed class MarkdownExporter : IMarkdownExporter
         {
             return StickyNoteAnnotation.GetY(annotation);
         }
+        if (annotation.Type == AnnotationType.FreeText)
+        {
+            return FreeTextAnnotation.GetY(annotation);
+        }
         return 0;
     }
 
@@ -173,5 +206,31 @@ public sealed class MarkdownExporter : IMarkdownExporter
     {
         // Minimaler Escape für Markdown-Sonderzeichen im Titel.
         return value.Replace("\\", "\\\\").Replace("#", "\\#");
+    }
+
+    /// <summary>
+    /// Escaped eine Freitext-Zeile so, dass Markdown sie NICHT interpretiert
+    /// (Freitext ist Klartext). Inline-aktive Sonderzeichen werden überall
+    /// escaped; Listen-/Zitat-Marker (-, +) zusätzlich am Zeilenanfang. Bewusst
+    /// pragmatisch (nicht jedes ASCII-Satzzeichen), damit Datums-/URL-Text
+    /// lesbar bleibt (CommonMark: \x rendert x literal).
+    /// </summary>
+    private static string EscapeFreeTextLine(string line)
+    {
+        var sb = new StringBuilder(line.Length + 8);
+        for (var i = 0; i < line.Length; i++)
+        {
+            var ch = line[i];
+            var isInlineSpecial =
+                ch is '\\' or '`' or '*' or '_' or '[' or ']' or '<' or '>' or '#' or '~' or '|';
+            var isLeadingListMarker =
+                (ch is '-' or '+') && line.AsSpan(0, i).IsWhiteSpace();
+            if (isInlineSpecial || isLeadingListMarker)
+            {
+                sb.Append('\\');
+            }
+            sb.Append(ch);
+        }
+        return sb.ToString();
     }
 }

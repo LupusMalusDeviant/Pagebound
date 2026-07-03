@@ -208,6 +208,52 @@ public sealed class MarkdownExporterTests
         topIdx.ShouldBeLessThan(bottomIdx);
     }
 
+    [Fact]
+    public async Task ExportAsync_WithFreeText_ContainsTextUnderCorrectPage()
+    {
+        var freeText = MakeFreeText("ft1", 2, 0.4, "Freitext-Inhalt");
+        _annotationService.GetForDocumentAsync(TestPdf, default)
+            .Returns([freeText]);
+
+        var options = new MarkdownExportOptions(IncludeFreeTexts: true);
+        var result = await _sut.ExportAsync(TestPdf, options, default);
+
+        var pageIdx = result.IndexOf("## Seite 2", StringComparison.Ordinal);
+        var textIdx = result.IndexOf("Freitext-Inhalt", StringComparison.Ordinal);
+        pageIdx.ShouldBeGreaterThanOrEqualTo(0);
+        textIdx.ShouldBeGreaterThan(pageIdx);
+    }
+
+    [Fact]
+    public async Task ExportAsync_FreeTextsDisabled_ExcludesFreeText()
+    {
+        var freeText = MakeFreeText("ft1", 1, 0.4, "verborgener freitext");
+        _annotationService.GetForDocumentAsync(TestPdf, default)
+            .Returns([freeText]);
+
+        var options = new MarkdownExportOptions(
+            IncludeHighlights: false, IncludeNotes: false, IncludeFreeTexts: false);
+        var result = await _sut.ExportAsync(TestPdf, options, default);
+
+        result.ShouldNotContain("verborgener freitext");
+        result.ShouldContain("keine Annotationen");
+    }
+
+    [Fact]
+    public async Task ExportAsync_FreeTextWithMarkdownChars_IsEscaped()
+    {
+        var freeText = MakeFreeText("ft1", 1, 0.4, "# keine Ueberschrift *kein* fett");
+        _annotationService.GetForDocumentAsync(TestPdf, default)
+            .Returns([freeText]);
+
+        var options = new MarkdownExportOptions(IncludeFreeTexts: true);
+        var result = await _sut.ExportAsync(TestPdf, options, default);
+
+        // Freitext ist Klartext → Sonderzeichen escaped, nicht als Markdown gerendert.
+        result.ShouldContain("\\#");
+        result.ShouldContain("\\*kein\\*");
+    }
+
     private static Annotation MakeHighlight(string id, int page, double y, string text)
     {
         var newAnnotation = HighlightAnnotation.Create(
@@ -224,6 +270,14 @@ public sealed class MarkdownExporterTests
         var newAnnotation = StickyNoteAnnotation.Create(TestPdf, page, 0.5, y, content);
         return new Annotation(
             new AnnotationId(id), TestPdf, AnnotationType.StickyNote, page,
+            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, newAnnotation.Payload);
+    }
+
+    private static Annotation MakeFreeText(string id, int page, double y, string text)
+    {
+        var newAnnotation = FreeTextAnnotation.Create(TestPdf, page, 0.3, y, text);
+        return new Annotation(
+            new AnnotationId(id), TestPdf, AnnotationType.FreeText, page,
             DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, newAnnotation.Payload);
     }
 }
