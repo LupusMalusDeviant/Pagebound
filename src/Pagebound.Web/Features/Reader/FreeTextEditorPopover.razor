@@ -1,0 +1,106 @@
+@inject ILocalizationService L
+
+@*
+    Freitext-Editor-Popover (F-17 — Pilot-Extraktion aus ReaderPane).
+
+    Der Textinhalt lebt LOKAL (_content) und wird per Tastenanschlag über
+    OnContentInput (ein plain Action<string>, KEIN EventCallback → löst KEIN
+    Re-Render des Parents aus) mit dem Parent synchron gehalten. Dadurch
+    re-rendert ein Tastenanschlag nur diese Komponente statt der ~3900-Zeilen-
+    Reader-Pane; der Parent behält seinen Content-State aber aktuell, sodass
+    seine externen Save-Pfade (Moduswechsel/Klick-außerhalb/Editor-Wechsel)
+    unverändert funktionieren.
+*@
+
+<div class="absolute z-10 w-80 rounded-lg pb-glass-strong p-3"
+     style="@($"left:{Left}%; top:{Top}%; transform: {Transform}")"
+     @onclick:stopPropagation
+     @onmousedown:stopPropagation>
+    <div class="flex items-center justify-between mb-2 gap-2">
+        <span class="text-xs text-pb-fg-muted">@L.T("reader.text.editLabel", new Dictionary<string, object> { ["page"] = Page })</span>
+        <button type="button"
+                class="text-pb-fg-muted hover:text-pb-fg text-sm"
+                @onclick="HandleCancel"
+                aria-label="@L.T("common.close")">
+            ✕
+        </button>
+    </div>
+    <textarea @bind="_content"
+              @bind:event="oninput"
+              @bind:after="NotifyContentInput"
+              class="w-full h-20 rounded border border-pb-border bg-pb-bg px-2 py-1 text-sm resize-none"
+              placeholder="@L.T("reader.text.placeholder")"
+              aria-label="@L.T("reader.text.contentAria")"></textarea>
+    <div class="mt-2 flex flex-wrap items-center gap-2 text-xs text-pb-fg-muted">
+        <span>@L.T("reader.text.sizeLabel")</span>
+        @foreach (var (labelKey, size) in Sizes)
+        {
+            var s = size;
+            var sizeActive = Math.Abs(FontSize - s) < 0.0005;
+            <button type="button"
+                    class="@($"rounded border px-1.5 py-0.5 {(sizeActive ? "border-pb-accent text-pb-accent" : "border-pb-border")}")"
+                    @onclick="@(() => OnStyleChanged.InvokeAsync((s, Color)))">
+                @L.T(labelKey)
+            </button>
+        }
+        <span class="ml-1">@L.T("reader.text.colorLabel")</span>
+        @foreach (var (_, css) in Palette)
+        {
+            var c = css;
+            var colorActive = string.Equals(Color, c, StringComparison.OrdinalIgnoreCase);
+            <button type="button"
+                    class="@($"w-5 h-5 rounded-full border hover:scale-110 transition-transform {(colorActive ? "border-pb-accent" : "border-pb-border")}")"
+                    style="@($"background-color:{c}")"
+                    @onclick="@(() => OnStyleChanged.InvokeAsync((FontSize, c)))"></button>
+        }
+    </div>
+    <div class="mt-2 flex gap-2 justify-end">
+        <button type="button"
+                class="rounded border border-red-300/40 px-2 py-1 text-xs text-red-400 hover:bg-red-50/10"
+                @onclick="HandleDelete">
+            @L.T("common.delete")
+        </button>
+        <button type="button"
+                class="btn primary sm"
+                @onclick="HandleSave">
+            @L.T("common.save")
+        </button>
+    </div>
+</div>
+
+@code {
+    /// <summary>Aktueller Textinhalt (Startwert). Wird beim Öffnen/Wechsel gesetzt.</summary>
+    [Parameter] public string Content { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Plain Action (bewusst KEIN EventCallback): pro Tastenanschlag aufgerufen,
+    /// hält den Parent-State synchron OHNE ein Parent-Re-Render auszulösen.
+    /// </summary>
+    [Parameter] public Action<string>? OnContentInput { get; set; }
+
+    [Parameter] public double FontSize { get; set; }
+    [Parameter] public string Color { get; set; } = string.Empty;
+    [Parameter] public int Page { get; set; }
+    [Parameter] public string Left { get; set; } = "0";
+    [Parameter] public string Top { get; set; } = "0";
+    [Parameter] public string Transform { get; set; } = string.Empty;
+    [Parameter] public IReadOnlyList<(string LabelKey, double Fraction)> Sizes { get; set; } = Array.Empty<(string, double)>();
+    [Parameter] public IReadOnlyList<(string LabelKey, string Css)> Palette { get; set; } = Array.Empty<(string, string)>();
+
+    [Parameter] public EventCallback OnSave { get; set; }
+    [Parameter] public EventCallback OnDelete { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+    [Parameter] public EventCallback<(double FontSize, string Color)> OnStyleChanged { get; set; }
+
+    private string _content = string.Empty;
+
+    // Content ist über OnContentInput stets mit dem Parent synchron; beim (Neu-)
+    // Öffnen/Wechsel bringt der Parent den neuen Startwert mit.
+    protected override void OnParametersSet() => _content = Content;
+
+    private void NotifyContentInput() => OnContentInput?.Invoke(_content);
+
+    private Task HandleSave() => OnSave.InvokeAsync();
+    private Task HandleDelete() => OnDelete.InvokeAsync();
+    private Task HandleCancel() => OnCancel.InvokeAsync();
+}

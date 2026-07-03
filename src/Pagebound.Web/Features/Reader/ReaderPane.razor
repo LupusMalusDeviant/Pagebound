@@ -1174,64 +1174,23 @@
                         var ftX = _editingFreeText is not null ? FreeTextAnnotation.GetX(_editingFreeText) : _pendingFreeTextPosition!.Value.X;
                         var ftY = _editingFreeText is not null ? FreeTextAnnotation.GetY(_editingFreeText) : _pendingFreeTextPosition!.Value.Y;
                         var ftPlacement = ComputePopoverPlacement(ftX, ftY);
-                        // F-11: Aktiver Stil kommt aus dem Editor-State (Pending), nicht
-                        // aus der Annotation — so wirken Swatch-Klicks ohne Storage-Write.
-                        var ftCurrentSize = _editingFreeTextFontSize;
-                        var ftCurrentColor = _editingFreeTextColor;
-                        <div class="absolute z-10 w-80 rounded-lg pb-glass-strong p-3"
-                             style="@($"left:{ftPlacement.Left}%; top:{ftPlacement.Top}%; transform: {ftPlacement.Transform}")"
-                             @onclick:stopPropagation
-                             @onmousedown:stopPropagation>
-                            <div class="flex items-center justify-between mb-2 gap-2">
-                                <span class="text-xs text-pb-fg-muted">@L.T("reader.text.editLabel", new Dictionary<string, object> { ["page"] = _currentPage })</span>
-                                <button type="button"
-                                        class="text-pb-fg-muted hover:text-pb-fg text-sm"
-                                        @onclick="CancelFreeTextEditing"
-                                        aria-label="@L.T("common.close")">
-                                    ✕
-                                </button>
-                            </div>
-                            <textarea @bind="_editingFreeTextContent"
-                                      @bind:event="oninput"
-                                      class="w-full h-20 rounded border border-pb-border bg-pb-bg px-2 py-1 text-sm resize-none"
-                                      placeholder="@L.T("reader.text.placeholder")"
-                                      aria-label="@L.T("reader.text.contentAria")"></textarea>
-                            <div class="mt-2 flex flex-wrap items-center gap-2 text-xs text-pb-fg-muted">
-                                <span>@L.T("reader.text.sizeLabel")</span>
-                                @foreach (var (labelKey, size) in FreeTextSizes)
-                                {
-                                    var s = size;
-                                    var sizeActive = Math.Abs(ftCurrentSize - s) < 0.0005;
-                                    <button type="button"
-                                            class="@($"rounded border px-1.5 py-0.5 {(sizeActive ? "border-pb-accent text-pb-accent" : "border-pb-border")}")"
-                                            @onclick="@(() => SetFreeTextStyle(s, ftCurrentColor))">
-                                        @L.T(labelKey)
-                                    </button>
-                                }
-                                <span class="ml-1">@L.T("reader.text.colorLabel")</span>
-                                @foreach (var (_, css) in DrawPalette)
-                                {
-                                    var c = css;
-                                    var colorActive = string.Equals(ftCurrentColor, c, StringComparison.OrdinalIgnoreCase);
-                                    <button type="button"
-                                            class="@($"w-5 h-5 rounded-full border hover:scale-110 transition-transform {(colorActive ? "border-pb-accent" : "border-pb-border")}")"
-                                            style="@($"background-color:{c}")"
-                                            @onclick="@(() => SetFreeTextStyle(ftCurrentSize, c))"></button>
-                                }
-                            </div>
-                            <div class="mt-2 flex gap-2 justify-end">
-                                <button type="button"
-                                        class="rounded border border-red-300/40 px-2 py-1 text-xs text-red-400 hover:bg-red-50/10"
-                                        @onclick="DeleteEditingFreeTextAsync">
-                                    @L.T("common.delete")
-                                </button>
-                                <button type="button"
-                                        class="btn primary sm"
-                                        @onclick="SaveEditingFreeTextAsync">
-                                    @L.T("common.save")
-                                </button>
-                            </div>
-                        </div>
+                        @* F-17: Popover als eigene Komponente — Tastenanschläge re-rendern
+                           nur die Komponente (Content-Sync via plain Action, kein Parent-
+                           Re-Render). Verhalten sonst unverändert. *@
+                        <FreeTextEditorPopover Content="@_editingFreeTextContent"
+                                               OnContentInput="@(v => _editingFreeTextContent = v)"
+                                               FontSize="@_editingFreeTextFontSize"
+                                               Color="@_editingFreeTextColor"
+                                               Page="@_currentPage"
+                                               Left="@ftPlacement.Left"
+                                               Top="@ftPlacement.Top"
+                                               Transform="@ftPlacement.Transform"
+                                               Sizes="@FreeTextSizes"
+                                               Palette="@DrawPalette"
+                                               OnStyleChanged="@(args => SetFreeTextStyle(args.FontSize, args.Color))"
+                                               OnSave="@SaveEditingFreeTextAsync"
+                                               OnDelete="@DeleteEditingFreeTextAsync"
+                                               OnCancel="@CancelFreeTextEditing" />
                     }
 
                     @* Pins für alle Sticky Notes auf der aktuellen Seite *@
