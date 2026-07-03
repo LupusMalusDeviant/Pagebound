@@ -34,7 +34,7 @@ Status: `[ ]` offen · `[x]` erledigt (mit Commit-Hash) · `[!]` blockiert (mit 
 
 ## Runde 5 — Refactorings/Doku
 - [x] F-15 · Payload-Helper 6-fach dupliziert — `89630c6`
-- [ ] F-16 · Freitext-Editor-Duplikate zusammenführen
+- [x] F-16 · Freitext-Editor-Duplikate zusammenführen — `0938a2c`
 - [ ] F-17 · Freitext-Editor als Komponente extrahieren
 - [ ] F-18 · `npm run typecheck` ist rot
 - [ ] F-19 · ADR-Verweise ohne ADR-Dateien
