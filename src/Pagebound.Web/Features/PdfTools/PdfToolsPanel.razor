@@ -79,7 +79,7 @@
                     var m = mode;
                     var active = _imgPageSize == m.Mode;
                     <button type="button"
-                            class="@($"rounded border px-2 py-0.5 text-xs {(active ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted hover:text-pb-fg")}")"
+                            class="@($"rounded border px-2 py-0.5 text-xs {(active ? "pb-toolbtn is-on" : "pb-toolbtn")}")"
                             @onclick="@(() => _imgPageSize = m.Mode)">
                         @L.T(m.LabelKey)
                     </button>
@@ -234,7 +234,7 @@
                 var p = preset;
                 var isActive = _compressQuality == p.Quality;
                 <button type="button"
-                        class="@($"rounded border px-2 py-0.5 text-xs {(isActive ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted hover:text-pb-fg")}")"
+                        class="@($"rounded border px-2 py-0.5 text-xs {(isActive ? "pb-toolbtn is-on" : "pb-toolbtn")}")"
                         @onclick="@(() => _compressQuality = p.Quality)">
                     @L.T(p.LabelKey)
                 </button>

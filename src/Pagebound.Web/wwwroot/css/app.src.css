@@ -368,6 +368,25 @@ input[type="file"]:hover::-webkit-file-upload-button {
 .btn-side:focus-visible, .btn-fmt:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .btn-side:disabled, .btn-fmt:disabled { opacity: 0.4; cursor: default; pointer-events: none; }
 
+/* Toolbar-Buttons (Reader-Werkzeuge/Zoom/Tabs/Aktionen etc.): dezenter Akzent-
+   Tint als Hintergrund; der aktive/ausgewählte Zustand (.is-on) ist voll mit der
+   Akzentfarbe gefüllt. Ergänzt die inline-Layout-Klassen (rounded/border/px/py). */
+.pb-toolbtn {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--ink-2);
+}
+.pb-toolbtn:hover:not(.is-on):not(:disabled) {
+  background: color-mix(in oklch, var(--accent) 24%, transparent);
+  color: var(--ink);
+}
+.pb-toolbtn.is-on {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: transparent;
+  font-weight: 600;
+}
+
 /* Inline-SVG-Icons der Editor-Bedienflächen (statt Emojis — folgen currentColor). */
 .pb-ic { width: 13px; height: 13px; flex: none; }
 

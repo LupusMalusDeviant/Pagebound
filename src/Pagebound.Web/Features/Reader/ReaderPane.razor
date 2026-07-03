@@ -188,7 +188,7 @@
                 {
                     var current = z;
                     <button type="button"
-                            class="@($"rounded border px-2 py-0.5 {(Math.Abs(_zoomFactor - current) < 0.001 ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted")}")"
+                            class="@($"rounded border px-2 py-0.5 {(Math.Abs(_zoomFactor - current) < 0.001 ? "pb-toolbtn is-on" : "pb-toolbtn")}")"
                             disabled="@_isRendering"
                             @onclick="@(() => SetZoom(current))">
                         @($"{(int)(current * 100)}%")
@@ -198,32 +198,32 @@
             <div class="flex items-center gap-2">
                 <span class="text-pb-fg-muted">@L.T("reader.tool.label")</span>
                 <button type="button"
-                        class="@($"rounded border px-2 py-0.5 {(_annotationMode == AnnotationMode.Select ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted")}")"
+                        class="@($"rounded border px-2 py-0.5 {(_annotationMode == AnnotationMode.Select ? "pb-toolbtn is-on" : "pb-toolbtn")}")"
                         @onclick="@(() => SetAnnotationMode(AnnotationMode.Select))"
                         title="@L.T("reader.tool.select.title")">
                     @L.T("reader.tool.select")
                 </button>
                 <button type="button"
-                        class="@($"rounded border px-2 py-0.5 {(_annotationMode == AnnotationMode.StickyNote ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted")}")"
+                        class="@($"rounded border px-2 py-0.5 {(_annotationMode == AnnotationMode.StickyNote ? "pb-toolbtn is-on" : "pb-toolbtn")}")"
                         @onclick="@(() => SetAnnotationMode(AnnotationMode.StickyNote))"
                         title="@L.T("reader.tool.note.title")">
                     @L.T("reader.tool.note")
                 </button>
                 <button type="button"
-                        class="@($"rounded border px-2 py-0.5 {(_annotationMode == AnnotationMode.FreeText ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted")}")"
+                        class="@($"rounded border px-2 py-0.5 {(_annotationMode == AnnotationMode.FreeText ? "pb-toolbtn is-on" : "pb-toolbtn")}")"
                         @onclick="@(() => SetAnnotationMode(AnnotationMode.FreeText))"
                         title="@L.T("reader.tool.text.title")">
                     @L.T("reader.tool.text")
                 </button>
                 <button type="button"
-                        class="@($"rounded border px-2 py-0.5 {(_annotationMode == AnnotationMode.DateStamp ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted")}")"
+                        class="@($"rounded border px-2 py-0.5 {(_annotationMode == AnnotationMode.DateStamp ? "pb-toolbtn is-on" : "pb-toolbtn")}")"
                         @onclick="@(() => SetAnnotationMode(AnnotationMode.DateStamp))"
                         title="@L.T("reader.tool.date.title")">
                     @L.T("reader.tool.date")
                 </button>
                 @if (_activeSignatureImage is null)
                 {
-                    <label class="rounded border border-pb-border bg-pb-bg px-2 py-0.5 text-pb-fg-muted hover:text-pb-fg cursor-pointer"
+                    <label class="rounded border pb-toolbtn px-2 py-0.5 cursor-pointer"
                            title="@L.T("reader.tool.signature.loadTitle")">
                         @L.T("reader.tool.signature.load")
                         <InputFile OnChange="HandleSignatureImageSelectedAsync"
@@ -234,7 +234,7 @@
                 else
                 {
                     <button type="button"
-                            class="@($"rounded border px-2 py-0.5 {(_annotationMode == AnnotationMode.Signature ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted")}")"
+                            class="@($"rounded border px-2 py-0.5 {(_annotationMode == AnnotationMode.Signature ? "pb-toolbtn is-on" : "pb-toolbtn")}")"
                             @onclick="@(() => SetAnnotationMode(AnnotationMode.Signature))"
                             title="@L.T("reader.tool.signature.placeTitle")">
                         @L.T("reader.tool.signature.placeFormat", new Dictionary<string, object> { ["name"] = _activeSignatureFilename ?? L.T("reader.tool.signature.defaultName") })
@@ -248,7 +248,7 @@
                     </button>
                 }
                 <button type="button"
-                        class="@($"rounded border px-2 py-0.5 text-pb-fg-muted hover:text-pb-fg {(_signerPanelOpen ? "border-pb-accent text-pb-accent" : "border-pb-border")}")"
+                        class="@($"rounded border px-2 py-0.5 {(_signerPanelOpen ? "pb-toolbtn is-on" : "pb-toolbtn")}")"
                         @onclick="@(() => _signerPanelOpen = !_signerPanelOpen)"
                         title="@L.T("reader.signer.toggleTitle")">
                     @(string.IsNullOrWhiteSpace(_signer.Name) ? L.T("reader.signer.toggleEmpty") : "👤 " + _signer.Name)
@@ -256,7 +256,7 @@
                 @if (_annotations.Any(a => a.Type == AnnotationType.Signature))
                 {
                     <button type="button"
-                            class="rounded border border-pb-border bg-pb-bg px-2 py-0.5 text-pb-fg-muted hover:text-pb-fg disabled:opacity-40"
+                            class="rounded border pb-toolbtn px-2 py-0.5 disabled:opacity-40"
                             disabled="@_isSavingSignedPdf"
                             @onclick="ExportSignedPdfAsync"
                             title="@L.T("reader.signed.saveTitle")">
@@ -265,32 +265,32 @@
                 }
                 <span class="text-pb-fg-muted ml-2">@L.T("reader.draw.label")</span>
                 <button type="button"
-                        class="@($"rounded border px-2 py-0.5 {(_annotationMode == AnnotationMode.Pen ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted")}")"
+                        class="@($"rounded border px-2 py-0.5 {(_annotationMode == AnnotationMode.Pen ? "pb-toolbtn is-on" : "pb-toolbtn")}")"
                         @onclick="@(() => SetAnnotationMode(AnnotationMode.Pen))"
                         title="@L.T("reader.draw.pen.title")">
                     @L.T("reader.draw.pen")
                 </button>
                 <button type="button"
-                        class="@($"rounded border px-2 py-0.5 {(_annotationMode == AnnotationMode.RectShape ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted")}")"
+                        class="@($"rounded border px-2 py-0.5 {(_annotationMode == AnnotationMode.RectShape ? "pb-toolbtn is-on" : "pb-toolbtn")}")"
                         @onclick="@(() => SetAnnotationMode(AnnotationMode.RectShape))"
                         title="@L.T("reader.draw.rect.title")">
                     @L.T("reader.draw.rect")
                 </button>
                 <button type="button"
-                        class="@($"rounded border px-2 py-0.5 {(_annotationMode == AnnotationMode.ArrowShape ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted")}")"
+                        class="@($"rounded border px-2 py-0.5 {(_annotationMode == AnnotationMode.ArrowShape ? "pb-toolbtn is-on" : "pb-toolbtn")}")"
                         @onclick="@(() => SetAnnotationMode(AnnotationMode.ArrowShape))"
                         title="@L.T("reader.draw.arrow.title")">
                     @L.T("reader.draw.arrow")
                 </button>
                 <button type="button"
-                        class="@($"rounded border px-2 py-0.5 {(_annotationMode == AnnotationMode.LineShape ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted")}")"
+                        class="@($"rounded border px-2 py-0.5 {(_annotationMode == AnnotationMode.LineShape ? "pb-toolbtn is-on" : "pb-toolbtn")}")"
                         @onclick="@(() => SetAnnotationMode(AnnotationMode.LineShape))"
                         title="@L.T("reader.draw.line.title")">
                     @L.T("reader.draw.line")
                 </button>
                 <span class="mx-1 h-4 w-px bg-pb-border"></span>
                 <button type="button"
-                        class="@($"rounded border px-2 py-0.5 {(_annotationMode == AnnotationMode.Redaction ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted")}")"
+                        class="@($"rounded border px-2 py-0.5 {(_annotationMode == AnnotationMode.Redaction ? "pb-toolbtn is-on" : "pb-toolbtn")}")"
                         @onclick="@(() => SetAnnotationMode(AnnotationMode.Redaction))"
                         title="@L.T("reader.redact.title")">
                     @L.T("reader.redact.tool")
@@ -339,7 +339,7 @@
                         var label = L.T(labelKey);
                         var isActive = Math.Abs(_drawStrokeWidth - f) < 1e-6;
                         <button type="button"
-                                class="@($"rounded border px-2 py-0.5 {(isActive ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted")}")"
+                                class="@($"rounded border px-2 py-0.5 {(isActive ? "pb-toolbtn is-on" : "pb-toolbtn")}")"
                                 title="@L.T("reader.draw.width.title", new Dictionary<string, object> { ["label"] = label })"
                                 @onclick="@(() => SetDrawStrokeWidth(f))">
                             @label
@@ -349,7 +349,7 @@
             }
             <div class="flex items-center gap-2">
                 <button type="button"
-                        class="@($"rounded border px-2 py-0.5 {(_continuous ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted")}")"
+                        class="@($"rounded border px-2 py-0.5 {(_continuous ? "pb-toolbtn is-on" : "pb-toolbtn")}")"
                         title="@L.T("reader.view.continuousTitle")"
                         @onclick="ToggleContinuousAsync">
                     @L.T("reader.view.continuous")
@@ -359,13 +359,13 @@
                     }
                 </button>
                 <button type="button"
-                        class="@($"rounded border px-2 py-0.5 {(_nightMode ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted")}")"
+                        class="@($"rounded border px-2 py-0.5 {(_nightMode ? "pb-toolbtn is-on" : "pb-toolbtn")}")"
                         title="@L.T("reader.view.nightTitle")"
                         @onclick="@(() => _nightMode = !_nightMode)">
                     @L.T("reader.view.night")
                 </button>
                 <button type="button"
-                        class="@($"rounded border px-2 py-0.5 {(_outlineOpen ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted")}")"
+                        class="@($"rounded border px-2 py-0.5 {(_outlineOpen ? "pb-toolbtn is-on" : "pb-toolbtn")}")"
                         title="@L.T("reader.outline.toggleTitle")"
                         @onclick="@(() => _outlineOpen = !_outlineOpen)">
                     @L.T("reader.outline.toggle")
@@ -375,7 +375,7 @@
                     }
                 </button>
                 <button type="button"
-                        class="@($"rounded border px-2 py-0.5 {(_thumbsOpen ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted")}")"
+                        class="@($"rounded border px-2 py-0.5 {(_thumbsOpen ? "pb-toolbtn is-on" : "pb-toolbtn")}")"
                         title="@L.T("reader.thumbs.toggleTitle")"
                         @onclick="ToggleThumbsAsync">
                     @L.T("reader.thumbs.toggle")
@@ -389,7 +389,7 @@
                 @if (HasFormFields)
                 {
                     <button type="button"
-                            class="@($"rounded border px-2 py-0.5 {(_formPanelOpen ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted")}")"
+                            class="@($"rounded border px-2 py-0.5 {(_formPanelOpen ? "pb-toolbtn is-on" : "pb-toolbtn")}")"
                             title="@L.T("reader.form.toggleTitle")"
                             @onclick="@(() => _formPanelOpen = !_formPanelOpen)">
                         @L.T("reader.form.toggle")
@@ -397,7 +397,7 @@
                     </button>
                 }
                 <button type="button"
-                        class="rounded border border-pb-border bg-pb-bg px-2 py-0.5 text-pb-fg-muted hover:text-pb-fg disabled:opacity-40 disabled:cursor-not-allowed"
+                        class="rounded border pb-toolbtn px-2 py-0.5 disabled:opacity-40 disabled:cursor-not-allowed"
                         disabled="@(_isExporting || _annotations.Count == 0)"
                         title="@(_annotations.Count == 0 ? L.T("reader.export.empty") : L.T("reader.export.title"))"
                         @onclick="ExportMarkdownAsync">
@@ -408,14 +408,14 @@
                     }
                 </button>
                 <button type="button"
-                        class="rounded border border-pb-border bg-pb-bg px-2 py-0.5 text-pb-fg-muted hover:text-pb-fg disabled:opacity-40 disabled:cursor-not-allowed"
+                        class="rounded border pb-toolbtn px-2 py-0.5 disabled:opacity-40 disabled:cursor-not-allowed"
                         disabled="@(_isFlattening || _annotations.Count == 0 || _originalPdfBytes is null)"
                         title="@(_annotations.Count == 0 ? L.T("reader.flatten.empty") : L.T("reader.flatten.title"))"
                         @onclick="FlattenAnnotationsAsync">
                     @(_isFlattening ? L.T("reader.flatten.running") : L.T("reader.flatten.button"))
                 </button>
                 <button type="button"
-                        class="rounded border border-pb-border bg-pb-bg px-2 py-0.5 text-pb-fg-muted hover:text-pb-fg disabled:opacity-40 disabled:cursor-not-allowed"
+                        class="rounded border pb-toolbtn px-2 py-0.5 disabled:opacity-40 disabled:cursor-not-allowed"
                         disabled="@(_isExportingSidecar || _annotations.Count == 0)"
                         title="@(_annotations.Count == 0 ? L.T("reader.sidecar.exportEmpty") : L.T("reader.sidecar.exportTitle"))"
                         @onclick="ExportSidecarAsync">
@@ -424,14 +424,14 @@
                 @if (_workspaceName is not null)
                 {
                     <button type="button"
-                            class="rounded border border-pb-border bg-pb-bg px-2 py-0.5 text-pb-fg-muted hover:text-pb-fg disabled:opacity-40 disabled:cursor-not-allowed"
+                            class="rounded border pb-toolbtn px-2 py-0.5 disabled:opacity-40 disabled:cursor-not-allowed"
                             disabled="@(_isSavingToWorkspace || _annotations.Count == 0)"
                             title="@L.T("reader.workspace.saveTitle", new Dictionary<string, object> { ["folder"] = _workspaceName })"
                             @onclick="SaveToWorkspaceAsync">
                         @(_isSavingToWorkspace ? L.T("reader.workspace.saving") : L.T("reader.workspace.save"))
                     </button>
                 }
-                <label class="rounded border border-pb-border bg-pb-bg px-2 py-0.5 text-pb-fg-muted hover:text-pb-fg cursor-pointer @(_handle is null ? "opacity-40 cursor-not-allowed" : "")"
+                <label class="rounded border pb-toolbtn px-2 py-0.5 cursor-pointer @(_handle is null ? "opacity-40 cursor-not-allowed" : "")"
                        title="@L.T("reader.sidecar.importTitle")">
                     @L.T("reader.sidecar.import")
                     <InputFile OnChange="HandleSidecarFileSelectedAsync"
@@ -1296,7 +1296,7 @@
         <nav class="sticky bottom-0 z-30 max-w-4xl mx-auto mt-6 flex items-center justify-center gap-3 rounded-t-lg border-t border-pb-border pb-glass-strong px-4 py-2"
              aria-label="@L.T("reader.pageNav")">
             <button type="button"
-                    class="rounded border border-pb-border px-3 py-1 text-sm disabled:opacity-40"
+                    class="rounded border pb-toolbtn px-3 py-1 text-sm disabled:opacity-40"
                     disabled="@(_currentPage <= 1 || _isRendering)"
                     @onclick="PreviousPage">
                 @L.T("reader.prev")
@@ -1313,7 +1313,7 @@
                 <span class="text-pb-fg-muted">@L.T("reader.pageOfTotal", new Dictionary<string, object> { ["total"] = _handle.PageCount })</span>
             </span>
             <button type="button"
-                    class="rounded border border-pb-border px-3 py-1 text-sm disabled:opacity-40"
+                    class="rounded border pb-toolbtn px-3 py-1 text-sm disabled:opacity-40"
                     disabled="@(_currentPage >= _handle.PageCount || _isRendering)"
                     @onclick="NextPage">
                 @L.T("reader.next")

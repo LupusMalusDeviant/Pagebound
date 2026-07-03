@@ -86,7 +86,7 @@
                 var m = mode;
                 var active = _view == m;
                 <button type="button"
-                        class="@($"rounded border px-2 py-0.5 text-xs {(active ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted hover:text-pb-fg")}")"
+                        class="@($"rounded border px-2 py-0.5 text-xs {(active ? "pb-toolbtn is-on" : "pb-toolbtn")}")"
                         @onclick="@(() => _view = m)">
                     @L.T(labelKey)
                 </button>
@@ -102,7 +102,7 @@
             <div class="max-w-4xl mx-auto mt-2 flex flex-wrap items-center gap-2 text-sm">
                 <span class="text-pb-fg-muted">@L.T("library.tags.label")</span>
                 <button type="button"
-                        class="@($"rounded-full border px-2 py-0.5 text-xs {(_selectedTags.Count == 0 ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted")}")"
+                        class="@($"rounded-full border px-2 py-0.5 text-xs {(_selectedTags.Count == 0 ? "pb-toolbtn is-on" : "pb-toolbtn")}")"
                         @onclick="ClearTagFilter">
                     @L.T("library.tags.clear")
                 </button>
@@ -111,7 +111,7 @@
                     var t = tag;
                     var active = _selectedTags.Contains(t);
                     <button type="button"
-                            class="@($"rounded-full border px-2 py-0.5 text-xs {(active ? "border-pb-accent text-pb-accent bg-pb-accent/10" : "border-pb-border text-pb-fg-muted hover:text-pb-fg")}")"
+                            class="@($"rounded-full border px-2 py-0.5 text-xs {(active ? "pb-toolbtn is-on" : "pb-toolbtn")}")"
                             @onclick="@(() => ToggleTagFilter(t))">
                         #@t
                     </button>

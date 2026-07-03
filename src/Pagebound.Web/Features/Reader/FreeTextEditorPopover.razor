@@ -38,7 +38,7 @@
             var s = size;
             var sizeActive = Math.Abs(FontSize - s) < 0.0005;
             <button type="button"
-                    class="@($"rounded border px-1.5 py-0.5 {(sizeActive ? "border-pb-accent text-pb-accent" : "border-pb-border")}")"
+                    class="@($"rounded border px-1.5 py-0.5 {(sizeActive ? "pb-toolbtn is-on" : "pb-toolbtn")}")"
                     @onclick="@(() => OnStyleChanged.InvokeAsync((s, Color)))">
                 @L.T(labelKey)
             </button>
