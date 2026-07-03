@@ -3048,6 +3048,10 @@
         var saved = await Annotations.UpdateAsync(updated, CancellationToken.None);
         _annotations = _annotations.Select(a => a.Id.Value == saved.Id.Value ? saved : a).ToList();
 
+        // Freitext-Position ist Teil des Signatur-Integritäts-Hashs → nach dem
+        // Verschieben Status neu berechnen (analog SaveEditingFreeTextAsync).
+        await RecomputeSignatureStatusesAsync();
+
         await InvokeAsync(StateHasChanged);
     }
 
