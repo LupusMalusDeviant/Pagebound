@@ -14,7 +14,7 @@ Status: `[ ]` offen · `[x]` erledigt (mit Commit-Hash) · `[!]` blockiert (mit 
 - [x] F-03 · Flatten-Export bricht bei nicht-kodierbarem Zeichen ab — `0197dac`
 - [x] F-04 · Editor-Wechsel zwischen Freitexten verwirft Inhalt — `4ad891b`
 - [x] F-05 · Text-Layer und Cursor ignorieren neue Modi — `77d803a`
-- [ ] F-06 · Eingebrannter Text verschwindet an Seiten-Unterkante
+- [x] F-06 · Eingebrannter Text verschwindet an Seiten-Unterkante — `1d824a5`
 
 ## Runde 2 — Robustheit + Export
 - [ ] F-08 · Doppelklick platziert doppelt (Reentrancy-Guard)
