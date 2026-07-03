@@ -33,7 +33,7 @@ Status: `[ ]` offen · `[x]` erledigt (mit Commit-Hash) · `[!]` blockiert (mit 
 - [x] F-20 · Automatischer Wächter gegen externe Requests — `85505fb` (+CI-Gate)
 
 ## Runde 5 — Refactorings/Doku
-- [ ] F-15 · Payload-Helper 6-fach dupliziert
+- [x] F-15 · Payload-Helper 6-fach dupliziert — `89630c6`
 - [ ] F-16 · Freitext-Editor-Duplikate zusammenführen
 - [ ] F-17 · Freitext-Editor als Komponente extrahieren
 - [ ] F-18 · `npm run typecheck` ist rot
@@ -46,6 +46,9 @@ Status: `[ ]` offen · `[x]` erledigt (mit Commit-Hash) · `[!]` blockiert (mit 
   folgt dem Code (eigenes try/catch um den Fallback + korrigierter Filter).
 - Bundled `wwwroot/js/*.js` sind gitignored (Build-Artefakte) → nur `.ts`
   committen, `npm run build:js` erzeugt die Bundles lokal.
+- F-15: Vorschlags-Signatur war `GetDouble(payload, key)`; ShapeAnnotation nutzte
+  aber `GetDouble(payload, key, fallback)`. Helper daher als Superset mit
+  optionalem `double fallback = 0` implementiert (deckt beide Aufrufmuster ab).
 - F-07: Nur Maßnahme 1 (Erkennen + Melden) umgesetzt; Maßnahme 2 (`minAppVersion`-
   Feld) bewusst weggelassen — es hätte das Sidecar-Schema/den Record geändert
   (Risiko ohne klaren Nutzen), die Aufgabe erlaubt das explizite Weglassen.
