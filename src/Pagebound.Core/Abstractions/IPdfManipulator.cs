@@ -94,6 +94,19 @@ public interface IPdfManipulator
         CancellationToken cancellationToken);
 
     /// <summary>
+    /// Inline-Text-Bearbeitung („Text bearbeiten"): übermalt die angegebenen alten
+    /// Textregionen opak (Hintergrundfarbe) und zeichnet den neuen Text darüber —
+    /// Cover + Redraw, KEIN Reflow. Position in 0..1-Page-Fractions (Ursprung
+    /// oben-links). WICHTIG: der ursprüngliche Text bleibt im Content-Stream
+    /// (weiterhin extrahierbar) — für echte Entfernung <see cref="RedactAsync"/>.
+    /// Leere Liste → PDF unverändert.
+    /// </summary>
+    Task<byte[]> ApplyTextEditsAsync(
+        Stream pdf,
+        IReadOnlyList<TextEditRegion> edits,
+        CancellationToken cancellationToken);
+
+    /// <summary>
     /// Legt AcroForm-Felder (Text/Checkbox) an den angegebenen Positionen an
     /// (Formular-Erstellung, Roadmap D1). Position in 0..1-Page-Fractions
     /// (Ursprung oben-links, wie im UI). Leere Liste → PDF unverändert.
@@ -120,6 +133,23 @@ public sealed record RedactionRegion(
     double Y,
     double Width,
     double Height);
+
+/// <summary>
+/// Eine Inline-Text-Bearbeitung (Cover + Redraw) auf einer Seite, in 0..1-Page-
+/// Fractions (Ursprung oben-links). <see cref="FontSize"/> ist Anteil der
+/// Seitenhöhe (wie Freitext). <see cref="Color"/>/<see cref="BgColor"/> sind
+/// Hex (z. B. "#111111"); null → Default (Text fast-schwarz, Hintergrund weiß).
+/// </summary>
+public sealed record TextEditRegion(
+    int PageNumber,
+    double X,
+    double Y,
+    double Width,
+    double Height,
+    string Text,
+    double FontSize,
+    string? Color,
+    string? BgColor);
 
 /// <summary>
 /// Ein neu anzulegendes Formularfeld (Roadmap D1). Position in 0..1-Page-Fractions

@@ -363,6 +363,29 @@ public sealed class JsPdfLibManipulator : IPdfManipulator
         }
     }
 
+    public async Task<byte[]> ApplyTextEditsAsync(Stream pdf, IReadOnlyList<TextEditRegion> edits, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(pdf);
+        ArgumentNullException.ThrowIfNull(edits);
+        var bytes = await ReadAllAsync(pdf, cancellationToken).ConfigureAwait(false);
+        if (edits.Count == 0) return bytes;
+
+        // camelCase-Payload exakt wie TextEditDto in der Bridge.
+        var payload = edits
+            .Select(e => new { pageNumber = e.PageNumber, x = e.X, y = e.Y, w = e.Width, h = e.Height, text = e.Text ?? string.Empty, fontSize = e.FontSize, color = e.Color, bgColor = e.BgColor })
+            .ToArray();
+        try
+        {
+            var result = await _js.InvokeAsync<byte[]>(
+                "pageboundPdfManipulator.applyTextEdits", cancellationToken, bytes, payload).ConfigureAwait(false);
+            return result ?? bytes;
+        }
+        catch (JSException jsex)
+        {
+            throw new InvalidOperationException($"[stage:edit] pdf-lib applyTextEdits fehlgeschlagen: {jsex.Message}", jsex);
+        }
+    }
+
     public async Task<byte[]> CreateFormFieldsAsync(Stream pdf, IReadOnlyList<FormFieldRegion> fields, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(pdf);

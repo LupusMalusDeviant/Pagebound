@@ -15,7 +15,7 @@ Reihenfolge = „Empfohlene Reihenfolge" im Plan.
 
 ## Runde 2 — Inline-Edit „Text bearbeiten" (Pflicht)
 - [x] **E-10** Bridge `applyTextEdits` (Cover + Redraw) — im Preview verifiziert: gültiges PDF, neuer Text gezeichnet, opake Cover-Rect; alter Text bleibt extrahierbar (Design → Ehrlichkeits-Hinweis)
-- [ ] **E-11** Infra `ApplyTextEditsAsync` (JsPdfLibManipulator)
+- [x] **E-11** Infra `ApplyTextEditsAsync` + `TextEditRegion`-Record (IPdfManipulator/JsPdfLibManipulator) — Build+184 Tests grün
 - [ ] **E-12** JS-Helper `findTextBlockAt`
 - [ ] **E-13** Reader-Werkzeug (Modus/Toolbar/State)
 - [ ] **E-14** Edit-Geste end-to-end (Klick→Editor→Anwenden)
