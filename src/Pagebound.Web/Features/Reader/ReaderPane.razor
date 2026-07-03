@@ -1415,6 +1415,10 @@
     private bool _isExporting;
     private bool _isExportingSidecar;
     private bool _isFlattening;
+    // Reentrancy-Guard für HandlePdfClickAsync: verhindert Doppel-Platzierung
+    // durch einen schnellen zweiten Klick, während der erste noch an einem
+    // await (JS-Interop / CreateAsync) hängt.
+    private bool _isPlacing;
     // FA-072: Name des aktiven Sidecar-Workspace (null = keiner gesetzt), wird beim
     // PDF-Öffnen geladen und steuert die Sichtbarkeit des "In Workspace speichern".
     private string? _workspaceName;
@@ -2794,70 +2798,83 @@
 
     private async Task HandlePdfClickAsync(MouseEventArgs e)
     {
-        // Editor schließt, sobald wir ins Dokument klicken (außer eben in den
-        // Editor selbst — der stoppt das Event via @onclick:stopPropagation).
-        if (_editingAnnotation is not null)
+        // Reentrancy-Guard (F-08): ein schneller zweiter Klick darf nicht am
+        // await-Punkt (JS-Interop / CreateAsync) durchlaufen und doppelt
+        // platzieren. Schützt alle vier Platzierungs-Modi auf einmal. Der Modus
+        // wird bewusst NICHT vorab zurückgesetzt (Signatur bleibt geladen).
+        if (_isPlacing) return;
+        _isPlacing = true;
+        try
         {
-            await SaveEditingAnnotationAsync();
+            // Editor schließt, sobald wir ins Dokument klicken (außer eben in den
+            // Editor selbst — der stoppt das Event via @onclick:stopPropagation).
+            if (_editingAnnotation is not null)
+            {
+                await SaveEditingAnnotationAsync();
+            }
+            if (_editingFreeText is not null)
+            {
+                await SaveEditingFreeTextAsync();
+            }
+
+            if (_currentPdfId is null || _handle is null) return;
+
+            if (_annotationMode == AnnotationMode.Signature)
+            {
+                await PlaceSignatureAsync(e);
+                return;
+            }
+
+            if (_annotationMode == AnnotationMode.FreeText)
+            {
+                // Leerer Text + Editor öffnen — der Nutzer tippt direkt los (wie Edge).
+                await PlaceFreeTextAsync(e, string.Empty, openEditor: true);
+                return;
+            }
+
+            if (_annotationMode == AnnotationMode.DateStamp)
+            {
+                // Aktuelles PC-Datum (lokale Zeitzone des Browsers/Rechners) im
+                // sprachabhängigen Format aus den i18n-Ressourcen.
+                var dateText = DateTime.Now.ToString(
+                    L.T("reader.tool.date.format"),
+                    CultureInfo.InvariantCulture);
+                await PlaceFreeTextAsync(e, dateText, openEditor: false);
+                return;
+            }
+
+            if (_annotationMode != AnnotationMode.StickyNote) return;
+
+            var fraction = await JS.InvokeAsync<NormalizedPosition?>(
+                "pageboundShortcuts.clientPositionToFraction",
+                PdfImageSelector,
+                e.ClientX,
+                e.ClientY);
+            if (fraction is null) return;
+
+            var newAnnotation = StickyNoteAnnotation.Create(
+                _currentPdfId.Value,
+                _currentPage,
+                fraction.X,
+                fraction.Y,
+                string.Empty);
+
+            var created = await Annotations.CreateAsync(newAnnotation, CancellationToken.None);
+            _annotations = _annotations.Append(created).ToList();
+
+            // Sofort in den Edit-Modus springen, damit der Nutzer den Text
+            // eingeben kann, ohne erst auf den Pin zu klicken.
+            OpenEditor(created);
+
+            // Nach dem Erstellen zurück zum Select-Modus — verhindert versehentliche
+            // Mehrfach-Erstellung beim Weiterklicken.
+            _annotationMode = AnnotationMode.Select;
+            await RecomputeSignatureStatusesAsync();
         }
-        if (_editingFreeText is not null)
+        finally
         {
-            await SaveEditingFreeTextAsync();
+            _isPlacing = false;
         }
-
-        if (_currentPdfId is null || _handle is null) return;
-
-        if (_annotationMode == AnnotationMode.Signature)
-        {
-            await PlaceSignatureAsync(e);
-            return;
-        }
-
-        if (_annotationMode == AnnotationMode.FreeText)
-        {
-            // Leerer Text + Editor öffnen — der Nutzer tippt direkt los (wie Edge).
-            await PlaceFreeTextAsync(e, string.Empty, openEditor: true);
-            return;
-        }
-
-        if (_annotationMode == AnnotationMode.DateStamp)
-        {
-            // Aktuelles PC-Datum (lokale Zeitzone des Browsers/Rechners) im
-            // sprachabhängigen Format aus den i18n-Ressourcen.
-            var dateText = DateTime.Now.ToString(
-                L.T("reader.tool.date.format"),
-                CultureInfo.InvariantCulture);
-            await PlaceFreeTextAsync(e, dateText, openEditor: false);
-            return;
-        }
-
-        if (_annotationMode != AnnotationMode.StickyNote) return;
-
-        var fraction = await JS.InvokeAsync<NormalizedPosition?>(
-            "pageboundShortcuts.clientPositionToFraction",
-            PdfImageSelector,
-            e.ClientX,
-            e.ClientY);
-        if (fraction is null) return;
-
-        var newAnnotation = StickyNoteAnnotation.Create(
-            _currentPdfId.Value,
-            _currentPage,
-            fraction.X,
-            fraction.Y,
-            string.Empty);
-
-        var created = await Annotations.CreateAsync(newAnnotation, CancellationToken.None);
-        _annotations = _annotations.Append(created).ToList();
-
-        // Sofort in den Edit-Modus springen, damit der Nutzer den Text
-        // eingeben kann, ohne erst auf den Pin zu klicken.
-        OpenEditor(created);
-
-        // Nach dem Erstellen zurück zum Select-Modus — verhindert versehentliche
-        // Mehrfach-Erstellung beim Weiterklicken.
-        _annotationMode = AnnotationMode.Select;
-        await RecomputeSignatureStatusesAsync();
     }
 
     private void OpenEditor(Annotation annotation)
