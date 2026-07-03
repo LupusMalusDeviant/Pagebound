@@ -29,7 +29,7 @@ public sealed class JsonSidecarService : ISidecarService
         return Task.FromResult(json);
     }
 
-    public async Task<Sidecar?> ParseAsync(Stream json, CancellationToken cancellationToken)
+    public async Task<SidecarParseResult> ParseAsync(Stream json, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(json);
         try
@@ -43,13 +43,19 @@ public sealed class JsonSidecarService : ISidecarService
                 || string.IsNullOrWhiteSpace(sidecar.SchemaVersion)
                 || sidecar.PdfMeta is null)
             {
-                return null;
+                return SidecarParseResult.Invalid;
             }
-            return sidecar;
+            // Vorwärtskompatibilität (F-07): Annotationen mit einem in DIESER App-
+            // Version unbekannten Typ-Ordinal (z.B. aus einer neueren Version) NICHT
+            // verwerfen — sie bleiben erhalten und beeinflussen den Signatur-Hash
+            // weiter — aber dem Aufrufer als Warnung melden. Die Ordinal-
+            // Serialisierung des Enums bleibt unverändert (kein Breaking Change).
+            var unknownCount = sidecar.Annotations.Count(a => !a.Type.IsKnown());
+            return new SidecarParseResult(sidecar, unknownCount);
         }
         catch (JsonException)
         {
-            return null;
+            return SidecarParseResult.Invalid;
         }
     }
 

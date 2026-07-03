@@ -3758,8 +3758,8 @@
         if (_currentPdfId is null || string.IsNullOrWhiteSpace(json)) return 0;
         await using var ms = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(json));
         var parsed = await Sidecar.ParseAsync(ms, CancellationToken.None).ConfigureAwait(false);
-        if (parsed is null) return 0;
-        var migration = await Sidecar.MigrateAsync(parsed, CancellationToken.None).ConfigureAwait(false);
+        if (parsed.Sidecar is null) return 0;
+        var migration = await Sidecar.MigrateAsync(parsed.Sidecar, CancellationToken.None).ConfigureAwait(false);
         var sidecar = migration.Result;
         var pdfId = _currentPdfId.Value;
         var existingIds = _annotations.Select(a => a.Id.Value).ToHashSet();
@@ -3805,7 +3805,7 @@
             ms.Position = 0;
 
             var parsed = await Sidecar.ParseAsync(ms, CancellationToken.None).ConfigureAwait(false);
-            if (parsed is null)
+            if (parsed.Sidecar is null)
             {
                 _sidecarStatus = L.T("reader.sidecar.importError",
                     new Dictionary<string, object> { ["message"] = "JSON nicht parsebar oder kein Sidecar-Format" });
@@ -3813,7 +3813,7 @@
                 return;
             }
 
-            var migration = await Sidecar.MigrateAsync(parsed, CancellationToken.None).ConfigureAwait(false);
+            var migration = await Sidecar.MigrateAsync(parsed.Sidecar, CancellationToken.None).ConfigureAwait(false);
             var sidecar = migration.Result;
 
             // Hash-Mismatch macht den Import nicht ungültig (User könnte z.B.
@@ -3846,6 +3846,16 @@
                 : L.T("reader.sidecar.imported",
                     new Dictionary<string, object> { ["added"] = newAnnotations.Count, ["filename"] = file.Name });
             _sidecarStatusIsError = wrongPdf;
+
+            // F-07: Annotationen aus einer neueren App-Version (unbekannter Typ)
+            // wurden übernommen, können hier aber nicht angezeigt werden → sichtbar
+            // warnen, statt sie still zu verschlucken.
+            if (parsed.HasUnknownAnnotations)
+            {
+                _sidecarStatus += " " + L.T("reader.sidecar.unknownTypes",
+                    new Dictionary<string, object> { ["count"] = parsed.UnknownAnnotationCount });
+                _sidecarStatusIsError = true;
+            }
         }
         catch (Exception ex)
         {

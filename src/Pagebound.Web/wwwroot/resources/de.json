@@ -364,6 +364,7 @@
   "reader.sidecar.imported": "Sidecar importiert: {added} neue Annotation(en) aus „{filename}\".",
   "reader.sidecar.importError": "Sidecar konnte nicht gelesen werden: {message}",
   "reader.sidecar.wrongPdf": "Achtung: Sidecar gehört zu einer anderen PDF (Hash weicht ab). Trotzdem laden?",
+  "reader.sidecar.unknownTypes": "{count} Annotation(en) stammen aus einer neueren App-Version und wurden übernommen, können hier aber nicht angezeigt werden.",
   "reader.workspace.save": "In Workspace",
   "reader.workspace.saving": "Speichere …",
   "reader.workspace.saved": "Im Workspace „{folder}\" gespeichert.",

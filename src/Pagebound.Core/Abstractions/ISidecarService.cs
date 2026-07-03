@@ -20,10 +20,12 @@ public interface ISidecarService
     /// <summary>
     /// Liest ein Sidecar aus einem JSON-Stream. Schema-Version wird geprüft;
     /// abweichende Versionen werden im Anschluss über <see cref="MigrateAsync"/>
-    /// behandelt. Gibt <c>null</c> zurück, wenn der Stream nicht parsebar ist
-    /// oder das Schema-Feld fehlt.
+    /// behandelt. <see cref="SidecarParseResult.Sidecar"/> ist <c>null</c>, wenn der
+    /// Stream nicht parsebar ist oder das Schema-Feld fehlt. Annotationen mit einem
+    /// in dieser App-Version unbekannten Typ-Ordinal werden NICHT verworfen, aber in
+    /// <see cref="SidecarParseResult.UnknownAnnotationCount"/> gemeldet.
     /// </summary>
-    Task<Sidecar?> ParseAsync(Stream json, CancellationToken cancellationToken);
+    Task<SidecarParseResult> ParseAsync(Stream json, CancellationToken cancellationToken);
 
     Task<Sidecar?> TryLoadAsync(string pdfPath, CancellationToken cancellationToken);
 
@@ -39,6 +41,21 @@ public sealed record MigrationResult(
     string FromVersion,
     string ToVersion,
     Sidecar Result);
+
+/// <summary>
+/// Ergebnis von <see cref="ISidecarService.ParseAsync"/>. <see cref="Sidecar"/> ist
+/// <c>null</c> bei nicht parsebarem/ungültigem Input. <see cref="UnknownAnnotationCount"/>
+/// zählt Annotationen mit einem Typ-Ordinal, das diese App-Version (noch) nicht kennt
+/// — sie bleiben erhalten (Vorwärtskompatibilität), können hier aber nicht angezeigt
+/// werden. Der Aufrufer kann das als Warnung sichtbar machen.
+/// </summary>
+public sealed record SidecarParseResult(Sidecar? Sidecar, int UnknownAnnotationCount)
+{
+    public bool HasUnknownAnnotations => UnknownAnnotationCount > 0;
+
+    /// <summary>Ergebnis für nicht parsebaren/ungültigen Input.</summary>
+    public static readonly SidecarParseResult Invalid = new(null, 0);
+}
 
 /// <summary>
 /// Eine Sidecar-Schema-Migration zwischen zwei Versionen.

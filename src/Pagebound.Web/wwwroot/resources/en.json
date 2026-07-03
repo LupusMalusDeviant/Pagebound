@@ -364,6 +364,7 @@
   "reader.sidecar.imported": "Sidecar imported: {added} new annotation(s) from “{filename}”.",
   "reader.sidecar.importError": "Could not read sidecar: {message}",
   "reader.sidecar.wrongPdf": "Warning: this sidecar belongs to a different PDF (hash mismatch). Load anyway?",
+  "reader.sidecar.unknownTypes": "{count} annotation(s) come from a newer app version and were imported, but cannot be displayed here.",
   "reader.workspace.save": "To workspace",
   "reader.workspace.saving": "Saving …",
   "reader.workspace.saved": "Saved to workspace “{folder}”.",

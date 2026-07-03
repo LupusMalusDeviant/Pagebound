@@ -22,6 +22,17 @@ public enum AnnotationType
     FreeText
 }
 
+public static class AnnotationTypeExtensions
+{
+    /// <summary>
+    /// True, wenn der (ordinal serialisierte) Wert ein in DIESER App-Version
+    /// bekannter <see cref="AnnotationType"/> ist. Unbekannte Werte stammen aus
+    /// einer neueren App-Version (Sidecar-Vorwärtskompatibilität) und dürfen NICHT
+    /// verworfen werden — sie beeinflussen weiterhin den Signatur-Hash.
+    /// </summary>
+    public static bool IsKnown(this AnnotationType type) => Enum.IsDefined(type);
+}
+
 public sealed record Rectangle(double X, double Y, double Width, double Height);
 
 public sealed record Annotation(
