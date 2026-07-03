@@ -11,7 +11,7 @@ Status: `[ ]` offen · `[x]` erledigt (mit Commit-Hash) · `[!]` blockiert (mit 
 ## Runde 1 — Sichtbare Bugs
 - [x] F-01 · Signatur-Badge veraltet nach Freitext-Drag — `69793b3`
 - [x] F-02 · Werkzeugwechsel hinterlässt leere Geister-Annotation — `44df46c`
-- [ ] F-03 · Flatten-Export bricht bei nicht-kodierbarem Zeichen ab
+- [x] F-03 · Flatten-Export bricht bei nicht-kodierbarem Zeichen ab — `0197dac`
 - [ ] F-04 · Editor-Wechsel zwischen Freitexten verwirft Inhalt
 - [ ] F-05 · Text-Layer und Cursor ignorieren neue Modi
 - [ ] F-06 · Eingebrannter Text verschwindet an Seiten-Unterkante
@@ -40,4 +40,9 @@ Status: `[ ]` offen · `[x]` erledigt (mit Commit-Hash) · `[!]` blockiert (mit 
 - [ ] F-19 · ADR-Verweise ohne ADR-Dateien
 
 ## Abweichungen / Notizen
-(keine)
+- F-03: IST sagt „Fallback-drawText steht außerhalb des try". Im Code steht er
+  im `catch`, ist aber selbst nicht geschützt — ein zweiter Wurf entkommt dem
+  catch und reißt `flattenAnnotations` ab. Gleiche Wirkung wie beschrieben; Fix
+  folgt dem Code (eigenes try/catch um den Fallback + korrigierter Filter).
+- Bundled `wwwroot/js/*.js` sind gitignored (Build-Artefakte) → nur `.ts`
+  committen, `npm run build:js` erzeugt die Bundles lokal.
