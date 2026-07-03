@@ -33,6 +33,12 @@ jobs:
           cache: 'npm'
           cache-dependency-path: src/Pagebound.Web/package-lock.json
 
+      # Privacy-Guard (F-20): schlägt fehl bei externen Requests / CDN-Assets /
+      # deaktivierter NoOp-Telemetrie / unreviewten Laufzeit-Dependencies.
+      # Dependency-frei (nur Node-Builtins) → früher, schneller Gate.
+      - name: Privacy guard (no external requests / telemetry)
+        run: node tools/privacy-check.mjs
+
       - name: Restore .NET packages
         run: dotnet restore
 
