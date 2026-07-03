@@ -5,10 +5,11 @@ Status: `[ ]` offen · `[x]` erledigt (mit Commit-Hash) · `[!]` blockiert (mit 
 
 ## Basis
 - Base-Commit `ad6f966` — feat(reader): Freitext-Werkzeug + Datum-Stempel
-- Base-Commit `<docs>` — docs: Codebase-Blueprints + Review-Findings
+- Base-Commit `92aa202` — docs: Codebase-Blueprints + Review-Findings
+- Base-Commit `bbed341` — docs: PROGRESS.md
 
 ## Runde 1 — Sichtbare Bugs
-- [ ] F-01 · Signatur-Badge veraltet nach Freitext-Drag
+- [x] F-01 · Signatur-Badge veraltet nach Freitext-Drag — `69793b3`
 - [ ] F-02 · Werkzeugwechsel hinterlässt leere Geister-Annotation
 - [ ] F-03 · Flatten-Export bricht bei nicht-kodierbarem Zeichen ab
 - [ ] F-04 · Editor-Wechsel zwischen Freitexten verwirft Inhalt
