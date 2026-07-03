@@ -66,7 +66,7 @@ public static class ShapeAnnotation
 
     public static ShapeKind GetShape(Annotation annotation)
     {
-        var raw = GetString(annotation.Payload, PayloadKeyShape, "rectangle");
+        var raw = AnnotationPayload.GetString(annotation.Payload, PayloadKeyShape, "rectangle");
         return raw.ToLowerInvariant() switch
         {
             "rectangle" or "rect" => ShapeKind.Rectangle,
@@ -77,15 +77,15 @@ public static class ShapeAnnotation
     }
 
     public static string GetColor(Annotation annotation) =>
-        GetString(annotation.Payload, PayloadKeyColor, DefaultColor);
+        AnnotationPayload.GetString(annotation.Payload, PayloadKeyColor, DefaultColor);
 
     public static double GetStrokeWidth(Annotation annotation) =>
-        GetDouble(annotation.Payload, PayloadKeyStrokeWidth, DefaultStrokeWidth);
+        AnnotationPayload.GetDouble(annotation.Payload, PayloadKeyStrokeWidth, DefaultStrokeWidth);
 
-    public static double GetStartX(Annotation annotation) => GetDouble(annotation.Payload, PayloadKeyStartX, 0);
-    public static double GetStartY(Annotation annotation) => GetDouble(annotation.Payload, PayloadKeyStartY, 0);
-    public static double GetEndX(Annotation annotation) => GetDouble(annotation.Payload, PayloadKeyEndX, 0);
-    public static double GetEndY(Annotation annotation) => GetDouble(annotation.Payload, PayloadKeyEndY, 0);
+    public static double GetStartX(Annotation annotation) => AnnotationPayload.GetDouble(annotation.Payload, PayloadKeyStartX, 0);
+    public static double GetStartY(Annotation annotation) => AnnotationPayload.GetDouble(annotation.Payload, PayloadKeyStartY, 0);
+    public static double GetEndX(Annotation annotation) => AnnotationPayload.GetDouble(annotation.Payload, PayloadKeyEndX, 0);
+    public static double GetEndY(Annotation annotation) => AnnotationPayload.GetDouble(annotation.Payload, PayloadKeyEndY, 0);
 
     private static string ShapeKindToString(ShapeKind shape) => shape switch
     {
@@ -94,35 +94,4 @@ public static class ShapeAnnotation
         ShapeKind.Line => "line",
         _ => "rectangle"
     };
-
-    private static string GetString(
-        IReadOnlyDictionary<string, object?> payload,
-        string key,
-        string fallback)
-    {
-        if (!payload.TryGetValue(key, out var value) || value is null) return fallback;
-        return value switch
-        {
-            string s => s,
-            JsonElement el when el.ValueKind == JsonValueKind.String => el.GetString() ?? fallback,
-            _ => value.ToString() ?? fallback
-        };
-    }
-
-    private static double GetDouble(
-        IReadOnlyDictionary<string, object?> payload,
-        string key,
-        double fallback)
-    {
-        if (!payload.TryGetValue(key, out var value) || value is null) return fallback;
-        return value switch
-        {
-            double d => d,
-            float f => f,
-            int i => i,
-            long l => l,
-            JsonElement el when el.ValueKind == JsonValueKind.Number => el.GetDouble(),
-            _ => fallback
-        };
-    }
 }

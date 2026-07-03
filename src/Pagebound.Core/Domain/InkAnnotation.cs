@@ -59,7 +59,7 @@ public static class InkAnnotation
     }
 
     public static string GetColor(Annotation annotation) =>
-        GetString(annotation.Payload, PayloadKeyColor, DefaultColor);
+        AnnotationPayload.GetString(annotation.Payload, PayloadKeyColor, DefaultColor);
 
     public static double GetStrokeWidth(Annotation annotation)
     {
@@ -87,18 +87,4 @@ public static class InkAnnotation
             [PayloadKeyColor] = color,
             [PayloadKeyStrokeWidth] = strokeWidth
         };
-
-    private static string GetString(
-        IReadOnlyDictionary<string, object?> payload,
-        string key,
-        string fallback)
-    {
-        if (!payload.TryGetValue(key, out var value) || value is null) return fallback;
-        return value switch
-        {
-            string s => s,
-            JsonElement el when el.ValueKind == JsonValueKind.String => el.GetString() ?? fallback,
-            _ => value.ToString() ?? fallback
-        };
-    }
 }

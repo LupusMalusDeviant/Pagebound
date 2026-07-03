@@ -65,8 +65,8 @@ public static class HighlightAnnotation
         };
     }
 
-    public static string GetText(Annotation annotation) => GetString(annotation.Payload, PayloadKeyText);
-    public static string GetColor(Annotation annotation) => GetString(annotation.Payload, PayloadKeyColor, DefaultColor);
+    public static string GetText(Annotation annotation) => AnnotationPayload.GetString(annotation.Payload, PayloadKeyText);
+    public static string GetColor(Annotation annotation) => AnnotationPayload.GetString(annotation.Payload, PayloadKeyColor, DefaultColor);
 
     private static IReadOnlyDictionary<string, object?> BuildPayload(
         IReadOnlyList<HighlightRect> rects,
@@ -78,18 +78,4 @@ public static class HighlightAnnotation
             [PayloadKeyText] = extractedText,
             [PayloadKeyColor] = color
         };
-
-    private static string GetString(
-        IReadOnlyDictionary<string, object?> payload,
-        string key,
-        string fallback = "")
-    {
-        if (!payload.TryGetValue(key, out var value) || value is null) return fallback;
-        return value switch
-        {
-            string s => s,
-            JsonElement el when el.ValueKind == JsonValueKind.String => el.GetString() ?? fallback,
-            _ => value.ToString() ?? fallback
-        };
-    }
 }
