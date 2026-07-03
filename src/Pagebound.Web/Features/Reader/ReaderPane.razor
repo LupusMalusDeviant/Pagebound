@@ -3330,17 +3330,11 @@
             return;
         }
 
-        var newStatuses = new Dictionary<string, SignatureIntegrityStatus>();
-        foreach (var sig in _annotations.Where(a => a.Type == AnnotationType.Signature))
-        {
-            var status = await Integrity.VerifySignatureAsync(
-                _currentPdfId.Value,
-                sig,
-                _annotations,
-                CancellationToken.None);
-            newStatuses[sig.Id.Value] = status;
-        }
-        _signatureStatuses = newStatuses;
+        // F-12: Alle Signaturen in EINEM Durchlauf verifizieren — der kanonische
+        // Annotations-Block wird intern nur einmal gebaut (statt pro Signatur).
+        var results = await Integrity.VerifyAllAsync(
+            _currentPdfId.Value, _annotations, CancellationToken.None);
+        _signatureStatuses = results.ToDictionary(kvp => kvp.Key.Value, kvp => kvp.Value);
     }
 
     private async Task DeleteSignatureAsync(Annotation signature)

@@ -28,4 +28,17 @@ public interface IIntegrityService
         Annotation signatureAnnotation,
         IEnumerable<Annotation> otherAnnotations,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Verifiziert ALLE Signaturen eines Dokuments in einem Durchlauf. Der kanonische
+    /// Annotations-Block ist für alle Signaturen identisch (Signaturen sind ohnehin
+    /// ausgeschlossen) und wird daher nur EINMAL gebaut und wiederverwendet (F-12) —
+    /// statt O(Signaturen × Annotationen). Liefert je Signatur-<see cref="AnnotationId"/>
+    /// denselben Status wie ein einzelner <see cref="VerifySignatureAsync"/>-Aufruf.
+    /// Das Hash-Format bleibt unverändert.
+    /// </summary>
+    Task<IReadOnlyDictionary<AnnotationId, SignatureIntegrityStatus>> VerifyAllAsync(
+        PdfId pdfId,
+        IEnumerable<Annotation> annotations,
+        CancellationToken cancellationToken);
 }

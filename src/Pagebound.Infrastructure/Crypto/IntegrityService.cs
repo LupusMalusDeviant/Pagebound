@@ -79,23 +79,92 @@ public sealed class IntegrityService : IIntegrityService
             : SignatureIntegrityStatus.Invalid;
     }
 
+    public async Task<IReadOnlyDictionary<AnnotationId, SignatureIntegrityStatus>> VerifyAllAsync(
+        PdfId pdfId,
+        IEnumerable<Annotation> annotations,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(annotations);
+
+        var annotationList = annotations as IReadOnlyList<Annotation> ?? annotations.ToList();
+        var signatures = annotationList.Where(a => a.Type == AnnotationType.Signature).ToList();
+        var result = new Dictionary<AnnotationId, SignatureIntegrityStatus>();
+        if (signatures.Count == 0) return result;
+
+        // F-12: Der kanonische Annotations-Block ist für ALLE Signaturen identisch
+        // (Signaturen werden ohnehin ausgeschlossen) → genau EINMAL bauen und für
+        // jede Signatur wiederverwenden. Nur die Header-Zeilen (signedAt/signatureId)
+        // unterscheiden sich pro Signatur. Das Hash-Format bleibt unverändert.
+        var annotationsBlock = BuildAnnotationsBlock(annotationList, excludeId: null);
+
+        foreach (var sig in signatures)
+        {
+            var storedHash = SignatureAnnotation.GetIntegrityHash(sig);
+            if (string.IsNullOrEmpty(storedHash))
+            {
+                result[sig.Id] = SignatureIntegrityStatus.NoHash;
+                continue;
+            }
+
+            var signedAt = SignatureAnnotation.GetSignedAt(sig);
+            var canonical = ComposeCanonical(pdfId, sig.Id.Value, signedAt, annotationsBlock);
+            var bytes = Encoding.UTF8.GetBytes(canonical);
+            var recomputed = await _hashService
+                .ComputeAsync(bytes, DomainHashAlgorithm.Sha256, cancellationToken)
+                .ConfigureAwait(false);
+
+            result[sig.Id] = string.Equals(recomputed, storedHash, StringComparison.OrdinalIgnoreCase)
+                ? SignatureIntegrityStatus.Valid
+                : SignatureIntegrityStatus.Invalid;
+        }
+
+        return result;
+    }
+
     private static string BuildCanonicalString(
         PdfId pdfId,
         Annotation signatureAnnotation,
         IEnumerable<Annotation> otherAnnotations,
         DateTimeOffset signedAt)
     {
+        var annotationsBlock = BuildAnnotationsBlock(otherAnnotations, signatureAnnotation.Id.Value);
+        return ComposeCanonical(pdfId, signatureAnnotation.Id.Value, signedAt, annotationsBlock);
+    }
+
+    /// <summary>
+    /// Setzt Header (pdfHash/signedAt/signatureId) + fertigen Annotations-Block zum
+    /// finalen kanonischen String zusammen — byte-identisch zur früheren Inline-Version.
+    /// </summary>
+    private static string ComposeCanonical(
+        PdfId pdfId,
+        string signatureId,
+        DateTimeOffset signedAt,
+        string annotationsBlock)
+    {
         var sb = new StringBuilder(capacity: 512);
         sb.Append("pdfHash=").Append(pdfId.Value).Append('\n');
         sb.Append("signedAt=").Append(signedAt.ToUniversalTime().ToString("o", CultureInfo.InvariantCulture)).Append('\n');
-        sb.Append("signatureId=").Append(signatureAnnotation.Id.Value).Append('\n');
+        sb.Append("signatureId=").Append(signatureId).Append('\n');
+        sb.Append(annotationsBlock);
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Baut den kanonischen <c>annotations=[…]</c>-Block. Signaturen werden NICHT
+    /// mitgehasht — sie können sich gegenseitig nicht invalidieren, und Reposition
+    /// einer Signatur (Drag-and-Drop) soll keinen anderen Signatur-Status verletzen.
+    /// Inhaltliche Annotationen (Sticky Notes, Highlights, Freitexte) bleiben Teil des
+    /// Hashs. Da alle Signaturen ohnehin ausgeschlossen sind, ist der Block für JEDE
+    /// Signatur identisch (<paramref name="excludeId"/> ist für Signaturen redundant)
+    /// und kann in <see cref="VerifyAllAsync"/> einmalig gebaut und wiederverwendet
+    /// werden.
+    /// </summary>
+    private static string BuildAnnotationsBlock(IEnumerable<Annotation> otherAnnotations, string? excludeId)
+    {
+        var sb = new StringBuilder(capacity: 512);
         sb.Append("annotations=[");
-        // Signaturen werden NICHT mitgehasht — sie können sich gegenseitig
-        // nicht invalidieren, und Reposition einer Signatur (Drag-and-Drop)
-        // soll keinen anderen Signatur-Status verletzen. Inhaltliche
-        // Annotationen (Sticky Notes, Highlights) bleiben Teil des Hashs.
         var sortedOthers = otherAnnotations
-            .Where(a => a.Id.Value != signatureAnnotation.Id.Value
+            .Where(a => (excludeId is null || a.Id.Value != excludeId)
                        && a.Type != AnnotationType.Signature)
             .OrderBy(a => a.Id.Value, StringComparer.Ordinal)
             .ToList();

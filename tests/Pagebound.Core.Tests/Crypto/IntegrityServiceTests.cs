@@ -119,6 +119,57 @@ public sealed class IntegrityServiceTests
         canonical.ShouldNotContain("sig2");
     }
 
+    [Fact]
+    public async Task VerifyAllAsync_MatchesIndividualVerifySignatureAsync()
+    {
+        // Deterministischer Mock: echter SHA-256 über die kanonischen Bytes, damit
+        // identische kanonische Strings identische Hashes ergeben.
+        _hashService
+            .ComputeAsync(Arg.Any<ReadOnlyMemory<byte>>(), Arg.Any<HashAlgorithm>(), Arg.Any<CancellationToken>())
+            .Returns(ci => Convert.ToHexString(
+                System.Security.Cryptography.SHA256.HashData(ci.Arg<ReadOnlyMemory<byte>>().Span)));
+
+        var highlight = MakeHighlight("hl1");
+        var sig1Base = MakeSignature("sig1");
+        var sig2Base = MakeSignature("sig2");
+        var sig3 = MakeSignature("sig3"); // kein Hash → NoHash
+
+        var forCompute = new List<Annotation> { sig1Base, sig2Base, sig3, highlight };
+        var sig1Hash = await _sut.ComputeSignatureHashAsync(
+            TestPdf, sig1Base, forCompute, SignatureAnnotation.GetSignedAt(sig1Base), default);
+        var sig1 = SignatureAnnotation.WithIntegrityHash(sig1Base, sig1Hash);        // gültig
+        var sig2 = SignatureAnnotation.WithIntegrityHash(sig2Base, "deadbeef_wrong"); // ungültig
+
+        var annotations = new List<Annotation> { sig1, sig2, sig3, highlight };
+
+        var all = await _sut.VerifyAllAsync(TestPdf, annotations, default);
+
+        // Identisch zu N Einzelaufrufen von VerifySignatureAsync.
+        foreach (var sig in annotations.Where(a => a.Type == AnnotationType.Signature))
+        {
+            var individual = await _sut.VerifySignatureAsync(TestPdf, sig, annotations, default);
+            all[sig.Id].ShouldBe(individual);
+        }
+
+        all[sig1.Id].ShouldBe(SignatureIntegrityStatus.Valid);
+        all[sig2.Id].ShouldBe(SignatureIntegrityStatus.Invalid);
+        all[sig3.Id].ShouldBe(SignatureIntegrityStatus.NoHash);
+    }
+
+    [Fact]
+    public async Task VerifyAllAsync_NoSignatures_ReturnsEmpty()
+    {
+        var result = await _sut.VerifyAllAsync(TestPdf, [MakeHighlight("hl1")], default);
+        result.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task VerifyAllAsync_NullAnnotations_Throws()
+    {
+        await Should.ThrowAsync<ArgumentNullException>(
+            () => _sut.VerifyAllAsync(TestPdf, null!, default));
+    }
+
     private static Annotation MakeSignature(string id)
     {
         var newAnnotation = SignatureAnnotation.Create(
