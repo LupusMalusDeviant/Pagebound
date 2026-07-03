@@ -1482,7 +1482,11 @@ export async function flattenAnnotations(
       const lineH = size * 1.25;
       const rawLines = (it.text ?? "").split("\n");
       const x = clampNum((it.x ?? 0) * pw, 0, pw);
-      const yTopPt = (it.y ?? 0) * ph;
+      // Start-y klemmen (wie im note-Zweig), damit mindestens die erste Zeile
+      // auf der Seite liegt — sonst wird y = ph - yTopPt - size negativ und
+      // pdf-lib zeichnet unterhalb der MediaBox (im Export unsichtbar). Folge-
+      // zeilen dürfen weiterhin unten hinauslaufen und abgeschnitten werden.
+      const yTopPt = clampNum((it.y ?? 0) * ph, 0, Math.max(0, ph - size));
       rawLines.forEach((rawLine, i) => {
         // Tabs sind nicht WinAnsi-kodierbar → durch Space ersetzen, damit die
         // Zeile normal gezeichnet wird statt in den Fallback zu fallen.
