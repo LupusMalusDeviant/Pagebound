@@ -37,7 +37,15 @@ Status: `[ ]` offen · `[x]` erledigt (mit Commit-Hash) · `[!]` blockiert (mit 
 - [x] F-16 · Freitext-Editor-Duplikate zusammenführen — `0938a2c`
 - [x] F-17 · Freitext-Editor als Komponente extrahieren — `acda9da` (Browser-verifiziert)
 - [x] F-18 · `npm run typecheck` ist rot — `29f7828` (0 statt 25 Fehler)
-- [ ] F-19 · ADR-Verweise ohne ADR-Dateien
+- [x] F-19 · ADR-Verweise ohne ADR-Dateien — `55ea789`
+
+## Abschluss (alle 21 Aufträge erledigt)
+- Erledigt: F-01 bis F-21 (kein Auftrag blockiert).
+- Endstand: `dotnet build Pagebound.slnx` 0 Fehler · `dotnet test
+  tests/Pagebound.Core.Tests` 184/184 grün · `npm run typecheck` Exit 0 ·
+  `npm run build:js` OK · `tools/privacy-check.mjs` Exit 0.
+- Neue Tests gegenüber Basis: 174 → 184 (+10: F-09 ×3, F-11 ×1, F-07 ×3, F-12 ×3).
+- Browser-verifiziert: F-21 (Sticky-Nav) und F-17 (Freitext-Editor-Komponente).
 
 ## Abweichungen / Notizen
 - F-03: IST sagt „Fallback-drawText steht außerhalb des try". Im Code steht er
@@ -46,6 +54,9 @@ Status: `[ ]` offen · `[x]` erledigt (mit Commit-Hash) · `[!]` blockiert (mit 
   folgt dem Code (eigenes try/catch um den Fallback + korrigierter Filter).
 - Bundled `wwwroot/js/*.js` sind gitignored (Build-Artefakte) → nur `.ts`
   committen, `npm run build:js` erzeugt die Bundles lokal.
+- F-19: Findings-IST + vorhandener README-Link nannten `docs/adrs/001-…` (Plural,
+  3-stellig). Umgesetzt wie im SOLL vorgegeben als `docs/adr/0001-…` (4-stellig,
+  adr-writer-Konvention); stalen Querverweis in Abstractions/README.md gefixt.
 - F-17: Statt des vorgeschlagenen `Annotation`-Parameters übergibt der Parent die
   berechnete Platzierung (Left/Top/Transform/Page), weil der Pending-Fall keine
   Annotation hat. Content-Sync via plain `Action<string>` (kein EventCallback) →
