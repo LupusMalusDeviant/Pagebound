@@ -3010,6 +3010,13 @@
     {
         if (_dotNetRef is null) return;
         if (e.Button != 0) return;
+        // Offenen Sticky-Note-Editor zuerst speichern — der Freitext-Div stoppt
+        // die Event-Propagation, sonst ginge dessen ungespeicherter Text beim
+        // Wechsel auf den Freitext verloren (analog F-04 Freitext↔Freitext).
+        if (_editingAnnotation is not null)
+        {
+            await SaveEditingAnnotationAsync();
+        }
         try
         {
             await JS.InvokeVoidAsync(
@@ -3040,6 +3047,14 @@
         // Klick ohne Bewegung → Editor öffnen (Position unverändert).
         if (Math.Abs(currentX - newX) < 0.0005 && Math.Abs(currentY - newY) < 0.0005)
         {
+            // Editor-Wechsel: ist bereits ein ANDERER Freitext-Editor offen,
+            // dessen getippten Inhalt zuerst speichern. Der Freitext-Div stoppt
+            // die Event-Propagation (@onmousedown:stopPropagation), daher greift
+            // HandlePdfClickAsync hier nicht und der Inhalt ginge sonst verloren.
+            if (_editingFreeText is not null && _editingFreeText.Id.Value != freeText.Id.Value)
+            {
+                await SaveEditingFreeTextAsync();
+            }
             OpenFreeTextEditor(freeText);
             await InvokeAsync(StateHasChanged);
             return;
