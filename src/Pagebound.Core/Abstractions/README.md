@@ -2,7 +2,7 @@
 
 Hier liegen **alle Service-Interfaces** (`IXxxService`) der Anwendung. Implementierungen befinden sich physisch getrennt in `Pagebound.Infrastructure/`.
 
-Verbindliches Architekturprinzip: **Interface-First** (siehe [ADR-001](../../../docs/adrs/001-interface-first.md)).
+Verbindliches Architekturprinzip: **Interface-First** (siehe [ADR-0001](../../../docs/adr/0001-interface-first.md)).
 
 ## Erwartete Interfaces (Pflichtenheft Abschnitt 4)
 
