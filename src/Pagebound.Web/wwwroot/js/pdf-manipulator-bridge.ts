@@ -94,7 +94,9 @@ export async function embedSignatures(
   }
   doc.setCreator("Pagebound");
 
-  const infoDict = doc.getInfoDict();
+  // getInfoDict() ist in pdf-lib als privat typisiert, existiert aber zur Laufzeit
+  // und ist der einzige Zugang zum Info-Dictionary. Eng begrenzter Cast (kein any).
+  const infoDict = (doc as unknown as { getInfoDict(): import("pdf-lib").PDFDict }).getInfoDict();
   infoDict.set(
     PDFName.of("Pagebound.SignatureCount"),
     PDFString.of(String(signatures.length))
@@ -1558,30 +1560,38 @@ function concatBytes(...parts: Uint8Array[]): Uint8Array {
   return out;
 }
 
+// TS ≥5.7 tippt Uint8Array als Uint8Array<ArrayBufferLike> (inkl. SharedArrayBuffer);
+// die WebCrypto-API verlangt aber Uint8Array<ArrayBuffer> (BufferSource). Diese App
+// nutzt NIE SharedArrayBuffer, daher ist der eng begrenzte Cast sicher und ändert
+// kein Laufzeitverhalten — vermeidet flächige any-Casts an jeder Aufrufstelle.
+function toBufferSource(u: Uint8Array): BufferSource {
+  return u as unknown as BufferSource;
+}
+
 async function sha(bits: 256 | 384 | 512, data: Uint8Array): Promise<Uint8Array> {
   const algo = bits === 256 ? "SHA-256" : bits === 384 ? "SHA-384" : "SHA-512";
-  return new Uint8Array(await crypto.subtle.digest(algo, data));
+  return new Uint8Array(await crypto.subtle.digest(algo, toBufferSource(data)));
 }
 
 /** AES-CBC ohne Padding: verschlüsselt block-alignte Daten, schneidet den PKCS7-Extra-Block ab. */
 async function aesCbcNoPad(key: Uint8Array, iv: Uint8Array, data: Uint8Array): Promise<Uint8Array> {
-  const k = await crypto.subtle.importKey("raw", key, { name: "AES-CBC" }, false, ["encrypt"]);
-  const enc = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-CBC", iv }, k, data));
+  const k = await crypto.subtle.importKey("raw", toBufferSource(key), { name: "AES-CBC" }, false, ["encrypt"]);
+  const enc = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-CBC", iv: toBufferSource(iv) }, k, toBufferSource(data)));
   return enc.slice(0, data.length);
 }
 
 /** AES-256-CBC mit zufälligem IV + PKCS7 (für Stream-/String-Daten, /CFM AESV3). IV wird vorangestellt. */
 async function aesCbcEncrypt(key: Uint8Array, plaintext: Uint8Array): Promise<Uint8Array> {
   const iv = crypto.getRandomValues(new Uint8Array(16));
-  const k = await crypto.subtle.importKey("raw", key, { name: "AES-CBC" }, false, ["encrypt"]);
-  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-CBC", iv }, k, plaintext));
+  const k = await crypto.subtle.importKey("raw", toBufferSource(key), { name: "AES-CBC" }, false, ["encrypt"]);
+  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-CBC", iv }, k, toBufferSource(plaintext)));
   return concatBytes(iv, ct);
 }
 
 /** Algorithm 2.B — iterierter Hardening-Hash. */
 async function hash2B(password: Uint8Array, salt: Uint8Array, udata: Uint8Array): Promise<Uint8Array> {
   let k = await sha(256, concatBytes(password, salt, udata));
-  let e = new Uint8Array(0);
+  let e: Uint8Array = new Uint8Array(0);
   for (let round = 0; round < 64 || e[e.length - 1] > round - 32; round++) {
     const block = concatBytes(password, k, udata);
     const k1 = new Uint8Array(block.length * 64);
@@ -1634,7 +1644,7 @@ async function recoverFileKeyFromUser(password: Uint8Array, u: Uint8Array, ue: U
   for (let i = 0; i < 32; i++) if (hash[i] !== u[i]) return null;
   const inter = await hash2B(password, kSalt, EMPTY);
   // UE entschlüsseln (AES-256-CBC no-pad, IV=0): liefert den 32-Byte File-Key.
-  const k = await crypto.subtle.importKey("raw", inter, { name: "AES-CBC" }, false, ["decrypt"]);
+  const k = await crypto.subtle.importKey("raw", toBufferSource(inter), { name: "AES-CBC" }, false, ["decrypt"]);
   // no-pad-Decrypt: ue um einen Block (IV0-CBC) „verlängern" geht nicht direkt; wir
   // entschlüsseln manuell, indem wir AES-CBC mit padding umgehen → eigener Decrypt:
   // CBC-Decrypt von 32 Byte (2 Blöcke) ohne Padding-Erwartung.
@@ -1646,7 +1656,7 @@ async function aesCbcDecryptNoPad(key: Uint8Array, iv: Uint8Array, data: Uint8Ar
   // WebCrypto AES-CBC-Decrypt verlangt gültiges PKCS7. Trick: an die Ciphertext-
   // Blöcke einen selbst erzeugten Padding-Block anhängen, dessen Klartext 0x10×16
   // ist, damit der Decrypt das Padding akzeptiert. Dazu C_{n+1} = E(K, 0x10..0x10 XOR C_n).
-  const kEnc = await crypto.subtle.importKey("raw", key, { name: "AES-CBC" }, false, ["encrypt"]);
+  const kEnc = await crypto.subtle.importKey("raw", toBufferSource(key), { name: "AES-CBC" }, false, ["encrypt"]);
   const lastBlock = data.slice(data.length - 16);
   const padPlain = new Uint8Array(16).fill(0x10);
   const xored = new Uint8Array(16);
@@ -1654,8 +1664,8 @@ async function aesCbcDecryptNoPad(key: Uint8Array, iv: Uint8Array, data: Uint8Ar
   // E(K, xored) mit IV=0, ein Block, padding abschneiden:
   const eBlock = (new Uint8Array(await crypto.subtle.encrypt({ name: "AES-CBC", iv: new Uint8Array(16) }, kEnc, xored))).slice(0, 16);
   const withPad = concatBytes(data, eBlock);
-  const kDec = await crypto.subtle.importKey("raw", key, { name: "AES-CBC" }, false, ["decrypt"]);
-  const dec = new Uint8Array(await crypto.subtle.decrypt({ name: "AES-CBC", iv }, kDec, withPad));
+  const kDec = await crypto.subtle.importKey("raw", toBufferSource(key), { name: "AES-CBC" }, false, ["decrypt"]);
+  const dec = new Uint8Array(await crypto.subtle.decrypt({ name: "AES-CBC", iv: toBufferSource(iv) }, kDec, toBufferSource(withPad)));
   return dec;
 }
 

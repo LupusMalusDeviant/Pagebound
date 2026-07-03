@@ -697,6 +697,10 @@ export async function renderTextLayerToContainer(
   // * pageWidth px)` — wir müssen --total-scale-factor auf das tatsächliche
   // Verhältnis Display-Width/PDF-Width setzen.
   function applyScale(): void {
+    // Der äußere instanceof-Guard wird von TS nicht in diese Closure propagiert
+    // → hier erneut prüfen (immer wahr, da container/image const sind); engt
+    // beide auf HTMLElement (non-null, mit .style) ein.
+    if (!(image instanceof HTMLElement) || !(container instanceof HTMLElement)) return;
     const rect = image.getBoundingClientRect();
     if (rect.width <= 0 || viewport.width <= 0) return;
     const factor = rect.width / viewport.width;
