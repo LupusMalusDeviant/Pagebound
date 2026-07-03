@@ -23,7 +23,7 @@ Status: `[ ]` offen · `[x]` erledigt (mit Commit-Hash) · `[!]` blockiert (mit 
 
 ## Runde 3 — UX/Effizienz (F-10 NACH F-02/F-04)
 - [x] F-10 · Leere Annotation vor dem Tippen persistiert — `0162595`
-- [ ] F-11 · Stil-Änderung schreibt bei jedem Swatch-Klick
+- [x] F-11 · Stil-Änderung schreibt bei jedem Swatch-Klick — `6210481` (löst F-10-Zwischenstufe)
 - [ ] F-13 · Drag-Bridge: Listener-Attach-Race bei schnellem Klick
 - [ ] F-21 · Seitennavigation als Sticky-Bottom-Bar
 
