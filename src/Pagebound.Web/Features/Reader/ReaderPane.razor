@@ -174,28 +174,11 @@
             }
         </div>
 
-        <div class="max-w-4xl mx-auto mt-6 flex items-center justify-between gap-3">
-            <div class="text-sm">
-                <span class="font-medium">@(_handle.Title ?? L.T("common.untitled"))</span>
-                <span class="text-pb-fg-muted"> · @_handle.PageCount @L.T("reader.pages")</span>
-            </div>
-            <nav class="flex items-center gap-2" aria-label="@L.T("reader.pageNav")">
-                <button type="button"
-                        class="rounded border border-pb-border px-3 py-1 text-sm disabled:opacity-40"
-                        disabled="@(_currentPage <= 1 || _isRendering)"
-                        @onclick="PreviousPage">
-                    @L.T("reader.prev")
-                </button>
-                <span class="text-sm tabular-nums">
-                    @L.T("reader.pageOfCount", new Dictionary<string, object> { ["current"] = _currentPage, ["total"] = _handle.PageCount })
-                </span>
-                <button type="button"
-                        class="rounded border border-pb-border px-3 py-1 text-sm disabled:opacity-40"
-                        disabled="@(_currentPage >= _handle.PageCount || _isRendering)"
-                        @onclick="NextPage">
-                    @L.T("reader.next")
-                </button>
-            </nav>
+        @* Titel-Block bleibt oben; die Seitennavigation wandert als Sticky-Bottom-
+           Bar unter das PDF (F-21). *@
+        <div class="max-w-4xl mx-auto mt-6 text-sm">
+            <span class="font-medium">@(_handle.Title ?? L.T("common.untitled"))</span>
+            <span class="text-pb-fg-muted"> · @_handle.PageCount @L.T("reader.pages")</span>
         </div>
 
         <div class="max-w-4xl mx-auto mt-3 flex flex-wrap items-center gap-4 text-sm">
@@ -1354,6 +1337,36 @@
 
         </div> @* /flex-Wrapper Outline+PDF *@
 
+        @* Seitennavigation als Sticky-Bottom-Bar (F-21): klebt beim Scrollen am
+           unteren Rand des Reader-Bereichs. Editierbares Seitenfeld springt via
+           GoToPageAsync; ungültige/aus-dem-Bereich-Eingaben werden geklemmt. *@
+        <nav class="sticky bottom-0 z-30 max-w-4xl mx-auto mt-6 flex items-center justify-center gap-3 rounded-t-lg border-t border-pb-border pb-glass-strong px-4 py-2"
+             aria-label="@L.T("reader.pageNav")">
+            <button type="button"
+                    class="rounded border border-pb-border px-3 py-1 text-sm disabled:opacity-40"
+                    disabled="@(_currentPage <= 1 || _isRendering)"
+                    @onclick="PreviousPage">
+                @L.T("reader.prev")
+            </button>
+            <span class="flex items-center gap-1.5 text-sm tabular-nums">
+                <input type="number"
+                       @key="_pageInputNonce"
+                       min="1" max="@_handle.PageCount"
+                       value="@_currentPage"
+                       @onchange="GoToPageFromInputAsync"
+                       disabled="@_isRendering"
+                       class="w-16 rounded border border-pb-border bg-pb-bg px-2 py-1 text-sm text-center tabular-nums"
+                       aria-label="@L.T("reader.pageInput.aria")" />
+                <span class="text-pb-fg-muted">@L.T("reader.pageOfTotal", new Dictionary<string, object> { ["total"] = _handle.PageCount })</span>
+            </span>
+            <button type="button"
+                    class="rounded border border-pb-border px-3 py-1 text-sm disabled:opacity-40"
+                    disabled="@(_currentPage >= _handle.PageCount || _isRendering)"
+                    @onclick="NextPage">
+                @L.T("reader.next")
+            </button>
+        </nav>
+
         <p class="max-w-4xl mx-auto mt-4 text-xs text-pb-fg-muted">
             @L.T("reader.shortcuts.label")
             <kbd class="rounded border border-pb-border px-1.5 py-0.5">←</kbd>
@@ -1395,6 +1408,10 @@
 
     private PdfDocumentHandle? _handle;
     private int _currentPage = 1;
+    // F-21: Nonce erzwingt beim Commit ein Neuaufbauen des Seiten-Eingabefelds,
+    // damit eine ungültige/aus-dem-Bereich-Eingabe sichtbar auf die gültige
+    // aktuelle Seite zurückspringt (auch wenn _currentPage sich nicht ändert).
+    private int _pageInputNonce;
     private double _zoomFactor = 1.0;
     private string? _rasterDataUrl;
     private string? _errorMessage;
@@ -2415,6 +2432,20 @@
         if (pageNumber == _currentPage) return;
         _currentPage = pageNumber;
         await RenderCurrentPageAsync();
+    }
+
+    // F-21: Sprung aus dem editierbaren Seitenfeld (Enter oder Blur). Ungültige
+    // oder aus-dem-Bereich liegende Eingaben (0, 999, Text) werden auf [1..Count]
+    // geklemmt bzw. verworfen; das Nonce-Bump baut das Feld neu auf, sodass es die
+    // gültige aktuelle Seite anzeigt.
+    private async Task GoToPageFromInputAsync(ChangeEventArgs e)
+    {
+        if (_handle is null) return;
+        _pageInputNonce++;
+        if (int.TryParse(e.Value?.ToString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var page))
+        {
+            await GoToPageAsync(Math.Clamp(page, 1, _handle.PageCount));
+        }
     }
 
     // --- Annotations (Sticky Notes, FA-011) ---------------------------------
