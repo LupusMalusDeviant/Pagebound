@@ -1333,7 +1333,7 @@ export async function stampPdf(pdfBytes: Uint8Array, opts: StampOptions): Promis
 // ============================================================================
 
 export interface FlattenItem {
-  kind: "highlight" | "ink" | "shape" | "note" | "signature";
+  kind: "highlight" | "ink" | "shape" | "note" | "signature" | "text";
   pageNumber: number;
   color?: string | null;
   opacity?: number | null;
@@ -1344,6 +1344,8 @@ export interface FlattenItem {
   shape?: "rectangle" | "line" | "arrow" | null;
   startX?: number; startY?: number; endX?: number; endY?: number;
   text?: string | null;
+  /** Schriftgröße als Anteil der Seitenhöhe (Freitext, wie im Reader via cqh). */
+  fontSize?: number | null;
   x?: number; y?: number;
   imageBase64?: string | null;
   width?: number; height?: number;
@@ -1471,6 +1473,27 @@ export async function flattenAnnotations(
       page.drawRectangle({ x, y: yBl, width: cardW, height: cardH, color, opacity: 0.92, borderColor: rgb(0, 0, 0), borderWidth: 0.5, borderOpacity: 0.25 });
       lines.forEach((ln, i) => {
         page.drawText(ln, { x: x + pad, y: yBl + cardH - pad - size - i * lineH, size, font, color: rgb(0.12, 0.12, 0.12) });
+      });
+    } else if (it.kind === "text") {
+      // Freitext/Datum-Stempel: Klartext an Top-Left-Position, Zeilen via \n.
+      // Kein Hintergrund-Karton wie bei Notizen — der Text steht direkt auf
+      // der Seite (Edge-Reader-Verhalten).
+      const size = Math.max(4, (it.fontSize ?? 0.02) * ph);
+      const lineH = size * 1.25;
+      const rawLines = (it.text ?? "").split("\n");
+      const x = clampNum((it.x ?? 0) * pw, 0, pw);
+      const yTopPt = (it.y ?? 0) * ph;
+      rawLines.forEach((ln, i) => {
+        if (!ln.trim()) return;
+        const y = ph - yTopPt - size - i * lineH;
+        try {
+          page.drawText(ln, { x, y, size, font, color });
+        } catch {
+          // Helvetica (WinAnsi) kann das Zeichen nicht encoden → Fallback auf
+          // Latin-1-Teilmenge, damit der Rest der Zeile erhalten bleibt.
+          const safe = Array.from(ln).filter((c) => c.charCodeAt(0) <= 0xff).join("");
+          if (safe) page.drawText(safe, { x, y, size, font, color });
+        }
       });
     } else if (it.kind === "signature" && it.imageBase64) {
       try {

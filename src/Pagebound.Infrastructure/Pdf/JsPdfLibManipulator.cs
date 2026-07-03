@@ -288,6 +288,19 @@ public sealed class JsPdfLibManipulator : IPdfManipulator
                     });
                     break;
 
+                case AnnotationType.FreeText:
+                    items.Add(new JsFlattenItem
+                    {
+                        Kind = "text",
+                        PageNumber = a.PageNumber,
+                        Color = FreeTextAnnotation.GetColor(a),
+                        X = FreeTextAnnotation.GetX(a),
+                        Y = FreeTextAnnotation.GetY(a),
+                        FontSize = FreeTextAnnotation.GetFontSize(a),
+                        Text = FreeTextAnnotation.GetText(a)
+                    });
+                    break;
+
                 case AnnotationType.Signature:
                     var b64 = StripDataUrlPrefix(SignatureAnnotation.GetImageDataUrl(a));
                     if (string.IsNullOrEmpty(b64)) break;
@@ -468,6 +481,7 @@ public sealed class JsPdfLibManipulator : IPdfManipulator
         public double? EndX { get; init; }
         public double? EndY { get; init; }
         public string? Text { get; init; }
+        public double? FontSize { get; init; }
         public double? X { get; init; }
         public double? Y { get; init; }
         public string? ImageBase64 { get; init; }

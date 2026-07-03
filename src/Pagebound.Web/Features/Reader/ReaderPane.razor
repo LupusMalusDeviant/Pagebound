@@ -226,6 +226,18 @@
                         title="@L.T("reader.tool.note.title")">
                     @L.T("reader.tool.note")
                 </button>
+                <button type="button"
+                        class="@($"rounded border px-2 py-0.5 {(_annotationMode == AnnotationMode.FreeText ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted")}")"
+                        @onclick="@(() => SetAnnotationMode(AnnotationMode.FreeText))"
+                        title="@L.T("reader.tool.text.title")">
+                    @L.T("reader.tool.text")
+                </button>
+                <button type="button"
+                        class="@($"rounded border px-2 py-0.5 {(_annotationMode == AnnotationMode.DateStamp ? "border-pb-accent text-pb-accent" : "border-pb-border text-pb-fg-muted")}")"
+                        @onclick="@(() => SetAnnotationMode(AnnotationMode.DateStamp))"
+                        title="@L.T("reader.tool.date.title")">
+                    @L.T("reader.tool.date")
+                </button>
                 @if (_activeSignatureImage is null)
                 {
                     <label class="rounded border border-pb-border bg-pb-bg px-2 py-0.5 text-pb-fg-muted hover:text-pb-fg cursor-pointer"
@@ -1146,6 +1158,93 @@
                         </div>
                     }
 
+                    @* Freitexte + Datum-Stempel (FA — Text auf der Seite wie im Edge-Reader).
+                       Drag verschiebt (JS-Bridge), Klick ohne Bewegung öffnet den Editor. *@
+                    @foreach (var txt in FreeTextsOnCurrentPage)
+                    {
+                        var freeText = txt;
+                        var txtLeft = (FreeTextAnnotation.GetX(freeText) * 100).ToString("F3", CultureInfo.InvariantCulture);
+                        var txtTop = (FreeTextAnnotation.GetY(freeText) * 100).ToString("F3", CultureInfo.InvariantCulture);
+                        var txtFontCqh = (FreeTextAnnotation.GetFontSize(freeText) * 100).ToString("F3", CultureInfo.InvariantCulture);
+                        var txtColor = FreeTextAnnotation.GetColor(freeText);
+                        var txtContent = FreeTextAnnotation.GetText(freeText);
+                        var isEmptyText = string.IsNullOrWhiteSpace(txtContent);
+                        <div data-pb-freetext-id="@freeText.Id.Value"
+                             class="@($"absolute cursor-move select-none touch-none whitespace-pre leading-tight rounded px-0.5 {(isEmptyText ? "outline-dashed outline-1 outline-pb-accent/60 min-w-8 min-h-4" : "hover:outline-dashed hover:outline-1 hover:outline-pb-accent/50")}")"
+                             style="@($"left:{txtLeft}%; top:{txtTop}%; font-size:{txtFontCqh}cqh; color:{txtColor}")"
+                             title="@L.T("reader.text.dragTitle")"
+                             @onmousedown="@((MouseEventArgs e) => HandleFreeTextMouseDownAsync(e, freeText))"
+                             @onmousedown:stopPropagation
+                             @onclick:stopPropagation>@(isEmptyText ? " " : txtContent)</div>
+                    }
+
+                    @* Editor-Popover für den aktuell bearbeiteten Freitext *@
+                    @if (_editingFreeText is not null && _editingFreeText.PageNumber == _currentPage)
+                    {
+                        var ftX = FreeTextAnnotation.GetX(_editingFreeText);
+                        var ftY = FreeTextAnnotation.GetY(_editingFreeText);
+                        var ftLeft = (ftX * 100).ToString("F2", CultureInfo.InvariantCulture);
+                        var ftTop = (ftY * 100).ToString("F2", CultureInfo.InvariantCulture);
+                        var ftTranslateX = ftX > 0.55 ? "calc(-100% - 8px)" : "8px";
+                        var ftTranslateY = ftY > 0.65 ? "calc(-100% + 8px)" : "-8px";
+                        var ftCurrentSize = FreeTextAnnotation.GetFontSize(_editingFreeText);
+                        var ftCurrentColor = FreeTextAnnotation.GetColor(_editingFreeText);
+                        <div class="absolute z-10 w-80 rounded-lg pb-glass-strong p-3"
+                             style="@($"left:{ftLeft}%; top:{ftTop}%; transform: translate({ftTranslateX}, {ftTranslateY})")"
+                             @onclick:stopPropagation
+                             @onmousedown:stopPropagation>
+                            <div class="flex items-center justify-between mb-2 gap-2">
+                                <span class="text-xs text-pb-fg-muted">@L.T("reader.text.editLabel", new Dictionary<string, object> { ["page"] = _editingFreeText.PageNumber })</span>
+                                <button type="button"
+                                        class="text-pb-fg-muted hover:text-pb-fg text-sm"
+                                        @onclick="CancelFreeTextEditing"
+                                        aria-label="@L.T("common.close")">
+                                    ✕
+                                </button>
+                            </div>
+                            <textarea @bind="_editingFreeTextContent"
+                                      @bind:event="oninput"
+                                      class="w-full h-20 rounded border border-pb-border bg-pb-bg px-2 py-1 text-sm resize-none"
+                                      placeholder="@L.T("reader.text.placeholder")"
+                                      aria-label="@L.T("reader.text.contentAria")"></textarea>
+                            <div class="mt-2 flex flex-wrap items-center gap-2 text-xs text-pb-fg-muted">
+                                <span>@L.T("reader.text.sizeLabel")</span>
+                                @foreach (var (labelKey, size) in FreeTextSizes)
+                                {
+                                    var s = size;
+                                    var sizeActive = Math.Abs(ftCurrentSize - s) < 0.0005;
+                                    <button type="button"
+                                            class="@($"rounded border px-1.5 py-0.5 {(sizeActive ? "border-pb-accent text-pb-accent" : "border-pb-border")}")"
+                                            @onclick="@(() => ChangeFreeTextStyleAsync(s, ftCurrentColor))">
+                                        @L.T(labelKey)
+                                    </button>
+                                }
+                                <span class="ml-1">@L.T("reader.text.colorLabel")</span>
+                                @foreach (var (_, css) in DrawPalette)
+                                {
+                                    var c = css;
+                                    var colorActive = string.Equals(ftCurrentColor, c, StringComparison.OrdinalIgnoreCase);
+                                    <button type="button"
+                                            class="@($"w-5 h-5 rounded-full border hover:scale-110 transition-transform {(colorActive ? "border-pb-accent" : "border-pb-border")}")"
+                                            style="@($"background-color:{c}")"
+                                            @onclick="@(() => ChangeFreeTextStyleAsync(ftCurrentSize, c))"></button>
+                                }
+                            </div>
+                            <div class="mt-2 flex gap-2 justify-end">
+                                <button type="button"
+                                        class="rounded border border-red-300/40 px-2 py-1 text-xs text-red-400 hover:bg-red-50/10"
+                                        @onclick="DeleteEditingFreeTextAsync">
+                                    @L.T("common.delete")
+                                </button>
+                                <button type="button"
+                                        class="btn primary sm"
+                                        @onclick="SaveEditingFreeTextAsync">
+                                    @L.T("common.save")
+                                </button>
+                            </div>
+                        </div>
+                    }
+
                     @* Pins für alle Sticky Notes auf der aktuellen Seite *@
                     @foreach (var note in StickyNotesOnCurrentPage)
                     {
@@ -1390,6 +1489,21 @@
     private IEnumerable<Annotation> StickyNotesOnCurrentPage =>
         _annotations.Where(a => a.Type == AnnotationType.StickyNote && a.PageNumber == _currentPage);
 
+    private IEnumerable<Annotation> FreeTextsOnCurrentPage =>
+        _annotations.Where(a => a.Type == AnnotationType.FreeText && a.PageNumber == _currentPage);
+
+    // Freitext-Editor-State (FA — Text-Werkzeug + Datum-Stempel)
+    private Annotation? _editingFreeText;
+    private string _editingFreeTextContent = string.Empty;
+
+    // Schriftgrößen als Anteil der Seitenhöhe (siehe FreeTextAnnotation.DefaultFontSize).
+    private static readonly (string LabelKey, double Fraction)[] FreeTextSizes =
+    {
+        ("reader.text.size.small", 0.015),
+        ("reader.text.size.normal", FreeTextAnnotation.DefaultFontSize),
+        ("reader.text.size.large", 0.03)
+    };
+
     private IEnumerable<Annotation> HighlightsOnCurrentPage =>
         _annotations.Where(a => a.Type == AnnotationType.Highlight && a.PageNumber == _currentPage);
 
@@ -1397,6 +1511,8 @@
     {
         Select,
         StickyNote,
+        FreeText,
+        DateStamp,
         Signature,
         Pen,
         RectShape,
@@ -2277,6 +2393,8 @@
         _editingAnnotation = null;
         _editingContent = string.Empty;
         _editingDrawing = null;
+        _editingFreeText = null;
+        _editingFreeTextContent = string.Empty;
         // Drawing-Capture (FA-013/014): bei Mode-Wechsel JS-Listener
         // (de-)attachen. Fire-and-Forget — stopDrawingCapture in JS ist
         // idempotent, also race-frei.
@@ -2673,12 +2791,34 @@
         {
             await SaveEditingAnnotationAsync();
         }
+        if (_editingFreeText is not null)
+        {
+            await SaveEditingFreeTextAsync();
+        }
 
         if (_currentPdfId is null || _handle is null) return;
 
         if (_annotationMode == AnnotationMode.Signature)
         {
             await PlaceSignatureAsync(e);
+            return;
+        }
+
+        if (_annotationMode == AnnotationMode.FreeText)
+        {
+            // Leerer Text + Editor öffnen — der Nutzer tippt direkt los (wie Edge).
+            await PlaceFreeTextAsync(e, string.Empty, openEditor: true);
+            return;
+        }
+
+        if (_annotationMode == AnnotationMode.DateStamp)
+        {
+            // Aktuelles PC-Datum (lokale Zeitzone des Browsers/Rechners) im
+            // sprachabhängigen Format aus den i18n-Ressourcen.
+            var dateText = DateTime.Now.ToString(
+                L.T("reader.tool.date.format"),
+                CultureInfo.InvariantCulture);
+            await PlaceFreeTextAsync(e, dateText, openEditor: false);
             return;
         }
 
@@ -2760,6 +2900,155 @@
     {
         _editingAnnotation = null;
         _editingContent = string.Empty;
+    }
+
+    // --- Freitext + Datum-Stempel (FA — Text-Werkzeug wie Edge-Reader) ------
+
+    private async Task PlaceFreeTextAsync(MouseEventArgs e, string initialText, bool openEditor)
+    {
+        if (_currentPdfId is null) return;
+
+        var fraction = await JS.InvokeAsync<NormalizedPosition?>(
+            "pageboundShortcuts.clientPositionToFraction",
+            PdfImageSelector,
+            e.ClientX,
+            e.ClientY);
+        if (fraction is null) return;
+
+        var newAnnotation = FreeTextAnnotation.Create(
+            _currentPdfId.Value,
+            _currentPage,
+            fraction.X,
+            fraction.Y,
+            initialText);
+
+        var created = await Annotations.CreateAsync(newAnnotation, CancellationToken.None);
+        _annotations = _annotations.Append(created).ToList();
+
+        if (openEditor)
+        {
+            OpenFreeTextEditor(created);
+        }
+
+        // Zurück zum Select-Modus — verhindert versehentliche Mehrfach-Erstellung.
+        _annotationMode = AnnotationMode.Select;
+        await RecomputeSignatureStatusesAsync();
+    }
+
+    private void OpenFreeTextEditor(Annotation annotation)
+    {
+        _editingFreeText = annotation;
+        _editingFreeTextContent = FreeTextAnnotation.GetText(annotation);
+    }
+
+    private async Task SaveEditingFreeTextAsync()
+    {
+        if (_editingFreeText is null) return;
+        var current = _editingFreeText;
+        var newText = _editingFreeTextContent;
+
+        // Leerer Text nach dem Schließen → Annotation wieder entfernen,
+        // sonst bleiben unsichtbare Reste auf der Seite zurück.
+        if (string.IsNullOrWhiteSpace(newText))
+        {
+            await DeleteEditingFreeTextAsync();
+            return;
+        }
+
+        if (FreeTextAnnotation.GetText(current) != newText)
+        {
+            var updated = FreeTextAnnotation.WithText(current, newText);
+            var saved = await Annotations.UpdateAsync(updated, CancellationToken.None);
+            _annotations = _annotations
+                .Select(a => a.Id.Value == saved.Id.Value ? saved : a)
+                .ToList();
+            await RecomputeSignatureStatusesAsync();
+        }
+
+        _editingFreeText = null;
+        _editingFreeTextContent = string.Empty;
+    }
+
+    private async Task DeleteEditingFreeTextAsync()
+    {
+        if (_editingFreeText is null) return;
+        var idToRemove = _editingFreeText.Id;
+        await Annotations.DeleteAsync(idToRemove, CancellationToken.None);
+        _annotations = _annotations.Where(a => a.Id.Value != idToRemove.Value).ToList();
+        _editingFreeText = null;
+        _editingFreeTextContent = string.Empty;
+        await RecomputeSignatureStatusesAsync();
+    }
+
+    private async Task CancelFreeTextEditing()
+    {
+        // Abbrechen bei nie befülltem Text = Annotation verwerfen; sonst
+        // bleibt der bestehende Text unverändert stehen.
+        if (_editingFreeText is not null && string.IsNullOrWhiteSpace(FreeTextAnnotation.GetText(_editingFreeText)))
+        {
+            await DeleteEditingFreeTextAsync();
+            return;
+        }
+        _editingFreeText = null;
+        _editingFreeTextContent = string.Empty;
+    }
+
+    private async Task ChangeFreeTextStyleAsync(double fontSize, string color)
+    {
+        if (_editingFreeText is null) return;
+        var updated = FreeTextAnnotation.WithStyle(_editingFreeText, fontSize, color);
+        var saved = await Annotations.UpdateAsync(updated, CancellationToken.None);
+        _annotations = _annotations
+            .Select(a => a.Id.Value == saved.Id.Value ? saved : a)
+            .ToList();
+        _editingFreeText = saved;
+        await RecomputeSignatureStatusesAsync();
+    }
+
+    private async Task HandleFreeTextMouseDownAsync(MouseEventArgs e, Annotation freeText)
+    {
+        if (_dotNetRef is null) return;
+        if (e.Button != 0) return;
+        try
+        {
+            await JS.InvokeVoidAsync(
+                "pageboundShortcuts.dragElementToFraction",
+                $"[data-pb-freetext-id=\"{freeText.Id.Value}\"]",
+                PageCanvasSelector,
+                e.ClientX,
+                e.ClientY,
+                _dotNetRef,
+                nameof(HandleFreeTextDragCompleteAsync),
+                freeText.Id.Value);
+        }
+        catch (JSException)
+        {
+            // Bridge nicht erreichbar — Drag wird einfach nicht starten.
+        }
+    }
+
+    [JSInvokable]
+    public async Task HandleFreeTextDragCompleteAsync(string freeTextId, double newX, double newY)
+    {
+        var freeText = _annotations.FirstOrDefault(a =>
+            a.Id.Value == freeTextId && a.Type == AnnotationType.FreeText);
+        if (freeText is null) return;
+
+        var currentX = FreeTextAnnotation.GetX(freeText);
+        var currentY = FreeTextAnnotation.GetY(freeText);
+        // Klick ohne Bewegung → Editor öffnen (Position unverändert).
+        if (Math.Abs(currentX - newX) < 0.0005 && Math.Abs(currentY - newY) < 0.0005)
+        {
+            OpenFreeTextEditor(freeText);
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
+        var updated = FreeTextAnnotation.WithPosition(freeText, newX, newY);
+        var saved = await Annotations.UpdateAsync(updated, CancellationToken.None);
+        _annotations = _annotations.Select(a => a.Id.Value == saved.Id.Value ? saved : a).ToList();
+
+        await InvokeAsync(StateHasChanged);
     }
 
     private sealed record NormalizedPosition(double X, double Y);

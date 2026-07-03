@@ -18,7 +18,8 @@ public enum AnnotationType
     StickyNote,
     Ink,
     Shape,
-    Signature
+    Signature,
+    FreeText
 }
 
 public sealed record Rectangle(double X, double Y, double Width, double Height);
