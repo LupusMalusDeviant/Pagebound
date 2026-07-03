@@ -295,6 +295,12 @@
                         title="@L.T("reader.redact.title")">
                     @L.T("reader.redact.tool")
                 </button>
+                <button type="button"
+                        class="@($"rounded border px-2 py-0.5 {(_annotationMode == AnnotationMode.EditText ? "pb-toolbtn is-on" : "pb-toolbtn")}")"
+                        @onclick="@(() => SetAnnotationMode(AnnotationMode.EditText))"
+                        title="@L.T("reader.edit.title")">
+                    @L.T("reader.edit.tool")
+                </button>
             </div>
             @if (_annotationMode == AnnotationMode.Redaction || _redactions.Count > 0)
             {
@@ -314,6 +320,22 @@
                         <input type="checkbox" @bind="_redactAudit" />
                         @L.T("reader.redact.audit")
                     </label>
+                </div>
+            }
+            @if (_annotationMode == AnnotationMode.EditText || _edits.Count > 0)
+            {
+                <div class="max-w-4xl mx-auto mt-1 flex flex-wrap items-center gap-2 text-xs">
+                    <span class="text-pb-fg-muted">@L.T("reader.edit.hint")</span>
+                    <span class="text-pb-fg-muted">·&nbsp;@L.T("reader.edit.count", new Dictionary<string, object> { ["count"] = _edits.Count })</span>
+                    <button type="button" class="btn primary"
+                            disabled="@(_isApplyingEdits || _edits.Count == 0 || _originalPdfBytes is null)"
+                            @onclick="ApplyTextEditsAsync">
+                        @(_isApplyingEdits ? L.T("reader.edit.running") : L.T("reader.edit.apply"))
+                    </button>
+                    <button type="button" class="rounded border border-pb-border px-2 py-0.5 text-pb-fg-muted hover:text-pb-fg disabled:opacity-40"
+                            disabled="@(_edits.Count == 0)" @onclick="ClearEdits">
+                        @L.T("reader.edit.clear")
+                    </button>
                 </div>
             }
             @if (IsDrawingMode(_annotationMode))
@@ -866,6 +888,21 @@
                              aria-hidden="true"></div>
                     }
 
+                    @* Vorschau der Text-Bearbeitungen: opaker Cover-Kasten (Hintergrund-
+                       farbe) + neuer Text darüber. Das echte Einbrennen passiert erst
+                       beim Anwenden via applyTextEdits. *@
+                    @foreach (var eb in EditsOnCurrentPage)
+                    {
+                        var ed = eb;
+                        var edLeft = (ed.X * 100).ToString("F3", CultureInfo.InvariantCulture);
+                        var edTop = (ed.Y * 100).ToString("F3", CultureInfo.InvariantCulture);
+                        var edW = (ed.Width * 100).ToString("F3", CultureInfo.InvariantCulture);
+                        var edH = (ed.Height * 100).ToString("F3", CultureInfo.InvariantCulture);
+                        var edFontCqh = (ed.FontSize * 100).ToString("F3", CultureInfo.InvariantCulture);
+                        <div class="absolute whitespace-pre leading-tight" aria-hidden="true"
+                             style="@($"left:{edLeft}%; top:{edTop}%; min-width:{edW}%; min-height:{edH}%; background:{ed.BgColor}; color:{ed.Color}; font-size:{edFontCqh}cqh; pointer-events:none; z-index:20")">@ed.NewText</div>
+                    }
+
                     @* Ink + Shape Overlay (FA-013 Stift, FA-014 Formen).
                        SVG mit viewBox 0..1 — alle Punkte/Bounds sind als
                        Seiten-Anteile gespeichert und skalieren automatisch
@@ -1193,6 +1230,28 @@
                                                OnCancel="@CancelFreeTextEditing" />
                     }
 
+                    @* Editor-Popover für die Inline-Text-Bearbeitung („Text bearbeiten").
+                       Wiederverwendung der Freitext-Editor-Komponente, aber gegen den
+                       Pending-Edit-State gebunden (eigener Save/Cancel-Pfad). *@
+                    @if (IsTextEditorOpen && _pendingEdit!.Page == _currentPage)
+                    {
+                        var edPlacement = ComputePopoverPlacement(_pendingEdit.X, _pendingEdit.Y);
+                        <FreeTextEditorPopover Content="@_pendingEditContent"
+                                               OnContentInput="@(v => _pendingEditContent = v)"
+                                               FontSize="@_pendingEditFontSize"
+                                               Color="@_pendingEditColor"
+                                               Page="@_currentPage"
+                                               Left="@edPlacement.Left"
+                                               Top="@edPlacement.Top"
+                                               Transform="@edPlacement.Transform"
+                                               Sizes="@FreeTextSizes"
+                                               Palette="@DrawPalette"
+                                               OnStyleChanged="@(args => SetPendingEditStyle(args.FontSize, args.Color))"
+                                               OnSave="@CommitPendingEdit"
+                                               OnDelete="@CancelPendingEdit"
+                                               OnCancel="@CancelPendingEdit" />
+                    }
+
                     @* Pins für alle Sticky Notes auf der aktuellen Seite *@
                     @foreach (var note in StickyNotesOnCurrentPage)
                     {
@@ -1515,7 +1574,8 @@
         RectShape,
         ArrowShape,
         LineShape,
-        Redaction
+        Redaction,
+        EditText
     }
 
     private static bool IsDrawingMode(AnnotationMode mode) => mode is
@@ -1531,7 +1591,8 @@
     // selektion statt zu platzieren). Zentral, damit ein neuer Platzierungs-
     // Modus nicht wieder an einer der beiden Stellen vergessen wird.
     private static bool IsPlacementMode(AnnotationMode mode) =>
-        mode is AnnotationMode.StickyNote or AnnotationMode.FreeText or AnnotationMode.DateStamp;
+        mode is AnnotationMode.StickyNote or AnnotationMode.FreeText or AnnotationMode.DateStamp
+            or AnnotationMode.EditText;
 
     // Schwärzungs-Bereiche (FA — echte Redaktion). Transient (NICHT in der Sidecar
     // — Redaktion ist destruktiv und gehört nicht in die wiederherstellbaren
@@ -1543,6 +1604,31 @@
 
     private IEnumerable<RedactionBox> RedactionsOnCurrentPage =>
         _redactions.Where(r => r.Page == _currentPage);
+
+    // Inline-Text-Bearbeitung („Text bearbeiten" — Cover + Redraw). Transient wie
+    // die Schwärzung: NICHT in der Sidecar; „Anwenden" erzeugt eine neue Datei
+    // (<name>.edited.pdf), Original/Sidecar bleiben unangetastet. 0..1-Koordinaten,
+    // oben-links, je Seite. OldText/NewText dienen nur der Änderungs-Erkennung +
+    // Editor-Vorbelegung; eingebrannt wird ausschließlich NewText.
+    private const string DefaultEditTextColor = "#111111";
+    private const string DefaultEditBgColor = "#ffffff";
+    private sealed record TextEditBox(int Page, double X, double Y, double Width, double Height,
+        string OldText, string NewText, double FontSize, string Color, string BgColor);
+    private readonly List<TextEditBox> _edits = new();
+    private bool _isApplyingEdits;
+    private IEnumerable<TextEditBox> EditsOnCurrentPage => _edits.Where(e => e.Page == _currentPage);
+
+    // Der aktuell im Editor getippte, noch nicht in _edits übernommene Edit.
+    // Geometrie/OldText stecken in _pendingEdit; der neue Text/Stil leben live in
+    // den _pendingEdit*-Feldern (Content-Sync ohne Parent-Re-Render, wie Freitext).
+    private TextEditBox? _pendingEdit;
+    private string _pendingEditContent = string.Empty;
+    private double _pendingEditFontSize = FreeTextAnnotation.DefaultFontSize;
+    private string _pendingEditColor = DefaultEditTextColor;
+    private bool IsTextEditorOpen => _pendingEdit is not null;
+
+    // DTO für pageboundPdf.findTextBlockAt (camelCase-JSON → case-insensitive).
+    private sealed record TextBlockDto(string Text, double X, double Y, double W, double H, double FontSize);
 
     // Reader-Komfort (FA): Nachtmodus (invertierte Anzeige) + fortlaufende Lese-
     // ansicht (alle Seiten gestapelt). Beide nur Anzeige — die Quell-PDF bleibt
@@ -1698,6 +1784,8 @@
         _handle = await Renderer.LoadAsync(buffer, new LoadOptions(), CancellationToken.None).ConfigureAwait(false);
         _currentPage = 1;
         _redactions.Clear();
+        _edits.Clear();
+        _pendingEdit = null;
         _continuous = false;
         _continuousPages.Clear();
         _continuousRenderedCount = 0;
@@ -1942,6 +2030,8 @@
         _isExporting = false;
         _annotationMode = AnnotationMode.Select;
         _redactions.Clear();
+        _edits.Clear();
+        _pendingEdit = null;
         _continuous = false;
         _continuousPages.Clear();
         _continuousRenderedCount = 0;
@@ -2413,6 +2503,7 @@
         // Text geht verloren. Die Save-Methoden nullen ihren State selbst.
         await SaveEditingFreeTextAsync();
         await SaveEditingAnnotationAsync();
+        CommitPendingEdit();
         _editingDrawing = null;
         // Drawing-Capture (FA-013/014): bei Mode-Wechsel JS-Listener
         // (de-)attachen. Fire-and-Forget — stopDrawingCapture in JS ist
@@ -2551,6 +2642,126 @@
     public sealed record DrawPoint(double X, double Y);
 
     private void ClearRedactions() => _redactions.Clear();
+
+    // --- Inline-Text-Bearbeitung („Text bearbeiten" — Cover + Redraw) --------
+
+    private void ClearEdits()
+    {
+        _edits.Clear();
+        _pendingEdit = null;
+        _pendingEditContent = string.Empty;
+    }
+
+    // Klick → nächstliegende Textzeile suchen und den Editor (vorbefüllt mit dem
+    // alten Text) an ihrer Position öffnen. Kein Treffer → freies Einfügen an der
+    // Klickposition.
+    private async Task StartTextEditAsync(MouseEventArgs e)
+    {
+        if (_currentPdfId is null || _handle is null) return;
+
+        var fraction = await JS.InvokeAsync<NormalizedPosition?>(
+            "pageboundShortcuts.clientPositionToFraction",
+            PdfImageSelector,
+            e.ClientX,
+            e.ClientY);
+        if (fraction is null) return;
+
+        TextBlockDto? block = null;
+        try
+        {
+            block = await JS.InvokeAsync<TextBlockDto?>(
+                "pageboundPdf.findTextBlockAt", _handle.Id, _currentPage, fraction.X, fraction.Y);
+        }
+        catch (Exception)
+        {
+            // Text-Erkennung fehlgeschlagen → wie „kein Treffer" behandeln.
+        }
+
+        if (block is not null)
+        {
+            _pendingEdit = new TextEditBox(_currentPage, block.X, block.Y, block.W, block.H,
+                block.Text, block.Text, block.FontSize, DefaultEditTextColor, DefaultEditBgColor);
+            _pendingEditContent = block.Text;
+            _pendingEditFontSize = block.FontSize;
+        }
+        else
+        {
+            _pendingEdit = new TextEditBox(_currentPage, fraction.X, fraction.Y, 0.2, FreeTextAnnotation.DefaultFontSize,
+                string.Empty, string.Empty, FreeTextAnnotation.DefaultFontSize, DefaultEditTextColor, DefaultEditBgColor);
+            _pendingEditContent = string.Empty;
+            _pendingEditFontSize = FreeTextAnnotation.DefaultFontSize;
+        }
+        _pendingEditColor = DefaultEditTextColor;
+    }
+
+    private void SetPendingEditStyle(double fontSize, string color)
+    {
+        _pendingEditFontSize = fontSize;
+        _pendingEditColor = color;
+    }
+
+    // Übernimmt den getippten Edit in die Liste (bzw. verwirft ihn, wenn nichts
+    // geändert wurde). Leerer neuer Text bei vorhandenem Alt-Text = „übermalen".
+    private void CommitPendingEdit()
+    {
+        if (_pendingEdit is null) return;
+        var p = _pendingEdit;
+        var newText = _pendingEditContent ?? string.Empty;
+        _pendingEdit = null;
+        _pendingEditContent = string.Empty;
+
+        // Keine Änderung gegenüber dem Originaltext → nichts zu tun.
+        if (string.Equals(newText, p.OldText, StringComparison.Ordinal)) return;
+        // Freies Einfügen ohne Inhalt → nichts zu tun.
+        if (newText.Length == 0 && p.OldText.Length == 0) return;
+
+        _edits.Add(p with { NewText = newText, FontSize = _pendingEditFontSize, Color = _pendingEditColor });
+    }
+
+    private void CancelPendingEdit()
+    {
+        _pendingEdit = null;
+        _pendingEditContent = string.Empty;
+    }
+
+    // Bearbeitungen anwenden: übermalt die alten Regionen und zeichnet den neuen
+    // Text ein (Cover + Redraw), Download als <name>.edited.pdf. Original/Sidecar
+    // bleiben unangetastet. Hinweis: der ursprüngliche Text bleibt extrahierbar —
+    // für echte Entfernung das Schwärzen-Werkzeug nutzen.
+    private async Task ApplyTextEditsAsync()
+    {
+        if (_originalPdfBytes is null || _edits.Count == 0 || _isApplyingEdits) return;
+        _isApplyingEdits = true;
+        _errorMessage = null;
+        try
+        {
+            var regions = _edits
+                .Select(ed => new TextEditRegion(ed.Page, ed.X, ed.Y, ed.Width, ed.Height, ed.NewText, ed.FontSize, ed.Color, ed.BgColor))
+                .ToList();
+            using var ms = new MemoryStream(_originalPdfBytes);
+            var edited = await Manipulator.ApplyTextEditsAsync(ms, regions, CancellationToken.None);
+
+            var baseName = !string.IsNullOrWhiteSpace(_currentFilename)
+                ? System.IO.Path.GetFileNameWithoutExtension(_currentFilename)
+                : (_handle?.Title ?? "pagebound");
+            var safeBase = string.Concat(baseName.Select(c =>
+                char.IsLetterOrDigit(c) || c is '_' or '-' or '.' or ' ' ? c : '_'));
+            await JS.InvokeVoidAsync(
+                "pageboundShortcuts.downloadBytes",
+                $"{safeBase}.edited.pdf",
+                Convert.ToBase64String(edited),
+                "application/pdf");
+            _edits.Clear();
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Bearbeitung fehlgeschlagen:\n{ex.Message}";
+        }
+        finally
+        {
+            _isApplyingEdits = false;
+        }
+    }
 
     // Fortlaufende Leseansicht: beim Einschalten alle Seiten progressiv rendern.
     private async Task ToggleContinuousAsync()
@@ -2843,6 +3054,12 @@
                 // Auch einen offenen Pending-Text (F-10) speichern/verwerfen.
                 await SaveEditingFreeTextAsync();
             }
+            if (IsTextEditorOpen)
+            {
+                // Offenen „Text bearbeiten"-Editor übernehmen, bevor der neue Klick
+                // verarbeitet wird (analog zum Freitext).
+                CommitPendingEdit();
+            }
 
             if (_currentPdfId is null || _handle is null) return;
 
@@ -2884,6 +3101,12 @@
                     dateText = DateTime.Now.ToString(dateFallbackFormat, CultureInfo.InvariantCulture);
                 }
                 await PlaceFreeTextAsync(e, dateText, openEditor: false);
+                return;
+            }
+
+            if (_annotationMode == AnnotationMode.EditText)
+            {
+                await StartTextEditAsync(e);
                 return;
             }
 

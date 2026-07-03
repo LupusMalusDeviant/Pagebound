@@ -17,8 +17,8 @@ Reihenfolge = „Empfohlene Reihenfolge" im Plan.
 - [x] **E-10** Bridge `applyTextEdits` (Cover + Redraw) — im Preview verifiziert: gültiges PDF, neuer Text gezeichnet, opake Cover-Rect; alter Text bleibt extrahierbar (Design → Ehrlichkeits-Hinweis)
 - [x] **E-11** Infra `ApplyTextEditsAsync` + `TextEditRegion`-Record (IPdfManipulator/JsPdfLibManipulator) — Build+184 Tests grün
 - [x] **E-12** JS-Helper `findTextBlockAt` — im Preview verifiziert: Klick auf Textzeile liefert exakten Text+BBox+fontSize (x=72/595, size=24/842), leerer Bereich → null, Seite-2-18pt korrekt
-- [ ] **E-13** Reader-Werkzeug (Modus/Toolbar/State)
-- [ ] **E-14** Edit-Geste end-to-end (Klick→Editor→Anwenden)
+- [x] **E-13** Reader-Werkzeug (Modus/Toolbar/State) — Enum `EditText`, Toolbar-Button, Aktionsleiste, transienter `_edits`-State, Overlay-Vorschau; Build+184 Tests+Privacy grün
+- [x] **E-14** Edit-Geste end-to-end (Klick→Editor→Anwenden) — **im Browser voll verifiziert**: Werkzeug aktivieren → Klick auf Textzeile → Editor vorbefüllt mit Alt-Text → ändern+speichern → Overlay (weißes Cover + neuer Text) → „Anwenden" erzeugt gültigen `application/pdf`-Blob (1774 B), Edits geleert, kein Fehler. Screenshot belegt Ersetzung visuell.
 - [ ] **E-04b** Doku: pdf-reader/pdf-werkzeuge um „Text bearbeiten" ergänzen
 
 ## Runde 3 — Optional (nur bei Budget)
