@@ -25,7 +25,7 @@ Status: `[ ]` offen · `[x]` erledigt (mit Commit-Hash) · `[!]` blockiert (mit 
 - [x] F-10 · Leere Annotation vor dem Tippen persistiert — `0162595`
 - [x] F-11 · Stil-Änderung schreibt bei jedem Swatch-Klick — `6210481` (löst F-10-Zwischenstufe)
 - [x] F-13 · Drag-Bridge: Listener-Attach-Race bei schnellem Klick — `ab8c6a4`
-- [ ] F-21 · Seitennavigation als Sticky-Bottom-Bar
+- [x] F-21 · Seitennavigation als Sticky-Bottom-Bar — `06204a7` (Browser-verifiziert)
 
 ## Runde 4 — Kompatibilität, Performance, Privacy
 - [ ] F-07 · Sidecar: unbekannter Annotationstyp still verschluckt
@@ -46,6 +46,10 @@ Status: `[ ]` offen · `[x]` erledigt (mit Commit-Hash) · `[!]` blockiert (mit 
   folgt dem Code (eigenes try/catch um den Fallback + korrigierter Filter).
 - Bundled `wwwroot/js/*.js` sind gitignored (Build-Artefakte) → nur `.ts`
   committen, `npm run build:js` erzeugt die Bundles lokal.
+- F-21: Neue Tailwind-Klasse `bottom-0` war nicht im vorkompilierten `app.css` →
+  `npm run build:css` (Tailwind v4) nötig, sonst `bottom: auto` und die Bar klebt
+  nicht. `app.css`/`*.js`-Bundles sind gitignored; `npm run build` (Deploy) baut
+  beide. Per Browser-Preview mit 3-Seiten-Test-PDF vollständig verifiziert.
 - F-13: IST/SOLL nennt `finish()`; im Code heißt die Abschluss-Funktion `onUp()`
   (Cleanup + C#-Callback). Fix folgt dem Code (`onUp()` in `onMove` bei
   `e.buttons === 0`).
