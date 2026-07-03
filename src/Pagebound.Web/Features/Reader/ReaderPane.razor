@@ -2835,10 +2835,27 @@
             if (_annotationMode == AnnotationMode.DateStamp)
             {
                 // Aktuelles PC-Datum (lokale Zeitzone des Browsers/Rechners) im
-                // sprachabhängigen Format aus den i18n-Ressourcen.
-                var dateText = DateTime.Now.ToString(
-                    L.T("reader.tool.date.format"),
-                    CultureInfo.InvariantCulture);
+                // sprachabhängigen Format aus den i18n-Ressourcen. Absicherung
+                // (F-14): Fehlt der Key, gibt L.T den Key SELBST zurück — der darf
+                // nicht als Formatstring interpretiert werden. Und ein kaputter
+                // Formatstring einer Übersetzung darf den Klick-Handler nicht
+                // werfen → in beiden Fällen ISO-Fallback "yyyy-MM-dd".
+                const string dateFormatKey = "reader.tool.date.format";
+                const string dateFallbackFormat = "yyyy-MM-dd";
+                var dateFormat = L.T(dateFormatKey);
+                if (string.IsNullOrWhiteSpace(dateFormat) || dateFormat == dateFormatKey)
+                {
+                    dateFormat = dateFallbackFormat;
+                }
+                string dateText;
+                try
+                {
+                    dateText = DateTime.Now.ToString(dateFormat, CultureInfo.InvariantCulture);
+                }
+                catch (FormatException)
+                {
+                    dateText = DateTime.Now.ToString(dateFallbackFormat, CultureInfo.InvariantCulture);
+                }
                 await PlaceFreeTextAsync(e, dateText, openEditor: false);
                 return;
             }
