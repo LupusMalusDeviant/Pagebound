@@ -1173,16 +1173,13 @@
                     {
                         var ftX = _editingFreeText is not null ? FreeTextAnnotation.GetX(_editingFreeText) : _pendingFreeTextPosition!.Value.X;
                         var ftY = _editingFreeText is not null ? FreeTextAnnotation.GetY(_editingFreeText) : _pendingFreeTextPosition!.Value.Y;
-                        var ftLeft = (ftX * 100).ToString("F2", CultureInfo.InvariantCulture);
-                        var ftTop = (ftY * 100).ToString("F2", CultureInfo.InvariantCulture);
-                        var ftTranslateX = ftX > 0.55 ? "calc(-100% - 8px)" : "8px";
-                        var ftTranslateY = ftY > 0.65 ? "calc(-100% + 8px)" : "-8px";
+                        var ftPlacement = ComputePopoverPlacement(ftX, ftY);
                         // F-11: Aktiver Stil kommt aus dem Editor-State (Pending), nicht
                         // aus der Annotation — so wirken Swatch-Klicks ohne Storage-Write.
                         var ftCurrentSize = _editingFreeTextFontSize;
                         var ftCurrentColor = _editingFreeTextColor;
                         <div class="absolute z-10 w-80 rounded-lg pb-glass-strong p-3"
-                             style="@($"left:{ftLeft}%; top:{ftTop}%; transform: translate({ftTranslateX}, {ftTranslateY})")"
+                             style="@($"left:{ftPlacement.Left}%; top:{ftPlacement.Top}%; transform: {ftPlacement.Transform}")"
                              @onclick:stopPropagation
                              @onmousedown:stopPropagation>
                             <div class="flex items-center justify-between mb-2 gap-2">
@@ -1262,14 +1259,11 @@
                     {
                         var noteX = StickyNoteAnnotation.GetX(_editingAnnotation);
                         var noteY = StickyNoteAnnotation.GetY(_editingAnnotation);
-                        var editLeft = (noteX * 100).ToString("F2", CultureInfo.InvariantCulture);
-                        var editTop = (noteY * 100).ToString("F2", CultureInfo.InvariantCulture);
-                        // Pin sitzt rechts → Popover nach links flippen, damit es nicht überhängt.
-                        // Pin sitzt unten → Popover nach oben flippen.
-                        var translateX = noteX > 0.55 ? "calc(-100% - 8px)" : "8px";
-                        var translateY = noteY > 0.65 ? "calc(-100% + 8px)" : "-8px";
+                        // Pin sitzt rechts → Popover nach links flippen, damit es nicht
+                        // überhängt; Pin sitzt unten → nach oben flippen (F-16 Helper).
+                        var notePlacement = ComputePopoverPlacement(noteX, noteY);
                         <div class="absolute z-10 w-80 rounded-lg pb-glass-strong p-3"
-                             style="@($"left:{editLeft}%; top:{editTop}%; transform: translate({translateX}, {translateY})")"
+                             style="@($"left:{notePlacement.Left}%; top:{notePlacement.Top}%; transform: {notePlacement.Transform}")"
                              @onclick:stopPropagation>
                             <div class="flex items-center justify-between mb-2 gap-2">
                                 <span class="text-xs text-pb-fg-muted">@L.T("reader.note.contextLabel", new Dictionary<string, object> { ["page"] = _editingAnnotation.PageNumber })</span>
@@ -2762,12 +2756,32 @@
         _editingDrawing = annotation;
     }
 
+    // Popover-Platzierung (F-16): berechnet left/top (% der Seite) + die
+    // Flip-Transform, sodass der Editor-Popover nicht über den Seitenrand
+    // hinausläuft. Gemeinsam für Freitext- und Sticky-Note-Editor.
+    private static (string Left, string Top, string Transform) ComputePopoverPlacement(double x, double y)
+    {
+        var left = (x * 100).ToString("F2", CultureInfo.InvariantCulture);
+        var top = (y * 100).ToString("F2", CultureInfo.InvariantCulture);
+        var translateX = x > 0.55 ? "calc(-100% - 8px)" : "8px";
+        var translateY = y > 0.65 ? "calc(-100% + 8px)" : "-8px";
+        return (left, top, $"translate({translateX}, {translateY})");
+    }
+
+    // List-Mutations-Helper (F-16): ersetzt bzw. entfernt eine Annotation in
+    // _annotations. Lösen das zuvor 6-/5-fach duplizierte Select-/Where-Idiom ab.
+    private void ReplaceAnnotation(Annotation saved) =>
+        ReplaceAnnotation(saved);
+
+    private void RemoveAnnotation(AnnotationId id) =>
+        RemoveAnnotation(id);
+
     private async Task DeleteEditingDrawingAsync()
     {
         if (_editingDrawing is null) return;
         var id = _editingDrawing.Id;
         await Annotations.DeleteAsync(id, CancellationToken.None);
-        _annotations = _annotations.Where(a => a.Id.Value != id.Value).ToList();
+        RemoveAnnotation(id);
         _editingDrawing = null;
     }
 
@@ -2972,9 +2986,7 @@
         {
             var updated = StickyNoteAnnotation.WithContent(current, newContent);
             var saved = await Annotations.UpdateAsync(updated, CancellationToken.None);
-            _annotations = _annotations
-                .Select(a => a.Id.Value == saved.Id.Value ? saved : a)
-                .ToList();
+            ReplaceAnnotation(saved);
             await RecomputeSignatureStatusesAsync();
         }
 
@@ -2987,7 +2999,7 @@
         if (_editingAnnotation is null) return;
         var idToRemove = _editingAnnotation.Id;
         await Annotations.DeleteAsync(idToRemove, CancellationToken.None);
-        _annotations = _annotations.Where(a => a.Id.Value != idToRemove.Value).ToList();
+        RemoveAnnotation(idToRemove);
         _editingAnnotation = null;
         _editingContent = string.Empty;
         await RecomputeSignatureStatusesAsync();
@@ -3105,9 +3117,7 @@
             var updated = FreeTextAnnotation.WithTextAndStyle(
                 current, newText, _editingFreeTextFontSize, _editingFreeTextColor);
             var saved = await Annotations.UpdateAsync(updated, CancellationToken.None);
-            _annotations = _annotations
-                .Select(a => a.Id.Value == saved.Id.Value ? saved : a)
-                .ToList();
+            ReplaceAnnotation(saved);
             await RecomputeSignatureStatusesAsync();
         }
 
@@ -3127,7 +3137,7 @@
         }
         var idToRemove = _editingFreeText.Id;
         await Annotations.DeleteAsync(idToRemove, CancellationToken.None);
-        _annotations = _annotations.Where(a => a.Id.Value != idToRemove.Value).ToList();
+        RemoveAnnotation(idToRemove);
         _editingFreeText = null;
         _editingFreeTextContent = string.Empty;
         await RecomputeSignatureStatusesAsync();
@@ -3154,6 +3164,30 @@
         _editingFreeTextColor = color;
     }
 
+    // Startet den JS-seitigen Drag eines absolut positionierten Overlay-Elements
+    // (Freitext/Signatur) und meldet die End-Fraction via callbackName an C#
+    // zurück (F-16 — löst die zwei identischen MouseDown-Interop-Blöcke ab).
+    private async Task StartElementDragAsync(string selector, string callbackName, string id, MouseEventArgs e)
+    {
+        if (_dotNetRef is null) return;
+        try
+        {
+            await JS.InvokeVoidAsync(
+                "pageboundShortcuts.dragElementToFraction",
+                selector,
+                PageCanvasSelector,
+                e.ClientX,
+                e.ClientY,
+                _dotNetRef,
+                callbackName,
+                id);
+        }
+        catch (JSException)
+        {
+            // Bridge nicht erreichbar — Drag wird einfach nicht starten.
+        }
+    }
+
     private async Task HandleFreeTextMouseDownAsync(MouseEventArgs e, Annotation freeText)
     {
         if (_dotNetRef is null) return;
@@ -3165,22 +3199,11 @@
         {
             await SaveEditingAnnotationAsync();
         }
-        try
-        {
-            await JS.InvokeVoidAsync(
-                "pageboundShortcuts.dragElementToFraction",
-                $"[data-pb-freetext-id=\"{freeText.Id.Value}\"]",
-                PageCanvasSelector,
-                e.ClientX,
-                e.ClientY,
-                _dotNetRef,
-                nameof(HandleFreeTextDragCompleteAsync),
-                freeText.Id.Value);
-        }
-        catch (JSException)
-        {
-            // Bridge nicht erreichbar — Drag wird einfach nicht starten.
-        }
+        await StartElementDragAsync(
+            $"[data-pb-freetext-id=\"{freeText.Id.Value}\"]",
+            nameof(HandleFreeTextDragCompleteAsync),
+            freeText.Id.Value,
+            e);
     }
 
     [JSInvokable]
@@ -3211,7 +3234,7 @@
 
         var updated = FreeTextAnnotation.WithPosition(freeText, newX, newY);
         var saved = await Annotations.UpdateAsync(updated, CancellationToken.None);
-        _annotations = _annotations.Select(a => a.Id.Value == saved.Id.Value ? saved : a).ToList();
+        ReplaceAnnotation(saved);
 
         // Freitext-Position ist Teil des Signatur-Integritäts-Hashs → nach dem
         // Verschieben Status neu berechnen (analog SaveEditingFreeTextAsync).
@@ -3340,7 +3363,7 @@
     private async Task DeleteSignatureAsync(Annotation signature)
     {
         await Annotations.DeleteAsync(signature.Id, CancellationToken.None);
-        _annotations = _annotations.Where(a => a.Id.Value != signature.Id.Value).ToList();
+        RemoveAnnotation(signature.Id);
         _signatureStatuses.Remove(signature.Id.Value);
         await RecomputeSignatureStatusesAsync();
     }
@@ -3502,22 +3525,11 @@
         // Linke Maustaste nur; ohne diese Prüfung würde Rechtsklick auch
         // einen Drag-Listener registrieren.
         if (e.Button != 0) return;
-        try
-        {
-            await JS.InvokeVoidAsync(
-                "pageboundShortcuts.dragElementToFraction",
-                $"[data-pb-signature-id=\"{signature.Id.Value}\"]",
-                PageCanvasSelector,
-                e.ClientX,
-                e.ClientY,
-                _dotNetRef,
-                nameof(HandleSignatureDragCompleteAsync),
-                signature.Id.Value);
-        }
-        catch (JSException)
-        {
-            // Bridge nicht erreichbar — Drag wird einfach nicht starten.
-        }
+        await StartElementDragAsync(
+            $"[data-pb-signature-id=\"{signature.Id.Value}\"]",
+            nameof(HandleSignatureDragCompleteAsync),
+            signature.Id.Value,
+            e);
     }
 
     private async Task HandleSignatureResizeMouseDownAsync(MouseEventArgs e, Annotation signature)
@@ -3568,7 +3580,7 @@
             Payload = payload
         };
         var saved = await Annotations.UpdateAsync(updated, CancellationToken.None);
-        _annotations = _annotations.Select(a => a.Id.Value == saved.Id.Value ? saved : a).ToList();
+        ReplaceAnnotation(saved);
 
         await InvokeAsync(StateHasChanged);
     }
@@ -3601,7 +3613,7 @@
             Payload = payload
         };
         var saved = await Annotations.UpdateAsync(updated, CancellationToken.None);
-        _annotations = _annotations.Select(a => a.Id.Value == saved.Id.Value ? saved : a).ToList();
+        ReplaceAnnotation(saved);
 
         await InvokeAsync(StateHasChanged);
     }
@@ -3935,9 +3947,7 @@
         if (_editingHighlight is null) return;
         var updated = HighlightAnnotation.WithColor(_editingHighlight, color);
         var saved = await Annotations.UpdateAsync(updated, CancellationToken.None);
-        _annotations = _annotations
-            .Select(a => a.Id.Value == saved.Id.Value ? saved : a)
-            .ToList();
+        ReplaceAnnotation(saved);
         _editingHighlight = saved;
     }
 
@@ -3946,7 +3956,7 @@
         if (_editingHighlight is null) return;
         var id = _editingHighlight.Id;
         await Annotations.DeleteAsync(id, CancellationToken.None);
-        _annotations = _annotations.Where(a => a.Id.Value != id.Value).ToList();
+        RemoveAnnotation(id);
         _editingHighlight = null;
         await RecomputeSignatureStatusesAsync();
     }
