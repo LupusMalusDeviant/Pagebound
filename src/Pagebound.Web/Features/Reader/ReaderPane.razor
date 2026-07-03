@@ -795,7 +795,7 @@
                     "container-type:size; aspect-ratio:{0}/{1}; width:min(100%, {2}px)",
                     pageW, pageH, maxWidthPx);
                 <div data-pb-page-canvas
-                     class="relative @(_annotationMode == AnnotationMode.StickyNote || IsDrawCaptureMode(_annotationMode) ? "cursor-crosshair" : "cursor-text")"
+                     class="relative @(IsPlacementMode(_annotationMode) || IsDrawCaptureMode(_annotationMode) ? "cursor-crosshair" : "cursor-text")"
                      style="@canvasStyle"
                      @onclick="HandlePdfClickAsync"
                      @onmouseup="HandleCanvasMouseUpAsync">
@@ -807,8 +807,9 @@
                          draggable="false" />
 
                     @* Text-Layer für FA-005 (Suche-Highlighting) und FA-010 (Highlight-Selection).
-                       Im Sticky-Note-/Zeichnen-Modus deaktiviert, damit Klicks aufs PDF
-                       direkt auf das Canvas-Div durchschlagen.
+                       In allen Platzierungs- (Sticky Note / Freitext / Datum) und Zeichen-
+                       Modi deaktiviert, damit Klicks aufs PDF direkt auf das Canvas-Div
+                       durchschlagen (siehe IsPlacementMode / IsDrawCaptureMode).
 
                        Zwei Code-Pfade:
                        a) Native PDF-Text: PDF.js' eigene TextLayer-Klasse rendert die
@@ -819,7 +820,7 @@
                        b) OCR-Output (FA-050): kommt mit Pixel-Bounding-Boxes statt
                           font-stream — die rendern wir als Razor-Spans mit scaleX-Helper. *@
                     @{
-                        var textLayerInteractiveCss = (_annotationMode == AnnotationMode.StickyNote || IsDrawCaptureMode(_annotationMode))
+                        var textLayerInteractiveCss = (IsPlacementMode(_annotationMode) || IsDrawCaptureMode(_annotationMode))
                             ? "select-none pointer-events-none"
                             : "select-text";
                     }
@@ -1528,6 +1529,13 @@
     // Modi, die den Rechteck/Strich-Capture im JS brauchen (Zeichnen + Schwärzen).
     private static bool IsDrawCaptureMode(AnnotationMode mode) =>
         IsDrawingMode(mode) || mode == AnnotationMode.Redaction;
+
+    // Klick-zum-Platzieren-Modi: hier muss der Text-Layer inert sein und der
+    // Cursor als Crosshair erscheinen (sonst startet der Klick eine Text-
+    // selektion statt zu platzieren). Zentral, damit ein neuer Platzierungs-
+    // Modus nicht wieder an einer der beiden Stellen vergessen wird.
+    private static bool IsPlacementMode(AnnotationMode mode) =>
+        mode is AnnotationMode.StickyNote or AnnotationMode.FreeText or AnnotationMode.DateStamp;
 
     // Schwärzungs-Bereiche (FA — echte Redaktion). Transient (NICHT in der Sidecar
     // — Redaktion ist destruktiv und gehört nicht in die wiederherstellbaren
