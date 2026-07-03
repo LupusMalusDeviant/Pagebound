@@ -2385,16 +2385,17 @@
 
     // --- Annotations (Sticky Notes, FA-011) ---------------------------------
 
-    private void SetAnnotationMode(AnnotationMode mode)
+    private async Task SetAnnotationMode(AnnotationMode mode)
     {
         _annotationMode = mode;
-        // Editor schließen, wenn wir den Modus wechseln — sonst überlappen
-        // sich Modus-Indikatoren und offener Popover unangenehm.
-        _editingAnnotation = null;
-        _editingContent = string.Empty;
+        // Offenen Editor beim Moduswechsel ORDENTLICH schließen (nicht nur die
+        // State-Felder nullen): getippten Inhalt speichern, leere Freitext-
+        // Annotation entfernen. Sonst bleibt beim Text-Werkzeug eine leere
+        // Geister-Annotation in IndexedDB/Sidecar zurück und ungespeicherter
+        // Text geht verloren. Die Save-Methoden nullen ihren State selbst.
+        await SaveEditingFreeTextAsync();
+        await SaveEditingAnnotationAsync();
         _editingDrawing = null;
-        _editingFreeText = null;
-        _editingFreeTextContent = string.Empty;
         // Drawing-Capture (FA-013/014): bei Mode-Wechsel JS-Listener
         // (de-)attachen. Fire-and-Forget — stopDrawingCapture in JS ist
         // idempotent, also race-frei.
