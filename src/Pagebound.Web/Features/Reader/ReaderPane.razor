@@ -1164,10 +1164,13 @@
                     @foreach (var txt in FreeTextsOnCurrentPage)
                     {
                         var freeText = txt;
+                        // F-11: Wird genau dieser Text gerade editiert, zeigt sein Div den
+                        // Pending-Stil live (ohne Persistierung); sonst den gespeicherten.
+                        var isThisEditing = _editingFreeText is not null && _editingFreeText.Id.Value == freeText.Id.Value;
                         var txtLeft = (FreeTextAnnotation.GetX(freeText) * 100).ToString("F3", CultureInfo.InvariantCulture);
                         var txtTop = (FreeTextAnnotation.GetY(freeText) * 100).ToString("F3", CultureInfo.InvariantCulture);
-                        var txtFontCqh = (FreeTextAnnotation.GetFontSize(freeText) * 100).ToString("F3", CultureInfo.InvariantCulture);
-                        var txtColor = FreeTextAnnotation.GetColor(freeText);
+                        var txtFontCqh = ((isThisEditing ? _editingFreeTextFontSize : FreeTextAnnotation.GetFontSize(freeText)) * 100).ToString("F3", CultureInfo.InvariantCulture);
+                        var txtColor = isThisEditing ? _editingFreeTextColor : FreeTextAnnotation.GetColor(freeText);
                         var txtContent = FreeTextAnnotation.GetText(freeText);
                         @* F-10: Gespeicherte Freitexte sind nie leer (leere werden nicht
                            persistiert), daher kein Platzhalter-/Geisterbox-Zweig mehr. *@
@@ -1191,8 +1194,10 @@
                         var ftTop = (ftY * 100).ToString("F2", CultureInfo.InvariantCulture);
                         var ftTranslateX = ftX > 0.55 ? "calc(-100% - 8px)" : "8px";
                         var ftTranslateY = ftY > 0.65 ? "calc(-100% + 8px)" : "-8px";
-                        var ftCurrentSize = _editingFreeText is not null ? FreeTextAnnotation.GetFontSize(_editingFreeText) : FreeTextAnnotation.DefaultFontSize;
-                        var ftCurrentColor = _editingFreeText is not null ? FreeTextAnnotation.GetColor(_editingFreeText) : FreeTextAnnotation.DefaultColor;
+                        // F-11: Aktiver Stil kommt aus dem Editor-State (Pending), nicht
+                        // aus der Annotation — so wirken Swatch-Klicks ohne Storage-Write.
+                        var ftCurrentSize = _editingFreeTextFontSize;
+                        var ftCurrentColor = _editingFreeTextColor;
                         <div class="absolute z-10 w-80 rounded-lg pb-glass-strong p-3"
                              style="@($"left:{ftLeft}%; top:{ftTop}%; transform: translate({ftTranslateX}, {ftTranslateY})")"
                              @onclick:stopPropagation
@@ -1219,7 +1224,7 @@
                                     var sizeActive = Math.Abs(ftCurrentSize - s) < 0.0005;
                                     <button type="button"
                                             class="@($"rounded border px-1.5 py-0.5 {(sizeActive ? "border-pb-accent text-pb-accent" : "border-pb-border")}")"
-                                            @onclick="@(() => ChangeFreeTextStyleAsync(s, ftCurrentColor))">
+                                            @onclick="@(() => SetFreeTextStyle(s, ftCurrentColor))">
                                         @L.T(labelKey)
                                     </button>
                                 }
@@ -1231,7 +1236,7 @@
                                     <button type="button"
                                             class="@($"w-5 h-5 rounded-full border hover:scale-110 transition-transform {(colorActive ? "border-pb-accent" : "border-pb-border")}")"
                                             style="@($"background-color:{c}")"
-                                            @onclick="@(() => ChangeFreeTextStyleAsync(ftCurrentSize, c))"></button>
+                                            @onclick="@(() => SetFreeTextStyle(ftCurrentSize, c))"></button>
                                 }
                             </div>
                             <div class="mt-2 flex gap-2 justify-end">
@@ -1508,6 +1513,12 @@
     // so entstehen keine leeren Geister-Annotationen und (auf signierten
     // Dokumenten) flackert das Signatur-Badge beim bloßen Platzieren nicht.
     private (double X, double Y, int Page)? _pendingFreeTextPosition;
+    // F-11: Pending-Stil des offenen Editors. Stil-Buttons ändern nur diesen State
+    // (+ Live-Vorschau), persistiert wird EINMAL beim Speichern — nicht mehr ein
+    // Storage-Write pro Swatch-Klick. Beim Öffnen aus der Annotation initialisiert,
+    // beim Platzieren mit den Defaults.
+    private double _editingFreeTextFontSize = FreeTextAnnotation.DefaultFontSize;
+    private string _editingFreeTextColor = FreeTextAnnotation.DefaultColor;
     // Ein Freitext-Editor ist offen, wenn ein bestehender Text editiert wird
     // ODER ein neuer (Pending-)Text platziert, aber noch nicht gespeichert ist.
     private bool IsFreeTextEditorOpen => _editingFreeText is not null || _pendingFreeTextPosition is not null;
@@ -2980,6 +2991,9 @@
             _pendingFreeTextPosition = (fraction.X, fraction.Y, _currentPage);
             _editingFreeText = null;
             _editingFreeTextContent = string.Empty;
+            // F-11: Pending-Stil auf die Defaults setzen (neuer Text).
+            _editingFreeTextFontSize = FreeTextAnnotation.DefaultFontSize;
+            _editingFreeTextColor = FreeTextAnnotation.DefaultColor;
             _annotationMode = AnnotationMode.Select;
             return;
         }
@@ -3008,6 +3022,9 @@
         _pendingFreeTextPosition = null;
         _editingFreeText = annotation;
         _editingFreeTextContent = FreeTextAnnotation.GetText(annotation);
+        // F-11: Pending-Stil aus der Annotation initialisieren.
+        _editingFreeTextFontSize = FreeTextAnnotation.GetFontSize(annotation);
+        _editingFreeTextColor = FreeTextAnnotation.GetColor(annotation);
     }
 
     private async Task SaveEditingFreeTextAsync()
@@ -3029,7 +3046,8 @@
             }
 
             var newAnnotation = FreeTextAnnotation.Create(
-                _currentPdfId.Value, pending.Value.Page, pending.Value.X, pending.Value.Y, newText);
+                _currentPdfId.Value, pending.Value.Page, pending.Value.X, pending.Value.Y,
+                newText, _editingFreeTextFontSize, _editingFreeTextColor);
             var created = await Annotations.CreateAsync(newAnnotation, CancellationToken.None);
             _annotations = _annotations.Append(created).ToList();
             await RecomputeSignatureStatusesAsync();
@@ -3046,9 +3064,15 @@
             return;
         }
 
-        if (FreeTextAnnotation.GetText(current) != newText)
+        // F-11: Text UND Stil zusammen prüfen/persistieren (ein Write, ein Bump).
+        var textChanged = FreeTextAnnotation.GetText(current) != newText;
+        var styleChanged =
+            Math.Abs(FreeTextAnnotation.GetFontSize(current) - _editingFreeTextFontSize) > 0.0005
+            || !string.Equals(FreeTextAnnotation.GetColor(current), _editingFreeTextColor, StringComparison.OrdinalIgnoreCase);
+        if (textChanged || styleChanged)
         {
-            var updated = FreeTextAnnotation.WithText(current, newText);
+            var updated = FreeTextAnnotation.WithTextAndStyle(
+                current, newText, _editingFreeTextFontSize, _editingFreeTextColor);
             var saved = await Annotations.UpdateAsync(updated, CancellationToken.None);
             _annotations = _annotations
                 .Select(a => a.Id.Value == saved.Id.Value ? saved : a)
@@ -3089,16 +3113,14 @@
         _editingFreeTextContent = string.Empty;
     }
 
-    private async Task ChangeFreeTextStyleAsync(double fontSize, string color)
+    private void SetFreeTextStyle(double fontSize, string color)
     {
-        if (_editingFreeText is null) return;
-        var updated = FreeTextAnnotation.WithStyle(_editingFreeText, fontSize, color);
-        var saved = await Annotations.UpdateAsync(updated, CancellationToken.None);
-        _annotations = _annotations
-            .Select(a => a.Id.Value == saved.Id.Value ? saved : a)
-            .ToList();
-        _editingFreeText = saved;
-        await RecomputeSignatureStatusesAsync();
+        // F-11: Nur den Pending-Stil im Editor-State ändern (Live-Vorschau über das
+        // gerenderte Div des bearbeiteten Freitexts). KEIN Storage-Write und kein
+        // Signatur-Recompute pro Swatch-Klick — persistiert wird einmal beim
+        // Speichern (SaveEditingFreeTextAsync). Funktioniert für Pending & Bestand.
+        _editingFreeTextFontSize = fontSize;
+        _editingFreeTextColor = color;
     }
 
     private async Task HandleFreeTextMouseDownAsync(MouseEventArgs e, Annotation freeText)

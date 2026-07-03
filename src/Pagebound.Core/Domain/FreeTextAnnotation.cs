@@ -60,6 +60,16 @@ public static class FreeTextAnnotation
         return existing with { UpdatedAt = DateTimeOffset.UtcNow, Payload = payload };
     }
 
+    /// <summary>
+    /// Setzt Text UND Stil in einem Rutsch (ein Payload-Build, ein UpdatedAt-Bump).
+    /// Vorbild für den Editor-Save, der beides zusammen persistiert (F-11).
+    /// </summary>
+    public static Annotation WithTextAndStyle(Annotation existing, string newText, double fontSize, string color)
+    {
+        var payload = BuildPayload(GetX(existing), GetY(existing), newText, fontSize, color);
+        return existing with { UpdatedAt = DateTimeOffset.UtcNow, Payload = payload };
+    }
+
     public static double GetX(Annotation annotation) => GetDouble(annotation.Payload, PayloadKeyX);
     public static double GetY(Annotation annotation) => GetDouble(annotation.Payload, PayloadKeyY);
     public static string GetText(Annotation annotation) => GetString(annotation.Payload, PayloadKeyText);

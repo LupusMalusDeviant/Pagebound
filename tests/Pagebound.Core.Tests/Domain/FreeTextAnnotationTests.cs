@@ -86,6 +86,20 @@ public sealed class FreeTextAnnotationTests
     }
 
     [Fact]
+    public void WithTextAndStyle_UpdatesTextFontSizeAndColorKeepsPosition()
+    {
+        var annotation = MakeAnnotation(FreeTextAnnotation.Create(TestPdf, 1, 0.1, 0.2, "old", 0.02, "#000000"));
+
+        var updated = FreeTextAnnotation.WithTextAndStyle(annotation, "new", 0.03, "#dc2626");
+
+        FreeTextAnnotation.GetText(updated).ShouldBe("new");
+        FreeTextAnnotation.GetFontSize(updated).ShouldBe(0.03);
+        FreeTextAnnotation.GetColor(updated).ShouldBe("#dc2626");
+        FreeTextAnnotation.GetX(updated).ShouldBe(0.1);
+        FreeTextAnnotation.GetY(updated).ShouldBe(0.2);
+    }
+
+    [Fact]
     public void GetFontSize_MissingOrZero_ReturnsDefault()
     {
         var annotation = new Annotation(
