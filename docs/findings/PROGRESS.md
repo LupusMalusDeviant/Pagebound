@@ -22,7 +22,7 @@ Status: `[ ]` offen · `[x]` erledigt (mit Commit-Hash) · `[!]` blockiert (mit 
 - [x] F-14 · Datum-Format aus i18n ungeprüft als Formatstring — `fa33e42`
 
 ## Runde 3 — UX/Effizienz (F-10 NACH F-02/F-04)
-- [ ] F-10 · Leere Annotation vor dem Tippen persistiert
+- [x] F-10 · Leere Annotation vor dem Tippen persistiert — `0162595`
 - [ ] F-11 · Stil-Änderung schreibt bei jedem Swatch-Klick
 - [ ] F-13 · Drag-Bridge: Listener-Attach-Race bei schnellem Klick
 - [ ] F-21 · Seitennavigation als Sticky-Bottom-Bar
@@ -46,3 +46,8 @@ Status: `[ ]` offen · `[x]` erledigt (mit Commit-Hash) · `[!]` blockiert (mit 
   folgt dem Code (eigenes try/catch um den Fallback + korrigierter Filter).
 - Bundled `wwwroot/js/*.js` sind gitignored (Build-Artefakte) → nur `.ts`
   committen, `npm run build:js` erzeugt die Bundles lokal.
+- F-10: Verifiziert per Build + Tests + Logik-/Null-Safety-Analyse aller
+  State-Pfade (Place/Save/Cancel/Delete/Moduswechsel/Background-Click/
+  Editor-Wechsel). Kein Browser-Test des Storage-Write-Verhaltens (bräuchte
+  IndexedDB-Inspektion). Bekannte, gewollte Zwischenstufe: Stil-Buttons wirken
+  auf einen noch-nicht-gespeicherten Freitext erst nach F-11 (Pending-Style).
