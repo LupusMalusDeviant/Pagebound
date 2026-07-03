@@ -17,7 +17,7 @@ Status: `[ ]` offen · `[x]` erledigt (mit Commit-Hash) · `[!]` blockiert (mit 
 - [x] F-06 · Eingebrannter Text verschwindet an Seiten-Unterkante — `1d824a5`
 
 ## Runde 2 — Robustheit + Export
-- [ ] F-08 · Doppelklick platziert doppelt (Reentrancy-Guard)
+- [x] F-08 · Doppelklick platziert doppelt (Reentrancy-Guard) — `113d6a0`
 - [ ] F-09 · Markdown-Export lässt Freitexte weg
 - [ ] F-14 · Datum-Format aus i18n ungeprüft als Formatstring
 
