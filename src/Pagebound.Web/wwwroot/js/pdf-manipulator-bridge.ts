@@ -1483,16 +1483,34 @@ export async function flattenAnnotations(
       const rawLines = (it.text ?? "").split("\n");
       const x = clampNum((it.x ?? 0) * pw, 0, pw);
       const yTopPt = (it.y ?? 0) * ph;
-      rawLines.forEach((ln, i) => {
+      rawLines.forEach((rawLine, i) => {
+        // Tabs sind nicht WinAnsi-kodierbar → durch Space ersetzen, damit die
+        // Zeile normal gezeichnet wird statt in den Fallback zu fallen.
+        const ln = rawLine.replace(/\t/g, " ");
         if (!ln.trim()) return;
         const y = ph - yTopPt - size - i * lineH;
         try {
           page.drawText(ln, { x, y, size, font, color });
         } catch {
-          // Helvetica (WinAnsi) kann das Zeichen nicht encoden → Fallback auf
-          // Latin-1-Teilmenge, damit der Rest der Zeile erhalten bleibt.
-          const safe = Array.from(ln).filter((c) => c.charCodeAt(0) <= 0xff).join("");
-          if (safe) page.drawText(safe, { x, y, size, font, color });
+          // Helvetica (WinAnsi) kann ein Zeichen nicht encoden → Fallback auf
+          // die WinAnsi-kodierbare Teilmenge: Steuerzeichen (< 0x20) und den
+          // C1-Bereich (0x7f–0x9f, dort u.a. 0x81/0x8d/0x8f/0x90/0x9d nicht
+          // kodierbar) sowie alles > 0xff entfernen. Der zweite drawText steht
+          // in eigenem try/catch (wie der signature-Zweig) — sonst reißt ein
+          // weiterhin nicht-kodierbares Zeichen das gesamte Flatten ab.
+          const safe = Array.from(ln)
+            .filter((c) => {
+              const code = c.charCodeAt(0);
+              return code >= 0x20 && code <= 0xff && !(code >= 0x7f && code <= 0x9f);
+            })
+            .join("");
+          if (safe) {
+            try {
+              page.drawText(safe, { x, y, size, font, color });
+            } catch (e) {
+              console.warn("[pagebound] flatten: Textzeile nicht kodierbar, übersprungen:", e);
+            }
+          }
         }
       });
     } else if (it.kind === "signature" && it.imageBase64) {
