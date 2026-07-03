@@ -35,7 +35,7 @@ Status: `[ ]` offen · `[x]` erledigt (mit Commit-Hash) · `[!]` blockiert (mit 
 ## Runde 5 — Refactorings/Doku
 - [x] F-15 · Payload-Helper 6-fach dupliziert — `89630c6`
 - [x] F-16 · Freitext-Editor-Duplikate zusammenführen — `0938a2c`
-- [ ] F-17 · Freitext-Editor als Komponente extrahieren
+- [x] F-17 · Freitext-Editor als Komponente extrahieren — `acda9da` (Browser-verifiziert)
 - [ ] F-18 · `npm run typecheck` ist rot
 - [ ] F-19 · ADR-Verweise ohne ADR-Dateien
 
@@ -46,6 +46,11 @@ Status: `[ ]` offen · `[x]` erledigt (mit Commit-Hash) · `[!]` blockiert (mit 
   folgt dem Code (eigenes try/catch um den Fallback + korrigierter Filter).
 - Bundled `wwwroot/js/*.js` sind gitignored (Build-Artefakte) → nur `.ts`
   committen, `npm run build:js` erzeugt die Bundles lokal.
+- F-17: Statt des vorgeschlagenen `Annotation`-Parameters übergibt der Parent die
+  berechnete Platzierung (Left/Top/Transform/Page), weil der Pending-Fall keine
+  Annotation hat. Content-Sync via plain `Action<string>` (kein EventCallback) →
+  Tastenanschlag re-rendert nur die Komponente, Parent-State bleibt aktuell.
+  Browser-verifiziert (Create/Edit/Style).
 - F-15: Vorschlags-Signatur war `GetDouble(payload, key)`; ShapeAnnotation nutzte
   aber `GetDouble(payload, key, fallback)`. Helper daher als Superset mit
   optionalem `double fallback = 0` implementiert (deckt beide Aufrufmuster ab).
