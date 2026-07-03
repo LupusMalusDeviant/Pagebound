@@ -7,7 +7,9 @@ public enum ConversionFormat
     Jpg,
     Text,
     Html,
-    Csv
+    Csv,
+    // Nur anhängen (nicht einsortieren): Word-Export als Best-Effort-Textfluss.
+    Docx
 }
 
 /// <summary>

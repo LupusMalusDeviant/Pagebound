@@ -6,8 +6,8 @@ Status je Auftrag: `[ ]` offen · `[x]` erledigt (Commit-Hash) · `[!]` blockier
 Reihenfolge = „Empfohlene Reihenfolge" im Plan.
 
 ## Runde 1 — PDF→DOCX (Pflicht)
-- [ ] **E-02** OOXML-Builder `convertToDocx` (pdfjs-bridge.ts)
-- [ ] **E-01** `ConversionFormat.Docx` + Converter-Dispatch
+- [x] **E-02** OOXML-Builder `convertToDocx` (pdfjs-bridge.ts) — `174b206`
+- [x] **E-01** `ConversionFormat.Docx` + Converter-Dispatch — Build+184 Tests grün
 - [ ] **E-03** UI-Option + i18n (de/en)
 - [ ] **E-04** Blueprint/Doku DOCX (konvertierung.md)
 

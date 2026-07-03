@@ -63,6 +63,15 @@ public sealed class JsPdfConverter : IPdfConverter
                     .ConfigureAwait(false);
                 return new ConversionResult(zip, "zip", "application/zip");
             }
+            case ConversionFormat.Docx:
+            {
+                // Best-Effort Word-Export: reiner Textfluss (Items->Zeilen->Absaetze),
+                // von Hand als OOXML-ZIP gebaut. Ergebnis sind fertige .docx-Bytes.
+                var docx = await _js.InvokeAsync<byte[]>($"{Module}.convertToDocx", cancellationToken, pdf)
+                    .ConfigureAwait(false);
+                return new ConversionResult(docx, "docx",
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+            }
             default:
                 throw new ArgumentOutOfRangeException(nameof(format), format, "Unbekanntes Konvertierungsformat.");
         }
