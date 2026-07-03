@@ -16,11 +16,12 @@ Pagebound ist ein datenschutzfreundlicher, quelloffener Adobe-Reader-Ersatz als 
 | Annotationen | Highlights, Sticky Notes (Markdown), Ink/Formen, Freitext-Werkzeug + Datum-Stempel; IndexedDB + Sidecar | [annotationen.md](./annotationen.md) |
 | Signatur & Integrität | PNG-Unterschrift mit Signer-Metadaten und SHA-256-Integritäts-Hash samt Status-Badge | [signatur-integritaet.md](./signatur-integritaet.md) |
 | Schwärzung (Redaktion) | Destruktive Schwärzung per Seiten-Rasterung, transient, optionaler Audit-Report | [redaktion.md](./redaktion.md) |
+| Text bearbeiten | Inline-Textbearbeitung im Reader (Cover + Redraw), transient, Export als `.edited.pdf` | [text-bearbeiten.md](./text-bearbeiten.md) |
 | Split-View & Vergleich | Zwei PDFs nebeneinander plus Text-Diff mit strukturierter Ergebnisansicht | [split-view-vergleich.md](./split-view-vergleich.md) |
 | PDF-Werkzeuge | Merge, Split, Reorder, Rotate, Compress, AES-256-Encrypt, Stamp, Metadaten — alles via pdf-lib im Browser | [pdf-werkzeuge.md](./pdf-werkzeuge.md) |
 | Formulare (AcroForms) | Felder lesen/füllen/flatten plus Form-Builder zum Platzieren neuer Felder | [formulare.md](./formulare.md) |
 | Stapelverarbeitung | Regeln (Compress/Encrypt/Export) auf mehrere PDFs, ZIP-Ergebnis, Regeln in IndexedDB | [batch.md](./batch.md) |
-| Konvertierung & Standards | PDF→PNG/JPG/Text/HTML/CSV, Bilder→PDF, Best-Effort PDF/A-2b und PDF/UA-1 | [konvertierung.md](./konvertierung.md) |
+| Konvertierung & Standards | PDF→PNG/JPG/Text/HTML/CSV/DOCX, Bilder→PDF, Best-Effort PDF/A-2b und PDF/UA-1 | [konvertierung.md](./konvertierung.md) |
 | OCR | Self-hosted Tesseract.js (eng+deu, Web Worker, kein CDN) mit selektierbarem OCR-Text-Layer | [ocr.md](./ocr.md) |
 | Library & Workspace | PDF-Bibliothek mit Hash-Identität, Tags, Suche, Sidecar-JSON, optionaler Workspace-Ordner (FSA-API) | [library-workspace.md](./library-workspace.md) |
 | Markdown-Export | Highlights + Notizen als Obsidian-kompatibles Markdown mit YAML-Frontmatter und Wikilinks | [markdown-export.md](./markdown-export.md) |
@@ -37,6 +38,7 @@ graph LR
     Anno[Annotationen]
     Sig[Signatur & Integrität]
     Redakt[Redaktion]
+    Edit[Text bearbeiten]
     Split[Split-View & Vergleich]
     Tools[PDF-Werkzeuge]
     Forms[Formulare]
@@ -58,6 +60,8 @@ graph LR
     Sig --> Tools
     Redakt --> Reader
     Redakt --> Tools
+    Edit --> Reader
+    Edit --> Tools
     Split --> Reader
     Tools --> Reader
     Forms --> Tools
