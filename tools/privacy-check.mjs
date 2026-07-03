@@ -35,6 +35,7 @@ const ALLOWED_HOSTS = new Set([
   'purl.org',            // Dublin-Core-Namespace (XMP)
   'www.aiim.org',        // PDF/A- & PDF/UA-Namespaces
   'www.color.org',       // ICC-Profil-RegistryName (PDF/A)
+  'schemas.openxmlformats.org', // OOXML-Namespaces (DOCX/XLSX/PPTX xmlns) — reine Bezeichner
   'github.com',          // Projekt-Repo-Link + Quellen-Kommentare
 ]);
 

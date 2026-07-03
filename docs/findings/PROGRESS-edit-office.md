@@ -9,7 +9,9 @@ Reihenfolge = „Empfohlene Reihenfolge" im Plan.
 - [x] **E-02** OOXML-Builder `convertToDocx` (pdfjs-bridge.ts) — `174b206`
 - [x] **E-01** `ConversionFormat.Docx` + Converter-Dispatch — `45a9b6a`
 - [x] **E-03** UI-Option + i18n (de/en) — end-to-end im Preview verifiziert: echte `convertToDocx` liefert gültiges .docx (ZIP+PK, 5 OOXML-Teile, alle XML wohlgeformt/DOMParser, Text+Seitenumbruch korrekt). Dropdown-Option compile-geprüft (Muster der 5 Geschwister); Tools-Panel liegt hinter Reader-Navigation, daher nicht click-getestet.
-- [ ] **E-04** Blueprint/Doku DOCX (konvertierung.md)
+- [x] **E-04** Blueprint/Doku DOCX (konvertierung.md) + privacy-check: OOXML-Namespace-Host allowlisted (XML-Bezeichner, kein Request)
+
+**Runde 1 (PDF→DOCX) abgeschlossen.**
 
 ## Runde 2 — Inline-Edit „Text bearbeiten" (Pflicht)
 - [ ] **E-10** Bridge `applyTextEdits` (Cover + Redraw)
