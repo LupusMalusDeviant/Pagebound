@@ -2941,10 +2941,14 @@
     // List-Mutations-Helper (F-16): ersetzt bzw. entfernt eine Annotation in
     // _annotations. Lösen das zuvor 6-/5-fach duplizierte Select-/Where-Idiom ab.
     private void ReplaceAnnotation(Annotation saved) =>
-        ReplaceAnnotation(saved);
+        _annotations = _annotations
+            .Select(a => a.Id.Value == saved.Id.Value ? saved : a)
+            .ToList();
 
     private void RemoveAnnotation(AnnotationId id) =>
-        RemoveAnnotation(id);
+        _annotations = _annotations
+            .Where(a => a.Id.Value != id.Value)
+            .ToList();
 
     private async Task DeleteEditingDrawingAsync()
     {
