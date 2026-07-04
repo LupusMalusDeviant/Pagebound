@@ -2,7 +2,7 @@
 
 ## Zweck
 
-Kern-Anzeigefunktion von Pagebound: PDFs vollständig im Browser rendern (PDF.js via JS-Interop), ohne Server-Roundtrip. Umfasst Zoom, Volltextsuche, Dokument-Outline (Lesezeichen), Seiten-Thumbnails, Nachtmodus und fortlaufende (kontinuierliche) Seitenansicht. Der Renderer ist hinter `IPdfRenderer` abstrahiert, sodass die PDF.js-Implementierung später (z. B. für eine MAUI-Variante) durch eine native Implementierung ersetzt werden kann. Erfüllt laut Interface-Doku FA-001, FA-003 bis FA-008.
+Kern-Anzeigefunktion von Pagebound: PDFs vollständig im Browser rendern (PDF.js via JS-Interop), ohne Server-Roundtrip. Umfasst Zoom, Volltextsuche, Dokument-Outline (Lesezeichen), Seiten-Thumbnails, Nachtmodus, fortlaufende (kontinuierliche) Seitenansicht und **Vorlesen** (TTS des Seiten-Texts über die Web Speech API / `tts-bridge.ts`, lokale Stimmen, kein Netz). Der Renderer ist hinter `IPdfRenderer` abstrahiert, sodass die PDF.js-Implementierung später (z. B. für eine MAUI-Variante) durch eine native Implementierung ersetzt werden kann. Erfüllt laut Interface-Doku FA-001, FA-003 bis FA-008.
 
 ## Dateien
 

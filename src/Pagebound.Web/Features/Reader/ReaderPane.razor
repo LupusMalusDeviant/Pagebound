@@ -278,6 +278,7 @@
                         @L.T("reader.form.toggle") <span class="ml-1 text-xs text-pb-fg-muted">(@_formFields.Count)</span>
                     </button>
                 }
+                <button type="button" class="@($"pb-menuitem {(_ttsActive ? "is-on" : "")}")" title="@L.T("reader.tts.hint")" @onclick="StartReadingAsync">🔊 @L.T("reader.tts.read")</button>
             </ToolbarMenu>
 
             <ToolbarMenu Label="@L.T("reader.menu.export")" Title="@L.T("reader.menu.export")">
@@ -397,6 +398,18 @@
                         @label
                     </button>
                 }
+            </div>
+        }
+        @if (_ttsActive)
+        {
+            <div class="max-w-4xl mx-auto mt-1 flex flex-wrap items-center gap-2 text-xs">
+                <span class="text-pb-fg-muted">🔊 @L.T("reader.tts.active")</span>
+                <button type="button" class="rounded border border-pb-border px-2 py-0.5 text-pb-fg-muted hover:text-pb-fg" @onclick="TtsToggleAsync">
+                    @(_ttsPaused ? L.T("reader.tts.resume") : L.T("reader.tts.pause"))
+                </button>
+                <button type="button" class="rounded border border-pb-border px-2 py-0.5 text-pb-fg-muted hover:text-pb-fg" @onclick="TtsStopAsync">
+                    @L.T("reader.tts.stop")
+                </button>
             </div>
         }
 
@@ -1623,6 +1636,57 @@
     // unangetastet. Fortlaufend ist read-only (Annotieren/Schwärzen im Einzelmodus).
     private const string NightFilterStyle = "filter: invert(0.92) hue-rotate(180deg)";
     private bool _nightMode;
+
+    // Vorlesen (TTS, Web Speech API — lokal, keine Dependency). Liest den Text
+    // der aktuellen Seite; Steuerleiste erscheint während der Wiedergabe.
+    private bool _ttsActive;
+    private bool _ttsPaused;
+
+    private async Task StartReadingAsync()
+    {
+        if (_handle is null) return;
+        try
+        {
+            var text = await JS.InvokeAsync<string>("pageboundPdf.pageText", _handle.Id, _currentPage).ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(text)) { _ttsActive = false; return; }
+            var ok = await JS.InvokeAsync<bool>("pageboundTts.speak", text, 1.0, null).ConfigureAwait(false);
+            _ttsActive = ok;
+            _ttsPaused = false;
+        }
+        catch
+        {
+            _ttsActive = false;
+        }
+    }
+
+    private async Task TtsToggleAsync()
+    {
+        if (_ttsPaused)
+        {
+            await JS.InvokeVoidAsync("pageboundTts.resume").ConfigureAwait(false);
+            _ttsPaused = false;
+        }
+        else
+        {
+            await JS.InvokeVoidAsync("pageboundTts.pause").ConfigureAwait(false);
+            _ttsPaused = true;
+        }
+    }
+
+    private async Task TtsStopAsync()
+    {
+        await JS.InvokeVoidAsync("pageboundTts.cancel").ConfigureAwait(false);
+        _ttsActive = false;
+        _ttsPaused = false;
+    }
+
+    private void StopTts()
+    {
+        if (!_ttsActive) return;
+        _ = JS.InvokeVoidAsync("pageboundTts.cancel");
+        _ttsActive = false;
+        _ttsPaused = false;
+    }
     private bool _continuous;
     private bool _continuousRendering;
     private int _continuousRenderedCount;
@@ -1774,6 +1838,7 @@
         _redactions.Clear();
         _edits.Clear();
         _pendingEdit = null;
+        StopTts();
         _continuous = false;
         _continuousPages.Clear();
         _continuousRenderedCount = 0;
@@ -2020,6 +2085,7 @@
         _redactions.Clear();
         _edits.Clear();
         _pendingEdit = null;
+        StopTts();
         _continuous = false;
         _continuousPages.Clear();
         _continuousRenderedCount = 0;

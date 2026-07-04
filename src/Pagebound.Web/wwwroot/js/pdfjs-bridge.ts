@@ -311,6 +311,13 @@ export async function extractText(
   });
 }
 
+/** Reiner Text einer Seite (Wort-Spacing via buildPageText) — z. B. fürs Vorlesen. */
+export async function pageText(handleId: string, pageNumber: number): Promise<string> {
+  const doc = requireDoc(handleId);
+  const { pageText } = await readPageText(doc, pageNumber);
+  return pageText;
+}
+
 // ============================================================================
 // Inline-Edit-Unterstützung: nächstliegende Textzeile an einer Klickposition
 // ----------------------------------------------------------------------------

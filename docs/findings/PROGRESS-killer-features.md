@@ -19,9 +19,11 @@ Plan: [`PLAN-2026-07-04-killer-features.md`](./PLAN-2026-07-04-killer-features.m
 **Runde 2 (Muster-Schwärzung) abgeschlossen.**
 
 ## Runde 3 — Vorlesen (TTS)
-- [ ] **K-20** tts-bridge.ts (speak/pause/resume/cancel/voices)
-- [ ] **K-21** Reader-UI: Vorlesen (Ansicht-Menü + Steuerung)
-- [ ] **K-22** i18n + Blueprint
+- [x] **K-20** tts-bridge.ts (speak/pause/resume/cancel/voices) — im Preview verifiziert (7 Funktionen, isSupported, 3 Stimmen, speak/cancel ok)
+- [x] **K-21** Reader-UI: Vorlesen (Ansicht-Menü + Steuerung) — Build grün (Reader-Klicktest im User-Browser)
+- [x] **K-22** i18n + Blueprint
+
+**Runde 3 (Vorlesen/TTS) abgeschlossen.**
 
 ## Runde 4 — Signatur zeichnen
 - [ ] **K-30** SignaturePad-Komponente (Canvas → PNG)

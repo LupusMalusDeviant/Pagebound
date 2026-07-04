@@ -107,6 +107,12 @@ const builds = [
     globalName: "pageboundSign",
     entryPoints: [resolve(__dirname, "wwwroot/js/sign-bridge.ts")],
     outfile: resolve(__dirname, "wwwroot/js/sign-bridge.js")
+  },
+  {
+    ...sharedOptions,
+    globalName: "pageboundTts",
+    entryPoints: [resolve(__dirname, "wwwroot/js/tts-bridge.ts")],
+    outfile: resolve(__dirname, "wwwroot/js/tts-bridge.js")
   }
 ];
 
