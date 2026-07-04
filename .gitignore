@@ -93,6 +93,8 @@ src/Pagebound.Web/wwwroot/js/designs-bridge.js
 src/Pagebound.Web/wwwroot/js/designs-bridge.js.map
 src/Pagebound.Web/wwwroot/js/sign-bridge.js
 src/Pagebound.Web/wwwroot/js/sign-bridge.js.map
+src/Pagebound.Web/wwwroot/js/tts-bridge.js
+src/Pagebound.Web/wwwroot/js/tts-bridge.js.map
 src/Pagebound.Web/wwwroot/js/pdf.worker.min.mjs
 
 # --- Playwright ------------------------------------------------------------
