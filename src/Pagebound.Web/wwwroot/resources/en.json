@@ -773,6 +773,7 @@
   "editor.props.mind.outdent": "Outdent",
   "editor.props.mind.indent": "Indent",
   "editor.props.mind.delete": "Delete node",
+  "editor.mind.directHint": "Directly on the map: double-click a node to rename it; the selected node shows ＋ (add child) and × (delete). Zoom/pan and collapsed branches are kept while editing.",
   "editor.type.columns": "Columns",
   "editor.type.qrcode": "QR code",
   "editor.type.mindmap": "Mind map",

@@ -773,6 +773,7 @@
   "editor.props.mind.outdent": "Ausrücken",
   "editor.props.mind.indent": "Einrücken",
   "editor.props.mind.delete": "Knoten löschen",
+  "editor.mind.directHint": "Direkt in der Mindmap: Doppelklick auf einen Knoten benennt ihn um; am gewählten Knoten erscheinen ＋ (Unterknoten) und × (löschen). Zoom/Pan und zugeklappte Äste bleiben beim Bearbeiten erhalten.",
   "editor.type.columns": "Spalten",
   "editor.type.qrcode": "QR-Code",
   "editor.type.mindmap": "Mindmap",

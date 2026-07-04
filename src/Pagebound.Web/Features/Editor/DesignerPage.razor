@@ -194,7 +194,7 @@
         </div>
 
         <label class="mb-1 block text-xs font-medium text-pb-fg-muted">@L.T("editor.template.label")</label>
-        <select class="mb-3 w-full rounded border border-pb-border bg-pb-bg px-2 py-1" @onchange="ApplyTemplate">
+        <select class="mb-3 w-full rounded border border-pb-border bg-pb-bg px-2 py-1" value="@_templateSelect" @onchange="ApplyTemplate">
             <option value="">@L.T("editor.template.choose")</option>
             <option value="@EditorTemplates.TemplateKind.Invoice">@L.T("editor.template.invoice")</option>
             <option value="@EditorTemplates.TemplateKind.Letter">@L.T("editor.template.letter")</option>
@@ -305,6 +305,7 @@
                         <button class="btn-side" disabled="@(!CanMindIndent(mindSel))" @onclick="MindIndentNode">@L.T("editor.props.mind.indent")</button>
                     </div>
                     <button class="btn-side w-full text-[#dc2626]" disabled="@(mindSel == _selected.Mind)" @onclick="MindDelete">@L.T("editor.props.mind.delete")</button>
+                    <p class="mt-1 text-[11px] leading-snug text-pb-fg-muted">@L.T("editor.mind.directHint")</p>
                 }
 
                 @if (_selected.Type is EditorBlockType.Columns)
@@ -989,6 +990,46 @@
         _mindNodeId = nodeId;
         StateHasChanged();
         return Task.CompletedTask;
+    }
+
+    /// <summary>Doppelklick-Umbenennen direkt am Knoten im Live-Widget.</summary>
+    [JSInvokable]
+    public async Task OnMindNodeRenamed(string blockId, string nodeId, string label)
+    {
+        if (!SelectMindNode(blockId, nodeId)) return;
+        await MindRename(label);
+        StateHasChanged();
+    }
+
+    /// <summary>„+"-Button am Knoten → Kindknoten anlegen.</summary>
+    [JSInvokable]
+    public async Task OnMindNodeAddChild(string blockId, string nodeId)
+    {
+        if (!SelectMindNode(blockId, nodeId)) return;
+        await MindAddChild();
+        StateHasChanged();
+    }
+
+    /// <summary>„×"-Button am Knoten → Knoten löschen (Wurzel bleibt).</summary>
+    [JSInvokable]
+    public async Task OnMindNodeDeleteNode(string blockId, string nodeId)
+    {
+        if (!SelectMindNode(blockId, nodeId)) return;
+        await MindDelete();
+        StateHasChanged();
+    }
+
+    /// <summary>Wählt Block + Knoten für die Direkt-am-Knoten-Callbacks; false, wenn nicht (mehr) vorhanden.</summary>
+    private bool SelectMindNode(string blockId, string nodeId)
+    {
+        var block = _doc.Pages.SelectMany(p => p.Blocks)
+            .FirstOrDefault(b => b.Id == blockId && b.Type == EditorBlockType.Mindmap);
+        if (block?.Mind is null || FindMindNode(block.Mind, nodeId) is null) return false;
+        _selectedPage = _doc.Pages.First(p => p.Blocks.Contains(block));
+        _selected = block;
+        _selectedOverlay = null;
+        _mindNodeId = nodeId;
+        return true;
     }
 
     /// <summary>Misst nach jedem Render, ob Seiteninhalt das Papierformat sprengt (würde im Druck abgeschnitten).</summary>
@@ -1751,6 +1792,7 @@
         _doc.Pages.Insert(at, page);
         _selectedPage = page;
         _selected = null;
+        _selectedOverlay = null;
     }
 
     private async Task DuplicatePage(EditorPage page)
@@ -1761,6 +1803,7 @@
         _doc.Pages.Insert(_doc.Pages.IndexOf(page) + 1, copy);
         _selectedPage = copy;
         _selected = null;
+        _selectedOverlay = null;
     }
 
     private async Task DeletePage(EditorPage page)
@@ -1770,7 +1813,10 @@
         PushUndo();
         var i = _doc.Pages.IndexOf(page);
         _doc.Pages.Remove(page);
+        // Selektion aufräumen, falls sie auf der gelöschten Seite lag (sonst editiert
+        // das Eigenschaften-Panel einen Block/ein Overlay, das nicht mehr sichtbar ist).
         if (_selected is not null && page.Blocks.Contains(_selected)) _selected = null;
+        if (_selectedOverlay is not null && page.Overlays.Contains(_selectedOverlay)) _selectedOverlay = null;
         _selectedPage = _doc.Pages[Math.Clamp(i, 0, _doc.Pages.Count - 1)];
     }
 
@@ -2308,17 +2354,27 @@
         _templateFile = null;
     }
 
+    // An das Vorlagen-<select> gebunden. Wird nach dem Anwenden auf "" zurückgesetzt,
+    // damit sich dieselbe Vorlage erneut auswählen lässt (sonst feuert @onchange nicht).
+    private string _templateSelect = "";
+
     private void ApplyTemplate(ChangeEventArgs e)
     {
         var raw = e.Value?.ToString();
-        if (string.IsNullOrEmpty(raw) || !Enum.TryParse<EditorTemplates.TemplateKind>(raw, out var kind)) return;
+        if (string.IsNullOrEmpty(raw) || !Enum.TryParse<EditorTemplates.TemplateKind>(raw, out var kind))
+        {
+            _templateSelect = "";
+            return;
+        }
         PushUndo();
         _doc = EditorTemplates.Create(kind).Migrate();
         _selected = null;
+        _selectedOverlay = null;
         _selectedPage = _doc.Pages.FirstOrDefault();
         _status = null;
         _pageSizeDirty = true;
         _templateFile = null;
+        _templateSelect = ""; // Auswahl zurücksetzen → erneutes Anwenden möglich
     }
 
     private async Task Save()
@@ -2386,6 +2442,7 @@
         await JS.InvokeVoidAsync("pageboundWysiwyg.setPageSize", EditorLayouts.For(_doc.Layout).CssPageSize);
         await JS.InvokeVoidAsync("pageboundWysiwyg.triggerPrint");
         _singleSlide = wasSingle;
+        StateHasChanged(); // Einzelfolien-Ansicht nach dem Druck wieder anzeigen
     }
 
     private bool DocumentHasInteractive()
@@ -2444,6 +2501,7 @@
         await DownloadTextAsync(SafeName(_doc.Title) + "-interaktiv.html", html, "text/html");
 
         _singleSlide = wasSingle;
+        StateHasChanged(); // Einzelfolien-Ansicht nach dem Export wiederherstellen
     }
 
     /// <summary>Ersetzt statische Mindmap-Bilder (&lt;img data-mind="…"&gt;) im
