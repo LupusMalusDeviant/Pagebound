@@ -18,6 +18,29 @@ DOMAIN="pagebound.app.lupusmalus.dev"
 
 echo "→ Pagebound-Deploy ($DOMAIN)"
 
+# 0) GHCR-Auth sicherstellen ---------------------------------------------------
+# Der Deploy läuft (via ServerWatch/SSH) meist als root — root hat aber KEINEN
+# GHCR-Login, nur der ubuntu-User (~/.docker/config.json). Ohne dessen Credentials
+# scheitert `docker compose pull` an den privaten Images mit
+# "error from registry: unauthorized" (und bei detachter Ausführung sogar STILL).
+# Ist DOCKER_CONFIG nicht schon vom Aufrufer gesetzt und hat der aktuelle User
+# keinen eigenen ghcr.io-Login, aber ubuntu schon, nutze ubuntus Docker-Config.
+# Überschreibbar per DOCKER_CONFIG bzw. GHCR_DOCKER_CONFIG.
+has_ghcr_auth() { [ -f "$1/config.json" ] && grep -q 'ghcr\.io' "$1/config.json" 2>/dev/null; }
+if [ -z "${DOCKER_CONFIG:-}" ]; then
+  FALLBACK_DOCKER_CONFIG="${GHCR_DOCKER_CONFIG:-/home/ubuntu/.docker}"
+  if has_ghcr_auth "${HOME:-/root}/.docker"; then
+    :  # eigener Login vorhanden → Docker-Default (~/.docker) reicht
+  elif has_ghcr_auth "$FALLBACK_DOCKER_CONFIG"; then
+    export DOCKER_CONFIG="$FALLBACK_DOCKER_CONFIG"
+    echo "→ GHCR-Auth: nutze $DOCKER_CONFIG (aktueller User hat keinen eigenen ghcr.io-Login)"
+  else
+    echo "⚠ Kein ghcr.io-Login gefunden (weder in ${HOME:-/root}/.docker noch $FALLBACK_DOCKER_CONFIG)."
+    echo "  Der Pull privater Images wird vermutlich mit 'unauthorized' scheitern."
+    echo "  Fix: als ubuntu 'docker login ghcr.io' ausführen oder DOCKER_CONFIG setzen."
+  fi
+fi
+
 # 1) Compose ablegen + Images ziehen + Container (neu)starten ------------------
 mkdir -p "$APP_DIR"
 # Liegt deploy.sh selbst schon im APP_DIR (SCRIPT_DIR == APP_DIR), ist Quelle ==

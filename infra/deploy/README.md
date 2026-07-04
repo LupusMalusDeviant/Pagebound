@@ -46,6 +46,17 @@ angehängt (vorher Backup, danach `caddy validate` → bei Fehler Rollback).
 | `PAGEBOUND_DIR` | `/home/ubuntu/pagebound` |
 | `CADDY_DIR` | `/home/ubuntu/lupusmalus-web` |
 | `CADDY_CONTAINER` | `lupusmalus-web-caddy-1` |
+| `GHCR_DOCKER_CONFIG` | `/home/ubuntu/.docker` |
+
+### GHCR-Auth (root vs. ubuntu)
+
+Der Deploy läuft (via ServerWatch/SSH) meist **als root** — root hat aber keinen
+GHCR-Login, nur der `ubuntu`-User (`~/.docker/config.json`). Ohne dessen Credentials
+scheitert `docker compose pull` an den privaten Images mit `unauthorized`. `deploy.sh`
+löst das jetzt selbst: Ist `DOCKER_CONFIG` nicht gesetzt und hat der aktuelle User
+keinen eigenen `ghcr.io`-Login, fällt es auf `GHCR_DOCKER_CONFIG` (Default
+`/home/ubuntu/.docker`) zurück. Ein manuelles `DOCKER_CONFIG=…`-Prefix ist damit
+nicht mehr nötig; ein gesetztes `DOCKER_CONFIG` hat weiterhin Vorrang.
 
 ## Sicherheits-Header
 
