@@ -326,6 +326,30 @@
                     <input type="checkbox" @bind="_redactAudit" />
                     @L.T("reader.redact.audit")
                 </label>
+                <span class="mx-1 h-3 w-px bg-pb-border"></span>
+                <span class="text-pb-fg-muted">@L.T("reader.redact.pattern.label")</span>
+                <select @bind="_redactPreset" class="rounded border border-pb-border bg-pb-bg px-1 py-0.5 text-xs text-pb-fg">
+                    <option value="email">@L.T("reader.redact.pattern.email")</option>
+                    <option value="phone">@L.T("reader.redact.pattern.phone")</option>
+                    <option value="iban">@L.T("reader.redact.pattern.iban")</option>
+                    <option value="creditcard">@L.T("reader.redact.pattern.creditcard")</option>
+                    <option value="custom">@L.T("reader.redact.pattern.custom")</option>
+                </select>
+                @if (_redactPreset == "custom")
+                {
+                    <input @bind="_redactCustomRegex" placeholder="@L.T("reader.redact.pattern.customPlaceholder")"
+                           class="w-40 rounded border border-pb-border bg-pb-bg px-1 py-0.5 text-xs text-pb-fg" />
+                }
+                <button type="button" class="rounded border border-pb-border px-2 py-0.5 text-pb-fg-muted hover:text-pb-fg disabled:opacity-40"
+                        disabled="@(_isFindingPattern || _handle is null)"
+                        title="@L.T("reader.redact.pattern.hint")"
+                        @onclick="FindPatternMatchesAsync">
+                    @(_isFindingPattern ? L.T("reader.redact.pattern.finding") : L.T("reader.redact.pattern.find"))
+                </button>
+                @if (_patternFindStatus is not null)
+                {
+                    <span class="text-pb-fg-muted">@_patternFindStatus</span>
+                }
             </div>
         }
         @if (_annotationMode == AnnotationMode.EditText || _edits.Count > 0)
@@ -1513,6 +1537,58 @@
     private readonly List<RedactionBox> _redactions = new();
     private bool _redactAudit = true;
     private bool _isRedacting;
+
+    // Muster-Schwärzung: Regex/Preset im Text-Layer finden → als Schwärzungsboxen
+    // markieren (bestehender Apply-Pfad = echte Entfernung via Raster). Findet nur
+    // extrahierbaren Text (kein OCR).
+    private string _redactPreset = "email";
+    private string _redactCustomRegex = string.Empty;
+    private bool _isFindingPattern;
+    private string? _patternFindStatus;
+
+    private static readonly Dictionary<string, string> RedactPresets = new()
+    {
+        ["email"] = @"[\w.+-]+@[\w-]+\.[\w.-]+",
+        ["phone"] = @"\+?\d[\d\s./()-]{6,}\d",
+        ["iban"] = @"[A-Z]{2}\d{2}[A-Z0-9]{10,30}",
+        ["creditcard"] = @"\d{4}[ -]?\d{4}[ -]?\d{4}[ -]?\d{1,7}",
+    };
+
+    private sealed record TextMatchDto(int Page, double X, double Y, double W, double H, string Text);
+
+    private async Task FindPatternMatchesAsync()
+    {
+        if (_handle is null || _isFindingPattern) return;
+        var source = _redactPreset == "custom"
+            ? _redactCustomRegex
+            : (RedactPresets.TryGetValue(_redactPreset, out var s) ? s : string.Empty);
+        if (string.IsNullOrWhiteSpace(source)) return;
+        _isFindingPattern = true;
+        _patternFindStatus = null;
+        try
+        {
+            var matches = await JS.InvokeAsync<TextMatchDto[]>("pageboundPdf.findTextMatches", _handle.Id, source, "")
+                .ConfigureAwait(false);
+            var added = 0;
+            foreach (var mt in matches ?? Array.Empty<TextMatchDto>())
+            {
+                // Duplikate (nahezu gleiche Box) überspringen.
+                if (_redactions.Any(r => r.Page == mt.Page
+                    && Math.Abs(r.X - mt.X) < 0.002 && Math.Abs(r.Y - mt.Y) < 0.002)) continue;
+                _redactions.Add(new RedactionBox(mt.Page, mt.X, mt.Y, mt.W, mt.H));
+                added++;
+            }
+            _patternFindStatus = L.T("reader.redact.pattern.found", new Dictionary<string, object> { ["count"] = added });
+        }
+        catch (Exception ex)
+        {
+            _patternFindStatus = L.T("reader.redact.pattern.error", new Dictionary<string, object> { ["message"] = ex.Message });
+        }
+        finally
+        {
+            _isFindingPattern = false;
+        }
+    }
 
     private IEnumerable<RedactionBox> RedactionsOnCurrentPage =>
         _redactions.Where(r => r.Page == _currentPage);

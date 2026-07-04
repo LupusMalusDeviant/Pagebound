@@ -410,6 +410,118 @@ export async function findTextBlockAt(
 }
 
 // ============================================================================
+// Muster-Schwärzung: Regex im Text-Layer finden → Bounding-Boxes (0..1)
+// ----------------------------------------------------------------------------
+// Für das „Schwärzen nach Muster" (E-Mail/Telefon/IBAN/… oder eigene Regex).
+// Findet NUR im extrahierbaren Text-Layer (kein OCR). Ein Treffer, der über
+// mehrere Zeilen geht, wird in eine Box je Zeile zerlegt (kein Riesenkasten).
+// ============================================================================
+export interface TextMatchDto {
+  page: number;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  text: string;
+}
+
+interface TextSpan { start: number; end: number; x: number; y: number; w: number; h: number; }
+
+/** Seiten-Text mit Zeichen-Offset→Item-Bounding-Box (px, oben-links). Kein
+ *  Whitespace-Collapse (sonst würden die Offsets verrutschen). */
+function buildPageTextWithSpans(items: PdfTextItem[], vpHeight: number): { text: string; spans: TextSpan[] } {
+  let text = "";
+  const spans: TextSpan[] = [];
+  for (let i = 0; i < items.length; i++) {
+    const cur = items[i];
+    const start = text.length;
+    text += cur.str;
+    spans.push({
+      start,
+      end: text.length,
+      x: cur.transform[4],
+      y: vpHeight - cur.transform[5] - cur.height * 0.8,
+      w: cur.width,
+      h: cur.height,
+    });
+    const next = items[i + 1];
+    if (!next) { if (cur.hasEOL && !text.endsWith(" ")) text += " "; continue; }
+    if (/\s$/.test(cur.str) || /^\s/.test(next.str)) continue;
+    if (cur.hasEOL) { text += " "; continue; }
+    if (Math.abs(cur.transform[5] - next.transform[5]) > 1) { text += " "; continue; }
+    const avgGlyph = cur.width / Math.max(cur.str.length, 1);
+    if (next.transform[4] - (cur.transform[4] + cur.width) > Math.max(1, avgGlyph * 0.5)) text += " ";
+  }
+  return { text, spans };
+}
+
+export async function findTextMatches(
+  handleId: string,
+  patternSource: string,
+  flags: string
+): Promise<TextMatchDto[]> {
+  if (!patternSource) return [];
+  let re: RegExp;
+  try {
+    const f = flags && flags.includes("g") ? flags : (flags ?? "") + "g";
+    re = new RegExp(patternSource, f);
+  } catch {
+    return [];
+  }
+  const doc = requireDoc(handleId);
+  const out: TextMatchDto[] = [];
+  const MAX = 5000;
+  for (let p = 1; p <= doc.numPages && out.length < MAX; p++) {
+    const page = await doc.getPage(p);
+    const content = await page.getTextContent();
+    const vp = page.getViewport({ scale: 1 });
+    const { text, spans } = buildPageTextWithSpans(content.items as unknown as PdfTextItem[], vp.height);
+    re.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(text)) !== null && out.length < MAX) {
+      if (m[0].length === 0) { re.lastIndex++; continue; } // Endlosschleife vermeiden
+      const mStart = m.index;
+      const mEnd = mStart + m[0].length;
+      // überlappende Spans einsammeln, nach Zeile (y) clustern → Box je Zeile
+      const hit = spans.filter((s) => s.end > mStart && s.start < mEnd);
+      if (hit.length === 0) continue;
+      // Pro Treffer-Span den vom Match überdeckten Teilbereich proportional zur
+      // Zeichenzahl schätzen (getTextContent liefert nur Item-, keine Glyphen-
+      // Positionen) → engere Box als das ganze Item. Näherung (uniforme
+      // Zeichenbreite), aber deutlich präziser bei Zeilen-als-ein-Item.
+      const sub = hit.map((s) => {
+        const chars = Math.max(1, s.end - s.start);
+        const a = (Math.max(mStart, s.start) - s.start) / chars;
+        const b = (Math.min(mEnd, s.end) - s.start) / chars;
+        return { x: s.x + s.w * a, y: s.y, w: s.w * (b - a), h: s.h };
+      });
+      const hs = sub.map((s) => s.h).filter((h) => h > 0).sort((a, b) => a - b);
+      const medH = hs.length ? hs[Math.floor(hs.length / 2)] : 10;
+      const tol = Math.max(2, medH * 0.6);
+      const byLine = [...sub].sort((a, b) => a.y - b.y);
+      let bucket: { x: number; y: number; w: number; h: number }[] = [];
+      let curY = byLine[0].y;
+      const flush = () => {
+        if (!bucket.length) return;
+        const x0 = Math.min(...bucket.map((s) => s.x));
+        const y0 = Math.min(...bucket.map((s) => s.y));
+        const x1 = Math.max(...bucket.map((s) => s.x + s.w));
+        const y1 = Math.max(...bucket.map((s) => s.y + s.h));
+        out.push({ page: p, x: x0 / vp.width, y: y0 / vp.height, w: (x1 - x0) / vp.width, h: (y1 - y0) / vp.height, text: m![0] });
+        bucket = [];
+      };
+      for (const s of byLine) {
+        if (bucket.length && Math.abs(s.y - curY) > tol) flush();
+        if (!bucket.length) curY = s.y;
+        bucket.push(s);
+      }
+      flush();
+    }
+  }
+  return out;
+}
+
+// ============================================================================
 // Konvertierungen (FA-030 PNG/JPG, FA-031 Text, FA-032 HTML)
 // ----------------------------------------------------------------------------
 // One-Shot-Konverter: nehmen die rohen PDF-Bytes, laden ein transientes

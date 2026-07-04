@@ -12,9 +12,11 @@ Plan: [`PLAN-2026-07-04-killer-features.md`](./PLAN-2026-07-04-killer-features.m
 **Runde 1 (Office-Export) abgeschlossen.**
 
 ## Runde 2 — Muster-Schwärzung
-- [ ] **K-10** findTextMatches Bridge (Regex → BBoxes)
-- [ ] **K-11** Reader-UI: Preset/Regex → Schwärzungen
-- [ ] **K-12** i18n + Blueprint
+- [x] **K-10** findTextMatches Bridge (Regex → BBoxes) — im Preview verifiziert (tighte Sub-Item-Box, Preset-Regex, Kein-Treffer=0)
+- [x] **K-11** Reader-UI: Preset/Regex → Schwärzungen — Build grün (Reader-Klicktest im User-Browser)
+- [x] **K-12** i18n + Blueprint
+
+**Runde 2 (Muster-Schwärzung) abgeschlossen.**
 
 ## Runde 3 — Vorlesen (TTS)
 - [ ] **K-20** tts-bridge.ts (speak/pause/resume/cancel/voices)

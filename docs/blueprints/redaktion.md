@@ -35,6 +35,10 @@ Destruktive Schwärzung sensibler Inhalte: markierte Bereiche werden nicht nur �
 3. Die Bridge (`redactPdf`) rendert jede betroffene Seite als Rasterbild, zeichnet die schwarzen Boxen darüber und ersetzt die Vektor-Seite im Ergebnis-PDF durch das Bild — der Originaltext unter der Box ist damit destruktiv entfernt.
 4. Das Ergebnis wird als neue Datei exportiert; optional wird ein Audit-Report (welche Seiten/Bereiche geschwärzt wurden) miterzeugt.
 
+## Muster-Schwärzung (Regex/Preset)
+
+Zusätzlich zum manuellen Aufziehen: `findTextMatches(handleId, regex, flags)` (pdfjs-bridge.ts) durchsucht den **extrahierbaren Text-Layer** (kein OCR) nach einem Muster — Presets für E-Mail/Telefon/IBAN/Kreditkarte oder eigene Regex. Treffer werden als 0..1-Bounding-Boxes zurückgegeben (Teilbereich innerhalb eines Text-Items proportional zur Zeichenzahl geschätzt, da `getTextContent` nur Item- statt Glyphen-Positionen liefert; mehrzeilige Treffer → eine Box je Zeile). Der Reader (`FindPatternMatchesAsync`) fügt sie als `RedactionBox` hinzu → gleicher Apply-Pfad (Raster = echte Entfernung). Grenze ehrlich: findet nur, was im Text-Layer steht (nicht in Scan-Bildern), und die Sub-Item-Box ist eine Näherung.
+
 ## Offene Fragen / TODOs
 
 - Rasterung erhöht die Dateigröße und entfernt die Textebene der betroffenen Seiten (Suche/Kopieren dort nicht mehr möglich) — bewusster Trade-off für garantierte Entfernung.
