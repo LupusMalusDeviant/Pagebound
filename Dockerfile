@@ -35,19 +35,12 @@ COPY src/ /src/
 # eingecheckt, sonst fehlen Manipulator/OCR/Files/Split/Workspace/Tweaks und die
 # App ist halb tot (kein Theme, keine PDF-Ops, keine OCR …).
 COPY --from=jsbuild /web/wwwroot/css/app.css                  /src/Pagebound.Web/wwwroot/css/app.css
-COPY --from=jsbuild /web/wwwroot/js/pdfjs-bridge.js           /src/Pagebound.Web/wwwroot/js/pdfjs-bridge.js
-COPY --from=jsbuild /web/wwwroot/js/shortcuts-bridge.js       /src/Pagebound.Web/wwwroot/js/shortcuts-bridge.js
-COPY --from=jsbuild /web/wwwroot/js/storage-bridge.js         /src/Pagebound.Web/wwwroot/js/storage-bridge.js
-COPY --from=jsbuild /web/wwwroot/js/pdf-manipulator-bridge.js /src/Pagebound.Web/wwwroot/js/pdf-manipulator-bridge.js
-COPY --from=jsbuild /web/wwwroot/js/ocr-bridge.js             /src/Pagebound.Web/wwwroot/js/ocr-bridge.js
-COPY --from=jsbuild /web/wwwroot/js/file-handle-bridge.js     /src/Pagebound.Web/wwwroot/js/file-handle-bridge.js
-COPY --from=jsbuild /web/wwwroot/js/split-bridge.js           /src/Pagebound.Web/wwwroot/js/split-bridge.js
-COPY --from=jsbuild /web/wwwroot/js/workspace-bridge.js       /src/Pagebound.Web/wwwroot/js/workspace-bridge.js
-COPY --from=jsbuild /web/wwwroot/js/tweaks-bridge.js          /src/Pagebound.Web/wwwroot/js/tweaks-bridge.js
-COPY --from=jsbuild /web/wwwroot/js/wysiwyg-editor.js         /src/Pagebound.Web/wwwroot/js/wysiwyg-editor.js
-COPY --from=jsbuild /web/wwwroot/js/mind-bridge.js            /src/Pagebound.Web/wwwroot/js/mind-bridge.js
-COPY --from=jsbuild /web/wwwroot/js/designs-bridge.js         /src/Pagebound.Web/wwwroot/js/designs-bridge.js
-COPY --from=jsbuild /web/wwwroot/js/sign-bridge.js            /src/Pagebound.Web/wwwroot/js/sign-bridge.js
+# ALLE gebauten JS-Bundles per Glob übernehmen statt einzeln aufzulisten — so
+# kann keine neu hinzugefügte Bridge mehr vergessen werden (tts-bridge.js fehlte
+# in der Einzelliste und wurde als text/html ausgeliefert). *.js erfasst die
+# gebündelten Bridges, nicht die .ts-Quellen oder .map-Dateien; die .mjs-Worker-
+# Datei matcht *.js nicht und wird separat kopiert.
+COPY --from=jsbuild /web/wwwroot/js/*.js                      /src/Pagebound.Web/wwwroot/js/
 COPY --from=jsbuild /web/wwwroot/js/pdf.worker.min.mjs        /src/Pagebound.Web/wwwroot/js/pdf.worker.min.mjs
 
 WORKDIR /src/Pagebound.Web
