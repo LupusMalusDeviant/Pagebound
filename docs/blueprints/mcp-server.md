@@ -2,7 +2,7 @@
 
 ## Zweck
 
-Eigenständiges Node.js-Paket (`pagebound-pdf-mcp-server`) unter `mcp/`, das die PDF-Operationen von Pagebound als MCP-Tools für LLM-Agents bereitstellt — lokal über stdio oder gehostet über Streamable HTTP (stateless, pro Request frischer Server + Transport). 25 registrierte Tools, u. a. Info/Textextraktion/Tabellen, Seiten-Manipulation (merge, split, extract, delete, rotate, reorder), Stempel/Wasserzeichen, AES-256-Verschlüsselung, AcroForm lesen/füllen/Felder anlegen, Text-Diff, Metadaten, PDF/A-Konvertierung, PDF/UA-Vorbereitung, P12-Signatur sowie Designer-Tools (Katalog, Erstellen, Validieren, HTML-Render inkl. interaktivem Render). Nutzt dieselben Engines wie die Web-App (pdf-lib + pdfjs-dist + WebCrypto), tokenless.
+Eigenständiges Node.js-Paket (`pagebound-pdf-mcp-server`) unter `mcp/`, das die PDF-Operationen von Pagebound als MCP-Tools für LLM-Agents bereitstellt — lokal über stdio oder gehostet über Streamable HTTP (stateless, pro Request frischer Server + Transport). 27 registrierte Tools, u. a. Info/Textextraktion/Tabellen, DOCX-Export (Best-Effort-Textfluss), Text-Suchen-&-Ersetzen (Cover + Redraw), Seiten-Manipulation (merge, split, extract, delete, rotate, reorder), Stempel/Wasserzeichen, AES-256-Verschlüsselung, AcroForm lesen/füllen/Felder anlegen, Text-Diff, Metadaten, PDF/A-Konvertierung, PDF/UA-Vorbereitung, P12-Signatur sowie Designer-Tools (Katalog, Erstellen, Validieren, HTML-Render inkl. interaktivem Render). Nutzt dieselben Engines wie die Web-App (pdf-lib + pdfjs-dist + WebCrypto), tokenless.
 
 ## Dateien
 
@@ -37,6 +37,7 @@ Eigenständiges Node.js-Paket (`pagebound-pdf-mcp-server`) unter `mcp/`, das die
 - `zod` — Tool-Input-Schemas
 - `pdf-lib` + `@pdf-lib/fontkit` — PDF-Erzeugung/-Manipulation, Font-Einbettung
 - `pdfjs-dist` — Text-/Struktur-Extraktion
+- `fflate` — ZIP-Erzeugung für den DOCX-Export (OOXML von Hand, wie in der Web-App)
 - `node-forge` — P12/PKCS#12-Signatur
 
 ## Öffentliche API / Interface
@@ -46,6 +47,8 @@ Registrierte Tools (aus `mcp/src/index.ts`):
 | Kategorie | Tools |
 |-----------|-------|
 | Analyse | `pdf_info`, `pdf_extract_text`, `pdf_extract_tables`, `pdf_diff` |
+| Konvertierung | `pdf_to_docx` (PDF→Word, Best-Effort-Textfluss, OOXML via fflate) |
+| Bearbeiten | `pdf_edit_text` (Suchen & Ersetzen, Cover + Redraw) |
 | Seiten | `pdf_merge`, `pdf_split`, `pdf_extract_pages`, `pdf_delete_pages`, `pdf_rotate_pages`, `pdf_reorder_pages`, `images_to_pdf` |
 | Gestaltung | `pdf_stamp` (Wasserzeichen/Seitenzahlen) |
 | Sicherheit | `pdf_encrypt` (AES-256), `pdf_sign` (P12) |

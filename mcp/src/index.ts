@@ -182,6 +182,39 @@ Eingabe: 'path'/'dataBase64', optional 'pages' (z. B. "1-3,5"). Returns: { pageC
     return ok({ pageCount: res.pageCount, truncated, csv }, csv || "(keine Tabellendaten erkannt)");
   }));
 
+  server.registerTool("pdf_to_docx", {
+    title: "PDF → Word (DOCX)",
+    description: `Konvertiert eine PDF in ein Word-Dokument (.docx) — Best-Effort-Textfluss (Absätze rekonstruiert, Schriftgröße abgeleitet, Seitenumbruch je Seite), KEINE 1:1-Layout-Treue. Für pixelgenaue Ausgabe eignen sich Bild-/HTML-Exporte besser. Kein OCR.
+Eingabe: 'path'/'dataBase64'. Ausgabe: 'outputPath' (z. B. "out.docx") oder 'dataBase64'. Returns: { pageCount, ... }.`,
+    inputSchema: { ...srcIn, ...outOpt },
+    annotations: writeAnn,
+  }, guard(async (a: { path?: string; dataBase64?: string; outputPath?: string }) => {
+    const r = await pdf.toDocx(await loadPdf(a));
+    return ok({ pageCount: r.pageCount, ...(await emitPdf(r.bytes, a.outputPath)) }, `PDF → DOCX: ${r.pageCount} Seite(n) (Best-Effort-Textfluss).`);
+  }));
+
+  server.registerTool("pdf_edit_text", {
+    title: "Text ersetzen (Suchen & Ersetzen)",
+    description: `Ersetzt Text im PDF per Suchen & Ersetzen (Cover + Redraw): Zeilen, die ein 'find' enthalten, werden opak übermalt und mit 'find'→'replace' in Helvetica neu gezeichnet. KEIN Reflow, keine Font-Treue. Hinweis: der ursprüngliche Text bleibt technisch im Content-Stream (übermalt, weiterhin extrahierbar) — für garantierte Entfernung ist Schwärzung/Rasterung nötig.
+Eingabe: 'path'/'dataBase64', 'replacements' (≥1 Paar), optional 'pages'/'color'/'bgColor'. Ausgabe: 'outputPath' oder 'dataBase64'. Returns: { replaced, ... }.`,
+    inputSchema: {
+      ...srcIn,
+      replacements: z.array(z.object({
+        find: z.string().min(1).describe("Zu findender Text (Teilstring einer Zeile)."),
+        replace: z.string().describe("Ersatztext (darf leer sein = übermalen/entfernen)."),
+      })).min(1).describe("Liste der Suchen-&-Ersetzen-Paare."),
+      pages: z.string().optional().describe('Seitenauswahl, z. B. "1-3,5" (Default: alle).'),
+      color: z.string().optional().describe('Textfarbe als Hex, z. B. "#111111" (Default: fast-schwarz).'),
+      bgColor: z.string().optional().describe('Cover-/Hintergrundfarbe als Hex (Default: "#ffffff").'),
+      ...outOpt,
+    },
+    annotations: writeAnn,
+  }, guard(async (a: { path?: string; dataBase64?: string; replacements: pdf.TextReplacement[]; pages?: string; color?: string; bgColor?: string; outputPath?: string }) => {
+    const r = await pdf.applyTextReplacements(await loadPdf(a), a.replacements, { pages: a.pages, color: a.color, bgColor: a.bgColor });
+    return ok({ replaced: r.replaced, ...(await emitPdf(r.bytes, a.outputPath)) },
+      r.replaced ? `${r.replaced} Zeile(n) ersetzt (Cover + Redraw). Alt-Text bleibt technisch extrahierbar.` : "Kein Treffer — nichts geändert.");
+  }));
+
   server.registerTool("pdf_merge", {
     title: "PDFs zusammenführen",
     description: `Fügt mehrere PDFs in Reihenfolge zu einer zusammen.

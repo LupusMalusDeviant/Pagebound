@@ -29,8 +29,10 @@ Reihenfolge = „Empfohlene Reihenfolge" im Plan.
 - [ ] **E-15** Echte Entfernung beim Bearbeiten (Raster)
 
 ## Runde 4 — MCP-Parität (neue Features als Agent-Tools)
-- [ ] **M-01** `pdf_to_docx` (mcp/src/pdf.ts `toDocx` + fflate + index.ts + smoke + Doku)
-- [ ] **M-02** `pdf_edit_text` (Suchen & Ersetzen, Cover+Redraw + index.ts + smoke + Doku)
+- [x] **M-01** `pdf_to_docx` (`toDocx` in pdf.ts + fflate-Dep + index.ts + smoke + Doku) — Build + Smoke ALL PASS (ZIP+PK, OOXML-Teile, Text, Seitenumbruch)
+- [x] **M-02** `pdf_edit_text` (Suchen & Ersetzen, Cover+Redraw `applyTextReplacements` + index.ts + smoke + Doku) — Build + Smoke ALL PASS (replaced=1, valides PDF, neuer Text, kein-Treffer→0)
+
+**Runde 4 (MCP-Parität) abgeschlossen.**
 
 ## Notizen / Abweichungen
 (leer — hier Code-Abweichungen von der IST-Beschreibung + blockierte Aufträge dokumentieren)

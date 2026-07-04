@@ -1,6 +1,7 @@
 // Smoke test for the PDF operations (run after `npm run build`: `node dist/smoke.js`).
 // Bytes-in/bytes-out — no temp files; exercises every operation end-to-end.
 import { PDFBool, PDFDict, PDFDocument, PDFName, PDFString, StandardFonts, rgb } from "pdf-lib";
+import { unzipSync, strFromU8 } from "fflate";
 import forge from "node-forge";
 import * as pdf from "./pdf.js";
 import * as design from "./design.js";
@@ -113,6 +114,35 @@ async function main() {
     check("pdf_extract_tables data row 'Apfel,1.50'", lines[1] === "Apfel,1.50", JSON.stringify(lines[1]));
   } catch (err) {
     check("pdf_extract_tables runs without throwing", false, String(err));
+  }
+
+  // PDF → DOCX (Best-Effort-Textfluss) — fresh sample (pdfjs detaches buffers)
+  try {
+    const docx = await pdf.toDocx(await makeSample(2, "Docx"));
+    check("pdf_to_docx pageCount=2", docx.pageCount === 2, JSON.stringify(docx.pageCount));
+    check("pdf_to_docx ZIP (PK header)", docx.bytes[0] === 0x50 && docx.bytes[1] === 0x4b);
+    const parts = unzipSync(docx.bytes);
+    check("pdf_to_docx has OOXML parts",
+      !!parts["[Content_Types].xml"] && !!parts["word/document.xml"] && !!parts["word/styles.xml"] && !!parts["word/_rels/document.xml.rels"]);
+    const docXml = strFromU8(parts["word/document.xml"]);
+    check("pdf_to_docx document.xml is a w:document", docXml.includes("<w:document") && docXml.includes("</w:document>"));
+    check("pdf_to_docx contains drawn text", /Docx Seite 1 Pagebound Test/.test(docXml.replace(/<[^>]+>/g, "")), docXml.replace(/<[^>]+>/g, "").slice(0, 80));
+    check("pdf_to_docx page break for 2 pages", docXml.includes('w:type="page"'));
+  } catch (err) {
+    check("pdf_to_docx runs without throwing", false, String(err));
+  }
+
+  // pdf_edit_text (Suchen & Ersetzen, Cover + Redraw) — fresh sample
+  try {
+    const ed = await pdf.applyTextReplacements(await makeSample(1, "Edit"), [{ find: "Pagebound", replace: "ERSETZT" }]);
+    check("pdf_edit_text replaced 1 line", ed.replaced === 1, JSON.stringify(ed.replaced));
+    check("pdf_edit_text output re-parses (1 page)", (await pdf.getInfo(ed.bytes)).pageCount === 1);
+    const reText = await pdf.extractText(ed.bytes.slice(), "1");
+    check("pdf_edit_text new text present", /ERSETZT/.test(reText.pages[0]?.text ?? ""), JSON.stringify(reText.pages[0]?.text?.slice(0, 60)));
+    const none = await pdf.applyTextReplacements(await makeSample(1, "Edit2"), [{ find: "NICHTVORHANDEN_xyz", replace: "X" }]);
+    check("pdf_edit_text no match → replaced 0", none.replaced === 0, JSON.stringify(none.replaced));
+  } catch (err) {
+    check("pdf_edit_text runs without throwing", false, String(err));
   }
 
   // NB: pdfjs (extractText above) detaches its input buffer, so reuse a fresh sample.

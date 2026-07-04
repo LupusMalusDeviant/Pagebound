@@ -20,6 +20,7 @@ import {
   rgb,
   degrees,
 } from "pdf-lib";
+import { zipSync } from "fflate";
 
 /** Erwartbare, dem Agenten erklärbare Fehler (vs. unerwartete Exceptions). */
 export class ToolError extends Error {}
@@ -545,6 +546,292 @@ export async function extractTablesCsv(bytes: Uint8Array, pages?: string): Promi
   } finally {
     await doc.loadingTask.destroy();
   }
+}
+
+// --- PDF → DOCX + Inline-Text-Ersetzen ---------------------------------------
+// Spiegelt die Web-Bridge (convertToDocx / applyTextEdits): Items → Zeilen
+// (y-Cluster) → Absätze; DOCX von Hand als OOXML-ZIP via fflate; Text-Ersetzen
+// als Cover+Redraw. Best-Effort-Textfluss, keine Layout-Treue. Kein OCR.
+
+const DOCX_XML_DECL = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n';
+
+interface DocxItem { str: string; x: number; yTop: number; w: number; h: number; }
+interface DocxLine { text: string; xMin: number; xMax: number; yTop: number; yBottom: number; medH: number; }
+
+function docxXmlEscape(s: string): string {
+  return (s ?? "")
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&apos;")
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, "");
+}
+
+/** Items einer Zeile (nach x sortiert) mit Wort-Spacing zusammenfügen. */
+function joinDocxLine(items: DocxItem[]): string {
+  if (items.length === 0) return "";
+  let text = items[0].str;
+  for (let i = 1; i < items.length; i++) {
+    const prev = items[i - 1], cur = items[i];
+    const gap = cur.x - (prev.x + prev.w);
+    const avgGlyph = prev.w / Math.max(prev.str.length, 1);
+    const tol = Math.max(1, avgGlyph * 0.5);
+    const needsSpace = gap > tol && !/\s$/.test(text) && !/^\s/.test(cur.str);
+    text += (needsSpace ? " " : "") + cur.str;
+  }
+  return text.replace(/[\t ]{2,}/g, " ").trim();
+}
+
+/** pdfjs-Text-Items → Top-Left-Geometrie (Punkte). */
+function mapDocxItems(rawItems: unknown[], viewportHeight: number): DocxItem[] {
+  return (rawItems as Array<{ str?: string; transform?: number[]; width?: number; height?: number }>)
+    .filter((it) => typeof it.str === "string" && (it.str as string).length > 0)
+    .map((it) => ({
+      str: it.str as string,
+      x: it.transform ? it.transform[4] : 0,
+      yTop: viewportHeight - (it.transform ? it.transform[5] : 0) - (it.height ?? 0) * 0.8,
+      w: it.width ?? 0,
+      h: it.height ?? 0,
+    }));
+}
+
+/** Items in Zeilen clustern (y-Nähe), je Zeile Text + Bounding-Box. */
+function clusterLines(items: DocxItem[]): DocxLine[] {
+  const valid = items.filter((it) => it.str.length > 0);
+  if (valid.length === 0) return [];
+  const heights = valid.map((i) => i.h).filter((h) => h > 0).sort((a, b) => a - b);
+  const medH = heights.length ? heights[Math.floor(heights.length / 2)] : 10;
+  const rowTol = Math.max(2, medH * 0.6);
+  valid.sort((a, b) => a.yTop - b.yTop || a.x - b.x);
+  const lines: DocxLine[] = [];
+  let bucket: DocxItem[] = [];
+  let curY = valid[0].yTop;
+  const flush = () => {
+    if (!bucket.length) return;
+    const sorted = bucket.slice().sort((a, b) => a.x - b.x);
+    const hs = sorted.map((e) => e.h).filter((h) => h > 0).sort((a, b) => a - b);
+    lines.push({
+      text: joinDocxLine(sorted),
+      xMin: Math.min(...sorted.map((e) => e.x)),
+      xMax: Math.max(...sorted.map((e) => e.x + e.w)),
+      yTop: Math.min(...sorted.map((e) => e.yTop)),
+      yBottom: Math.max(...sorted.map((e) => e.yTop + e.h)),
+      medH: hs.length ? hs[Math.floor(hs.length / 2)] : medH,
+    });
+    bucket = [];
+  };
+  for (const e of valid) {
+    if (bucket.length && Math.abs(e.yTop - curY) > rowTol) flush();
+    if (!bucket.length) curY = e.yTop;
+    bucket.push(e);
+  }
+  flush();
+  return lines;
+}
+
+/** Zeilen zu Absätzen gruppieren (vertikale Lücke) + Schriftgröße ableiten. */
+function linesToParagraphs(lines: DocxLine[]): { text: string; sizeHalfPt: number }[] {
+  if (lines.length === 0) return [];
+  const allH = lines.map((l) => l.medH).filter((h) => h > 0).sort((a, b) => a - b);
+  const medH = allH.length ? allH[Math.floor(allH.length / 2)] : 10;
+  const paraGap = Math.max(medH * 1.8, 2);
+  const paras: { text: string; sizeHalfPt: number }[] = [];
+  let paraLines: DocxLine[] = [];
+  let prevY: number | null = null;
+  const pushPara = () => {
+    const text = paraLines.map((l) => l.text).join(" ").replace(/[\t ]{2,}/g, " ").trim();
+    if (!text) { paraLines = []; return; }
+    const hs = paraLines.map((l) => l.medH).filter((h) => h > 0).sort((a, b) => a - b);
+    const ptH = hs.length ? hs[Math.floor(hs.length / 2)] : medH;
+    // PDF-Item-Höhe ≈ Schriftgröße in pt → Word-half-points (pt*2), geklemmt.
+    paras.push({ text, sizeHalfPt: Math.min(96, Math.max(12, Math.round(ptH * 2))) });
+    paraLines = [];
+  };
+  for (const ln of lines) {
+    if (!ln.text) continue;
+    if (prevY !== null && ln.yTop - prevY > paraGap) pushPara();
+    paraLines.push(ln);
+    prevY = ln.yTop;
+  }
+  pushPara();
+  return paras;
+}
+
+/**
+ * PDF → DOCX: Best-Effort-Textfluss (Absätze rekonstruiert, keine 1:1-Layout-
+ * Treue). Minimal-gültiges .docx von Hand als OOXML-ZIP (fflate).
+ */
+export async function toDocx(bytes: Uint8Array): Promise<{ bytes: Uint8Array; pageCount: number }> {
+  const pdfjs = await getPdfjs();
+  let doc;
+  try {
+    doc = await pdfjs.getDocument({ data: bytes, verbosity: 0 }).promise;
+  } catch (e) {
+    throw new ToolError(`DOCX-Konvertierung fehlgeschlagen (${errMsg(e)}).`);
+  }
+  try {
+    const total = doc.numPages;
+    enforcePages(total);
+    const enc = new TextEncoder();
+    const bodyParts: string[] = [];
+    for (let p = 1; p <= total; p++) {
+      const page = await doc.getPage(p);
+      const content = await page.getTextContent();
+      const vp = page.getViewport({ scale: 1 });
+      const paras = linesToParagraphs(clusterLines(mapDocxItems(content.items, vp.height)));
+      if (p > 1) bodyParts.push('<w:p><w:r><w:br w:type="page"/></w:r></w:p>');
+      if (paras.length === 0) { bodyParts.push("<w:p/>"); page.cleanup(); continue; }
+      for (const par of paras) {
+        bodyParts.push(
+          '<w:p><w:pPr><w:spacing w:after="120"/></w:pPr>' +
+          `<w:r><w:rPr><w:sz w:val="${par.sizeHalfPt}"/><w:szCs w:val="${par.sizeHalfPt}"/></w:rPr>` +
+          `<w:t xml:space="preserve">${docxXmlEscape(par.text)}</w:t></w:r></w:p>`
+        );
+      }
+      page.cleanup();
+    }
+    if (bodyParts.length === 0) bodyParts.push("<w:p/>");
+
+    const documentXml = DOCX_XML_DECL +
+      '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>' +
+      bodyParts.join("") +
+      '<w:sectPr><w:pgSz w:w="11906" w:h="16838"/>' +
+      '<w:pgMar w:top="1417" w:right="1417" w:bottom="1417" w:left="1417" w:header="708" w:footer="708" w:gutter="0"/>' +
+      "</w:sectPr></w:body></w:document>";
+    const contentTypesXml = DOCX_XML_DECL +
+      '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+      '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
+      '<Default Extension="xml" ContentType="application/xml"/>' +
+      '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>' +
+      '<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>' +
+      "</Types>";
+    const rootRels = DOCX_XML_DECL +
+      '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+      '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>' +
+      "</Relationships>";
+    const docRels = DOCX_XML_DECL +
+      '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+      '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>' +
+      "</Relationships>";
+    const stylesXml = DOCX_XML_DECL +
+      '<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
+      '<w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:cs="Calibri"/>' +
+      '<w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr></w:rPrDefault></w:docDefaults>' +
+      '<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style>' +
+      "</w:styles>";
+
+    const files: Record<string, Uint8Array> = {
+      "[Content_Types].xml": enc.encode(contentTypesXml),
+      "_rels/.rels": enc.encode(rootRels),
+      "word/document.xml": enc.encode(documentXml),
+      "word/_rels/document.xml.rels": enc.encode(docRels),
+      "word/styles.xml": enc.encode(stylesXml),
+    };
+    return { bytes: zipSync(files, { level: 6 }), pageCount: total };
+  } finally {
+    await doc.loadingTask.destroy();
+  }
+}
+
+function hexToRgbColor(hex: string | undefined | null, fallback: ReturnType<typeof rgb>): ReturnType<typeof rgb> {
+  if (!hex) return fallback;
+  let h = hex.trim().replace(/^#/, "");
+  if (h.length === 3) h = h.split("").map((c) => c + c).join("");
+  if (h.length !== 6 || /[^0-9a-fA-F]/.test(h)) return fallback;
+  return rgb(parseInt(h.slice(0, 2), 16) / 255, parseInt(h.slice(2, 4), 16) / 255, parseInt(h.slice(4, 6), 16) / 255);
+}
+
+/** WinAnsi-sichere Teilmenge: nicht kodierbare Zeichen entfernen. */
+function winAnsiSafe(s: string): string {
+  return Array.from(s)
+    .filter((c) => { const code = c.charCodeAt(0); return code >= 0x20 && code <= 0xff && !(code >= 0x7f && code <= 0x9f); })
+    .join("");
+}
+
+export interface TextReplacement { find: string; replace: string; }
+export interface TextEditOptions { pages?: string; color?: string; bgColor?: string; }
+
+/**
+ * Inline-Text-Ersetzen (Suchen & Ersetzen) als Cover + Redraw: Zeilen, die
+ * `find` enthalten, werden opak übermalt und mit `find`→`replace` neu gezeichnet.
+ * KEIN Reflow; die Zeile wird in Helvetica (WinAnsi) neu gezeichnet. Der
+ * ursprüngliche Text bleibt im Content-Stream (übermalt, weiterhin extrahierbar)
+ * — für garantierte Entfernung ist Rasterung/Redaktion nötig.
+ */
+export async function applyTextReplacements(
+  bytes: Uint8Array,
+  replacements: TextReplacement[],
+  opts: TextEditOptions = {},
+): Promise<{ bytes: Uint8Array; replaced: number }> {
+  const active = (replacements ?? []).filter((r) => r && typeof r.find === "string" && r.find.length > 0);
+  if (active.length === 0) throw new ToolError("Keine gültigen Ersetzungen ('replacements' mit nicht-leerem 'find').");
+
+  interface LineEdit { page: number; xMin: number; width: number; yTop: number; height: number; medH: number; newText: string; }
+  const edits: LineEdit[] = [];
+
+  // 1) Geometrie via pdfjs (auf einer Kopie — pdfjs detacht den Buffer).
+  const pdfjs = await getPdfjs();
+  let jdoc;
+  try {
+    jdoc = await pdfjs.getDocument({ data: bytes.slice(), verbosity: 0 }).promise;
+  } catch (e) {
+    throw new ToolError(`Text-Ersetzen fehlgeschlagen (${errMsg(e)}).`);
+  }
+  try {
+    const total = jdoc.numPages;
+    enforcePages(total);
+    const want = opts.pages
+      ? [...new Set(parsePageSpec(opts.pages, total))].sort((a, b) => a - b)
+      : Array.from({ length: total }, (_, i) => i + 1);
+    for (const p of want) {
+      const page = await jdoc.getPage(p);
+      const content = await page.getTextContent();
+      const vp = page.getViewport({ scale: 1 });
+      for (const line of clusterLines(mapDocxItems(content.items, vp.height))) {
+        let newText = line.text;
+        let hit = false;
+        for (const r of active) {
+          if (newText.includes(r.find)) { newText = newText.split(r.find).join(r.replace); hit = true; }
+        }
+        if (hit) edits.push({ page: p, xMin: line.xMin, width: line.xMax - line.xMin, yTop: line.yTop, height: line.yBottom - line.yTop, medH: line.medH, newText });
+      }
+      page.cleanup();
+    }
+  } finally {
+    await jdoc.loadingTask.destroy();
+  }
+
+  if (edits.length === 0) return { bytes, replaced: 0 };
+
+  // 2) Cover + Redraw via pdf-lib.
+  const doc = await PDFDocument.load(bytes, { ignoreEncryption: true });
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const pages = doc.getPages();
+  const fg = hexToRgbColor(opts.color, rgb(0.07, 0.07, 0.07));
+  const bg = hexToRgbColor(opts.bgColor, rgb(1, 1, 1));
+  for (const ed of edits) {
+    const page = pages[ed.page - 1];
+    if (!page) continue;
+    const ph = page.getHeight();
+    const size = Math.max(4, ed.medH);
+    const pad = Math.max(1, size * 0.15);
+    page.drawRectangle({
+      x: ed.xMin - pad,
+      y: ph - (ed.yTop + ed.height) - pad,
+      width: ed.width + 2 * pad,
+      height: ed.height + 2 * pad,
+      color: bg,
+      opacity: 1,
+    });
+    const line = ed.newText.replace(/\t/g, " ");
+    const y = ph - ed.yTop - size;
+    try {
+      page.drawText(line, { x: ed.xMin, y, size, font, color: fg });
+    } catch {
+      const safe = winAnsiSafe(line);
+      if (safe) { try { page.drawText(safe, { x: ed.xMin, y, size, font, color: fg }); } catch { /* skip */ } }
+    }
+  }
+  doc.setProducer("Pagebound Edit");
+  return { bytes: await doc.save(), replaced: edits.length };
 }
 
 // --- Metadata ----------------------------------------------------------------

@@ -38,6 +38,7 @@ Eingaben bleiben stets unangetastet (neue Datei/neue Bytes).
 |---|---|
 | `pdf_info` | Seitenzahl, Titel/Autor, Seitengrößen (read-only) |
 | `pdf_extract_text` | Text-Layer extrahieren, optional pro Seitenauswahl (read-only) |
+| `pdf_to_docx` | PDF → **Word (DOCX)**: Best-Effort-Textfluss (Absätze rekonstruiert, Schriftgröße abgeleitet, Seitenumbruch je Seite), **keine** 1:1-Layout-Treue, kein OCR |
 | `pdf_diff` | Text zweier PDFs seitenweise vergleichen — Versionsänderungen finden (read-only) |
 | `pdf_merge` | mehrere PDFs zusammenführen (`paths` / `dataBase64List`) |
 | `pdf_extract_pages` | Seiten (in Reihenfolge) in eine neue PDF kopieren |
@@ -46,6 +47,7 @@ Eingaben bleiben stets unangetastet (neue Datei/neue Bytes).
 | `pdf_rotate_pages` | Seiten um ±90/180/270° drehen |
 | `pdf_reorder_pages` | Seiten neu anordnen |
 | `pdf_stamp` | Wasserzeichen (diagonal) und/oder Seitenzahlen/Bates aufstempeln |
+| `pdf_edit_text` | Text **suchen & ersetzen** (Cover + Redraw, Helvetica, kein Reflow); Alt-Text bleibt technisch extrahierbar → für garantierte Entfernung schwärzen |
 | `pdf_encrypt` | PDF mit **Passwort** schützen (AES-256, ISO 32000-2 R6) |
 | `pdf_form_fields` | AcroForm-Felder auflisten (Werte, Optionen, Seitenzahl; read-only) |
 | `pdf_fill_form` | Formularfelder ausfüllen, optional **flatten** (einbrennen) |

@@ -1,7 +1,7 @@
 {
   "name": "pagebound-pdf-mcp-server",
-  "version": "1.5.0",
-  "description": "Tokenless MCP server exposing Pagebound's PDF operations (info, text extraction, text diff, merge, split, extract/delete/rotate/reorder pages, stamp watermark & page numbers, AES-256 encrypt, AcroForm read/fill/create, set metadata, designer documents (create/validate/render Pagebound designs), images→PDF) to LLM agents over stdio (local) or Streamable HTTP (hosted). Reuses the same engines as the Pagebound web app: pdf-lib + pdfjs-dist + WebCrypto.",
+  "version": "1.6.0",
+  "description": "Tokenless MCP server exposing Pagebound's PDF operations (info, text extraction, text diff, PDF→DOCX export, text find & replace, merge, split, extract/delete/rotate/reorder pages, stamp watermark & page numbers, AES-256 encrypt, AcroForm read/fill/create, set metadata, designer documents (create/validate/render Pagebound designs), images→PDF) to LLM agents over stdio (local) or Streamable HTTP (hosted). Reuses the same engines as the Pagebound web app: pdf-lib + pdfjs-dist + WebCrypto.",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
@@ -26,6 +26,7 @@
     "@modelcontextprotocol/sdk": "^1.12.0",
     "@pdf-lib/fontkit": "^1.1.1",
     "express": "^5.1.0",
+    "fflate": "^0.8.3",
     "node-forge": "^1.3.1",
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^6.0.227",
