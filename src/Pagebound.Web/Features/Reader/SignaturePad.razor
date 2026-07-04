@@ -1,0 +1,56 @@
+@inject IJSRuntime JS
+@inject ILocalizationService L
+@implements IAsyncDisposable
+
+@*
+    Signatur zeichnen: Modal mit <canvas>, freihändig mit Maus/Touch. Die
+    Pointer-Verarbeitung liegt im JS (pageboundShortcuts.*SignaturePad*) —
+    „Übernehmen" liefert die Unterschrift als PNG-Data-URL an den Aufrufer.
+*@
+<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" @onclick="Cancel">
+    <div class="w-[min(92vw,520px)] rounded-lg pb-glass-strong p-4" @onclick:stopPropagation>
+        <div class="mb-2 flex items-center justify-between">
+            <span class="text-sm font-medium">@L.T("reader.sig.draw.title")</span>
+            <button type="button" class="text-pb-fg-muted hover:text-pb-fg" @onclick="Cancel" aria-label="@L.T("common.close")">✕</button>
+        </div>
+        <canvas id="pb-sigpad" class="w-full touch-none rounded border border-pb-border bg-white" style="height:180px"></canvas>
+        <p class="mt-1 text-xs text-pb-fg-muted">@L.T("reader.sig.draw.hint")</p>
+        <div class="mt-3 flex flex-wrap justify-end gap-2">
+            <button type="button" class="btn-side" @onclick="Clear">@L.T("reader.sig.draw.clear")</button>
+            <button type="button" class="btn-side" @onclick="Cancel">@L.T("common.cancel")</button>
+            <button type="button" class="btn-side is-primary" @onclick="Accept">@L.T("reader.sig.draw.accept")</button>
+        </div>
+    </div>
+</div>
+
+@code {
+    private const string Selector = "#pb-sigpad";
+
+    [Parameter] public EventCallback<string> OnAccept { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await JS.InvokeVoidAsync("pageboundShortcuts.initSignaturePad", Selector);
+        }
+    }
+
+    private async Task Clear() => await JS.InvokeVoidAsync("pageboundShortcuts.clearSignaturePad", Selector);
+
+    private async Task Accept()
+    {
+        var dataUrl = await JS.InvokeAsync<string?>("pageboundShortcuts.getSignatureDataUrl", Selector);
+        if (string.IsNullOrEmpty(dataUrl)) return; // nichts gezeichnet
+        await OnAccept.InvokeAsync(dataUrl);
+    }
+
+    private Task Cancel() => OnCancel.InvokeAsync();
+
+    public async ValueTask DisposeAsync()
+    {
+        try { await JS.InvokeVoidAsync("pageboundShortcuts.disposeSignaturePad", Selector); }
+        catch { /* ignore */ }
+    }
+}

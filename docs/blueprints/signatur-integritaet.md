@@ -2,7 +2,7 @@
 
 ## Zweck
 
-Bild-basierte Unterschrift (PNG) mit Signer-Metadaten plus nachvollziehbarer Integritätsprüfung — komplett lokal, ohne PKI/Server. Statt PDF-Re-Hashing wird (laut ADR-006, pragmatische Variante) ein kombinierter SHA-256-Hash gebildet über: (1) den SHA-256 der Original-PDF (= `PdfId`), (2) den deterministisch serialisierten Annotation-Snapshot ohne die Signatur selbst, (3) den Signaturzeitpunkt. Ändert sich nach dem Signieren einer dieser Werte, schlägt die Verifikation fehl. Die UI zeigt den Zustand als Status-Badge: **Valid / Invalid / NoHash**. Erfüllt FA-016/FA-017.
+Bild-basierte Unterschrift (PNG) mit Signer-Metadaten plus nachvollziehbarer Integritätsprüfung — komplett lokal, ohne PKI/Server. Die Signatur kann als PNG **hochgeladen** oder direkt **auf einem Canvas gezeichnet** werden (`SignaturePad.razor` + `pageboundShortcuts.*SignaturePad*` — Pointer-Zeichnen im JS, Ergebnis als PNG-Data-URL, danach identischer Platzier-/Einbrenn-Pfad). Statt PDF-Re-Hashing wird (laut ADR-006, pragmatische Variante) ein kombinierter SHA-256-Hash gebildet über: (1) den SHA-256 der Original-PDF (= `PdfId`), (2) den deterministisch serialisierten Annotation-Snapshot ohne die Signatur selbst, (3) den Signaturzeitpunkt. Ändert sich nach dem Signieren einer dieser Werte, schlägt die Verifikation fehl. Die UI zeigt den Zustand als Status-Badge: **Valid / Invalid / NoHash**. Erfüllt FA-016/FA-017.
 
 ## Dateien
 

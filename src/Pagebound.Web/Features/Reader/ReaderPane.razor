@@ -238,6 +238,7 @@
                     </button>
                     <button type="button" class="pb-menuitem" @onclick="ClearActiveSignature" title="@L.T("reader.tool.signature.unload")">✕ @L.T("reader.tool.signature.unload")</button>
                 }
+                <button type="button" class="pb-menuitem" @onclick="@(() => _signaturePadOpen = true)" title="@L.T("reader.sig.draw.hint")">✍ @L.T("reader.sig.draw.menu")</button>
                 <button type="button" class="@($"pb-menuitem {(_signerPanelOpen ? "is-on" : "")}")" @onclick="@(() => _signerPanelOpen = !_signerPanelOpen)" title="@L.T("reader.signer.toggleTitle")">
                     @(string.IsNullOrWhiteSpace(_signer.Name) ? L.T("reader.signer.toggleEmpty") : "👤 " + _signer.Name)
                 </button>
@@ -411,6 +412,11 @@
                     @L.T("reader.tts.stop")
                 </button>
             </div>
+        }
+
+        @if (_signaturePadOpen)
+        {
+            <SignaturePad OnAccept="OnSignatureDrawnAsync" OnCancel="@(() => _signaturePadOpen = false)" />
         }
 
         @if (_sidecarStatus is not null)
@@ -1719,6 +1725,17 @@
     private string? _activeSignatureImage; // Data-URL
     private string? _activeSignatureFilename;
     private const int MaxSignatureBytes = 2 * 1024 * 1024; // 2 MB
+
+    // Signatur zeichnen (Canvas → PNG-Data-URL, wie ein hochgeladenes PNG).
+    private bool _signaturePadOpen;
+
+    private async Task OnSignatureDrawnAsync(string dataUrl)
+    {
+        _activeSignatureImage = dataUrl;
+        _activeSignatureFilename = L.T("reader.sig.draw.name");
+        _signaturePadOpen = false;
+        await SetAnnotationMode(AnnotationMode.Signature);
+    }
     private Dictionary<string, SignatureIntegrityStatus> _signatureStatuses = new();
     private byte[]? _originalPdfBytes;
 

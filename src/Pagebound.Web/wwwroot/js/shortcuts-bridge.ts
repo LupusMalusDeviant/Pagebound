@@ -759,3 +759,94 @@ export function downloadBytes(
   document.body.removeChild(link);
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
+
+// ---------------------------------------------------------------------------
+// Signatur-Pad: freihändiges Zeichnen einer Unterschrift auf einem <canvas>.
+// Pointer-Events werden hier (JS) verarbeitet — pro Strich einen Interop-Call
+// zu machen wäre zu chattig. C# ruft init → (Nutzer zeichnet) → getDataUrl.
+// ---------------------------------------------------------------------------
+interface SigPad {
+  canvas: HTMLCanvasElement;
+  ctx: CanvasRenderingContext2D;
+  drawing: boolean;
+  lastX: number;
+  lastY: number;
+  dirty: boolean;
+  handlers: { down: (e: PointerEvent) => void; move: (e: PointerEvent) => void; up: (e: PointerEvent) => void };
+}
+const signaturePads = new Map<string, SigPad>();
+
+export function initSignaturePad(selector: string): void {
+  const canvas = document.querySelector(selector);
+  if (!(canvas instanceof HTMLCanvasElement)) return;
+  disposeSignaturePad(selector);
+  const rect = canvas.getBoundingClientRect();
+  canvas.width = Math.max(1, Math.round(rect.width));
+  canvas.height = Math.max(1, Math.round(rect.height));
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  ctx.lineWidth = 2.5;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.strokeStyle = "#111827";
+  const pad: SigPad = { canvas, ctx, drawing: false, lastX: 0, lastY: 0, dirty: false, handlers: null as never };
+  const pos = (e: PointerEvent) => {
+    const r = canvas.getBoundingClientRect();
+    return { x: (e.clientX - r.left) * (canvas.width / r.width), y: (e.clientY - r.top) * (canvas.height / r.height) };
+  };
+  const down = (e: PointerEvent) => {
+    e.preventDefault();
+    pad.drawing = true;
+    const p = pos(e);
+    pad.lastX = p.x;
+    pad.lastY = p.y;
+    // Einzelpunkt (Tippen) sichtbar machen
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, ctx.lineWidth / 2, 0, Math.PI * 2);
+    ctx.fillStyle = ctx.strokeStyle as string;
+    ctx.fill();
+    pad.dirty = true;
+    try { canvas.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+  };
+  const move = (e: PointerEvent) => {
+    if (!pad.drawing) return;
+    const p = pos(e);
+    ctx.beginPath();
+    ctx.moveTo(pad.lastX, pad.lastY);
+    ctx.lineTo(p.x, p.y);
+    ctx.stroke();
+    pad.lastX = p.x;
+    pad.lastY = p.y;
+    pad.dirty = true;
+  };
+  const up = () => { pad.drawing = false; };
+  canvas.addEventListener("pointerdown", down);
+  canvas.addEventListener("pointermove", move);
+  canvas.addEventListener("pointerup", up);
+  canvas.addEventListener("pointerleave", up);
+  pad.handlers = { down, move, up };
+  signaturePads.set(selector, pad);
+}
+
+export function clearSignaturePad(selector: string): void {
+  const pad = signaturePads.get(selector);
+  if (!pad) return;
+  pad.ctx.clearRect(0, 0, pad.canvas.width, pad.canvas.height);
+  pad.dirty = false;
+}
+
+export function getSignatureDataUrl(selector: string): string | null {
+  const pad = signaturePads.get(selector);
+  if (!pad || !pad.dirty) return null;
+  return pad.canvas.toDataURL("image/png");
+}
+
+export function disposeSignaturePad(selector: string): void {
+  const pad = signaturePads.get(selector);
+  if (!pad) return;
+  pad.canvas.removeEventListener("pointerdown", pad.handlers.down);
+  pad.canvas.removeEventListener("pointermove", pad.handlers.move);
+  pad.canvas.removeEventListener("pointerup", pad.handlers.up);
+  pad.canvas.removeEventListener("pointerleave", pad.handlers.up);
+  signaturePads.delete(selector);
+}

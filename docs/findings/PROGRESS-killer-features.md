@@ -26,9 +26,11 @@ Plan: [`PLAN-2026-07-04-killer-features.md`](./PLAN-2026-07-04-killer-features.m
 **Runde 3 (Vorlesen/TTS) abgeschlossen.**
 
 ## Runde 4 — Signatur zeichnen
-- [ ] **K-30** SignaturePad-Komponente (Canvas → PNG)
-- [ ] **K-31** In Signatur-Menü einbinden
-- [ ] **K-32** i18n + Blueprint
+- [x] **K-30** SignaturePad-Komponente (Canvas → PNG) — Bridge im Preview verifiziert (init/draw/getDataUrl/clear/dispose; leer→null, gezeichnet→PNG)
+- [x] **K-31** In Signatur-Menü einbinden — Build grün (Reader-Klicktest im User-Browser)
+- [x] **K-32** i18n + Blueprint
+
+**Runde 4 (Signatur zeichnen) abgeschlossen. Alle 5 Runden komplett.**
 
 ## Runde 5 — Seiten-Organizer
 - [x] **K-40** organizePages Bridge — im Preview verifiziert (reorder, delete, valides PDF)
