@@ -1,0 +1,46 @@
+@*
+    Wiederverwendbares Toolbar-Dropdown (Kategorie-Menü der Reader-Leiste).
+    Trigger-Button + Panel. Schließt bei Klick außerhalb (transparenter, seiten-
+    füllender Backdrop) UND nach einer Auswahl: ein Klick im Panel blubbert auf
+    das Panel-@onclick, das schließt — die Item-Handler laufen zuerst (Target vor
+    Bubble). Kein JS-Interop nötig.
+*@
+<div class="relative inline-block">
+    <button type="button"
+            class="@($"rounded border px-2 py-0.5 inline-flex items-center gap-1 {(Active ? "pb-toolbtn is-on" : "pb-toolbtn")}")"
+            title="@Title"
+            aria-haspopup="true"
+            aria-expanded="@(_open ? "true" : "false")"
+            @onclick="Toggle">
+        <span>@Label</span>
+        <span class="text-[0.7em] opacity-70" aria-hidden="true">▾</span>
+    </button>
+    @if (_open)
+    {
+        @* Backdrop: fängt Klicks außerhalb → schließt. Transparent. *@
+        <div class="fixed inset-0 z-40" @onclick="Close" aria-hidden="true"></div>
+        <div class="absolute left-0 top-full mt-1 z-50 min-w-max rounded-lg pb-glass-strong p-1 flex flex-col gap-0.5"
+             role="menu"
+             @onclick="Close">
+            @ChildContent
+        </div>
+    }
+</div>
+
+@code {
+    /// <summary>Beschriftung des Trigger-Buttons (Kategoriename).</summary>
+    [Parameter] public string Label { get; set; } = string.Empty;
+
+    /// <summary>Tooltip des Trigger-Buttons.</summary>
+    [Parameter] public string? Title { get; set; }
+
+    /// <summary>Aktiv-Hervorhebung (z. B. wenn das aktive Werkzeug in dieser Kategorie liegt).</summary>
+    [Parameter] public bool Active { get; set; }
+
+    /// <summary>Die Menü-Einträge (Buttons/Labels mit Klasse <c>pb-menuitem</c>).</summary>
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    private bool _open;
+    private void Toggle() => _open = !_open;
+    private void Close() => _open = false;
+}
