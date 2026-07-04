@@ -300,3 +300,47 @@ Identisch zum FINDINGS-Loop, plus zwei feature-spezifische Regeln:
 **Abschluss:** Wenn keine Pflicht-Aufträge (Runde 1+2) mehr offen sind, Loop beenden (optionale
 Runde-3-Aufträge nur bei ausreichend Budget/Zeit), Abschluss-Zusammenfassung schreiben:
 erledigt / blockiert (mit Grund) / Build+Test-Gesamtergebnis.
+
+---
+
+## Nachtrag — Runde 4: MCP-Parität für die neuen Features
+
+Der MCP-Server (`mcp/`, separates TS-Paket, gleiche Engines pdf-lib + pdfjs-dist, **kein**
+Code-Sharing mit C#/Web) soll die zwei neuen Features als Agent-Tools spiegeln. Die JS-Logik
+wird nach `mcp/src/pdf.ts` portiert (nicht importiert). Verifikation: `npm run build` (tsc) +
+`npm run smoke` im Ordner `mcp/` müssen grün sein.
+
+### M-01 — `pdf_to_docx`
+
+- **Ziel:** PDF→DOCX als MCP-Tool (Parität zum Web-DOCX-Export E-01…E-04).
+- **SOLL:**
+  1. `toDocx(bytes): Promise<{ bytes, pageCount }>` in `mcp/src/pdf.ts` — Items→Zeilen (y-Cluster)
+     →Absätze (vertikale Lücke)→OOXML-ZIP via `fflate.zipSync`, exakt wie `convertToDocx` in der
+     Web-Bridge (dieselbe Absatz-/Schriftgrößen-Heuristik, Seitenumbruch je Seite, XML-Escape).
+  2. `fflate` zu `mcp/package.json` `dependencies` (der Web-`privacy-check` erfasst **nur**
+     `src/Pagebound.Web/package.json`, also unberührt; fflate ist dort bereits Baseline-erlaubt).
+  3. Tool `pdf_to_docx` in `index.ts` registrieren — Binär-Output via `outOpt` (`outputPath`
+     ODER `dataBase64`), wie `pdf_stamp`/`pdf_merge`.
+  4. `mcp/src/smoke.ts` um einen DOCX-Fall ergänzen; Doku (`mcp-server.md` Tool-Tabelle + README).
+- **NICHT:** kein XLSX/PPTX, keine Layout-Treue (Best-Effort-Textfluss wie im Web).
+- **Akzeptanz:** `npm run build` + `npm run smoke` grün; erzeugt gültiges .docx (ZIP-Signatur `PK`,
+  enthält `word/document.xml`).
+
+### M-02 — `pdf_edit_text` (Suchen & Ersetzen)
+
+- **Ziel:** Inline-Text-Ersetzen als **agent-taugliches** Tool (Parität zu „Text bearbeiten"
+  E-10…E-14) — Koordinaten sind für Agents wertlos, daher **inhaltsbasiert** (find/replace).
+- **SOLL:**
+  1. `applyTextReplacements(bytes, replacements, opts): Promise<{ bytes, replaced }>` in `pdf.ts`:
+     je Seite Text-Items in Zeilen clustern (dieselbe Heuristik), Zeilen finden, deren Text
+     `find` enthält; jede Treffer-Zeile opak übermalen (Hintergrundfarbe) und mit `find`→`replace`
+     neu zeichnen (Cover + Redraw, WinAnsi-Fallback, wie `applyTextEdits`).
+  2. Tool `pdf_edit_text` in `index.ts` — Input `{ replacements: [{find, replace}], pages?, color?,
+     bgColor? }`, Binär-Output via `outOpt`.
+  3. Smoke-Fall + Doku.
+- **NICHT:** kein Reflow, keine Font-Treue (Zeile wird in Helvetica neu gezeichnet — ehrlich
+  dokumentieren). Ehrlichkeits-Hinweis wie im Web: der ursprüngliche Text bleibt im Content-Stream
+  (übermalt, weiterhin extrahierbar) — für echte Entfernung ist Rasterung/Redaktion nötig.
+- **Akzeptanz:** `npm run build` + `npm run smoke` grün; Ersetzung sichtbar, Ergebnis valides PDF.
+
+**MCP-Reihenfolge:** M-01 zuerst (klarer Wert, Binär-Output-Muster), dann M-02.
