@@ -4,6 +4,37 @@ Alle nennenswerten Änderungen an Pagebound werden in dieser Datei dokumentiert.
 Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/de/1.1.0/),
 die Versionierung folgt [Semantic Versioning](https://semver.org/lang/de/).
 
+## [0.12.0-beta] — 2026-07-04
+
+Sammelrelease seit 0.11.0: fünf neue „Killer"-Werkzeuge (ohne Telemetrie, ohne
+Server), aufgeräumte Reader-Bedienung und eine ganze Runde Härtung aus dem
+Code-Review.
+
+### Hinzugefügt
+- **Office-Export komplett**: PDF → **XLSX** und **PPTX** (OOXML von Hand gebaut, ohne neue Abhängigkeit) — zusätzlich zum bestehenden DOCX
+- **Muster-Schwärzung**: Regex/Presets (E-Mail, IBAN, Telefon …) finden Treffer automatisch und legen echte Schwärzungen an
+- **Vorlesen (TTS)** im Reader über die Web-Speech-API; bei Scans ohne Textebene ausgegraut mit Hinweis auf „Text erkennen", danach wird der OCR-Text vorgelesen
+- **Signatur zeichnen**: freihändige Unterschrift auf Canvas → PNG (abgegrenzt von der zertifikatsbasierten P12-Signatur)
+- **Seiten-Organizer** (`/organize`): Seiten per Drag & Drop neu ordnen, drehen, löschen
+- **Inline „Text bearbeiten"** im Reader: bestehende Textzeile anklicken, überdecken und neu setzen
+- **Formular-Builder „Leeres Dokument"** mit Formatauswahl und „Seite hinzufügen"
+- **MCP**: `pdf_to_docx` und `pdf_edit_text` (Parität zu DOCX-Export und Text-Bearbeiten)
+
+### Geändert
+- **Reader-Werkzeugleiste in Kategorie-Menüs** (Zoom · Auswählen · Bearbeiten · Hinzufügen · Zeichnen · Signatur · Ansicht · Export) mit klareren Dropdowns statt gestapelter Leisten
+- **Startseite verschlankt** und ruhiger im Ton
+- Seitennavigation als Sticky-Bottom-Bar; aktive Toolbar-Buttons in Akzentfarben
+
+### Behoben
+- **Absturz beim Speichern** durch Endlos-Rekursion in `ReplaceAnnotation`/`RemoveAnnotation`
+- Toter `<link>` auf ein nie erzeugtes Scoped-CSS-Bundle (404 → falscher MIME-Typ)
+- Ghost-Drag bei schnellem Klick, Datum-Format aus i18n abgesichert, unbekannte Annotationstypen werden gemeldet statt still verworfen (aus dem Code-Review F-01…F-21)
+
+### Infrastruktur
+- **Wächter gegen externe Requests** (`tools/privacy-check`) überwacht die Web-Abhängigkeiten
+- `deploy.sh` löst die GHCR-Authentifizierung selbst auf (kein manuelles `DOCKER_CONFIG`-Prefix mehr)
+- `npm run typecheck` grün (0 statt 25 TS-Fehler)
+
 ## [0.11.0-beta] — 2026-06-25
 
 Sammelrelease seit 0.9.0: neue Werkzeuge (Formular-Builder, P12-Signatur,
