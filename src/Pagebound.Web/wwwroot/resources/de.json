@@ -387,6 +387,8 @@
   "reader.view.continuousTitle": "Alle Seiten gestapelt durchscrollen (Leseansicht)",
   "reader.view.night": "Nachtmodus",
   "reader.tts.read": "Vorlesen",
+  "reader.tts.noText": "Kein Text auf dieser Seite — erst „Text erkennen“ (OCR) ausführen, dann kann der erkannte Text vorgelesen werden.",
+  "reader.tts.needOcr": "· Text erkennen",
   "reader.tts.hint": "Text der aktuellen Seite vorlesen (lokale Stimme, kein Netz, keine Telemetrie).",
   "reader.tts.active": "Vorlesen läuft",
   "reader.tts.pause": "Pause",

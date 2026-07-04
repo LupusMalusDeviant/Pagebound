@@ -279,7 +279,16 @@
                         @L.T("reader.form.toggle") <span class="ml-1 text-xs text-pb-fg-muted">(@_formFields.Count)</span>
                     </button>
                 }
-                <button type="button" class="@($"pb-menuitem {(_ttsActive ? "is-on" : "")}")" title="@L.T("reader.tts.hint")" @onclick="StartReadingAsync">🔊 @L.T("reader.tts.read")</button>
+                <button type="button" class="@($"pb-menuitem {(_ttsActive ? "is-on" : "")}")"
+                        disabled="@(_pageTextItems.Count == 0)"
+                        title="@(_pageTextItems.Count == 0 ? L.T("reader.tts.noText") : L.T("reader.tts.hint"))"
+                        @onclick="StartReadingAsync">
+                    🔊 @L.T("reader.tts.read")
+                    @if (_pageTextItems.Count == 0)
+                    {
+                        <span class="ml-1 text-xs text-pb-fg-muted">@L.T("reader.tts.needOcr")</span>
+                    }
+                </button>
             </ToolbarMenu>
 
             <ToolbarMenu Label="@L.T("reader.menu.export")" Title="@L.T("reader.menu.export")">
@@ -1650,10 +1659,18 @@
 
     private async Task StartReadingAsync()
     {
-        if (_handle is null) return;
+        // Kein Text auf der Seite (Scan ohne OCR) → nichts vorzulesen (Button ist
+        // dann ohnehin ausgegraut).
+        if (_handle is null || _pageTextItems.Count == 0) return;
         try
         {
+            // Bevorzugt den echten Text-Layer (gute Wort-Trennung); fällt bei
+            // Scans auf den erkannten OCR-Text (_pageTextItems) zurück.
             var text = await JS.InvokeAsync<string>("pageboundPdf.pageText", _handle.Id, _currentPage).ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                text = string.Join(" ", _pageTextItems.Select(i => i.Text));
+            }
             if (string.IsNullOrWhiteSpace(text)) { _ttsActive = false; return; }
             var ok = await JS.InvokeAsync<bool>("pageboundTts.speak", text, 1.0, null).ConfigureAwait(false);
             _ttsActive = ok;

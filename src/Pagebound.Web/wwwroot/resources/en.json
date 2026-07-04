@@ -387,6 +387,8 @@
   "reader.view.continuousTitle": "Scroll through all pages stacked (reading view)",
   "reader.view.night": "Night mode",
   "reader.tts.read": "Read aloud",
+  "reader.tts.noText": "No text on this page — run “Recognize text” (OCR) first, then the recognized text can be read aloud.",
+  "reader.tts.needOcr": "· recognize text",
   "reader.tts.hint": "Read the current page aloud (local voice, no network, no telemetry).",
   "reader.tts.active": "Reading aloud",
   "reader.tts.pause": "Pause",
