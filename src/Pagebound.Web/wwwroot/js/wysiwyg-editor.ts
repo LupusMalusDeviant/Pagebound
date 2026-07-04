@@ -819,14 +819,19 @@ function pageBgOf(el: Element | null, win: Window): string | null {
   return null;
 }
 
-/** Lädt ein externes Bild und bettet es (komprimiert) als data-URL ein. Fehler → null. */
+/** Bettet ein Bild als data-URL ein. 100 % offline: KEINE Requests an fremde Hosts —
+ *  data:-URLs sind schon lokal, gleiche Herkunft (eigener Server) ist erlaubt, alles
+ *  Fremd-Origin wird beim Import verworfen (kein Nachladen). Fehler → null. */
 async function tryEmbedImage(src: string): Promise<string | null> {
+  let url: URL;
+  try { url = new URL(src, location.href); } catch { return null; }
+  if (url.protocol === "data:") return src;                 // bereits lokal, kein Request
+  if (url.origin !== location.origin) return null;          // fremder Host → verwerfen
+  if (url.protocol !== "http:" && url.protocol !== "https:") return null;
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 8000);
   try {
-    const url = new URL(src, location.href);
-    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
-    const resp = await fetch(url.toString(), { mode: "cors", signal: ctrl.signal });
+    const resp = await fetch(url.toString(), { signal: ctrl.signal }); // same-origin, kein cors
     if (!resp.ok) return null;
     const blob = await resp.blob();
     if (!blob.type.startsWith("image/") || blob.size > 12_000_000) return null;
@@ -935,9 +940,23 @@ function readBalancedObject(s: string, open: number): string | null {
   return null;
 }
 
+/** Tolerant-Parser für einfache JS-Objekt-Literale (Mindmap-Bäume) OHNE Code-
+ *  Ausführung: erst striktes JSON, sonst Schlüssel quoten / '…' → "…" / Trailing-
+ *  Commas entfernen und erneut JSON.parse. Nicht Parsbares → null (wird übersprungen). */
+function parseLooseObject(lit: string): any {
+  try { return JSON.parse(lit); } catch { /* nicht strikt JSON → normalisieren */ }
+  try {
+    const s = lit
+      .replace(/'(?:[^'\\]|\\.)*'/g, (m) => JSON.stringify(m.slice(1, -1).replace(/\\'/g, "'")))
+      .replace(/([{,]\s*)([A-Za-z_$][\w$]*)\s*:/g, '$1"$2":')
+      .replace(/,\s*([}\]])/g, "$1");
+    return JSON.parse(s);
+  } catch { return null; }
+}
+
 /** Extrahiert Mindmap-Bäume aus `…treeData = { … }`-Literalen der Inline-Skripte.
- *  Ausgewertet wird im Sandbox-iframe (`win.eval`), nicht im App-Kontext. */
-function extractMindmapTrees(idoc: Document, win: Window): MNode[] {
+ *  Das Literal wird OHNE Ausführung geparst (parseLooseObject), nie ge-eval-t. */
+function extractMindmapTrees(idoc: Document): MNode[] {
   const trees: MNode[] = [];
   const scripts = Array.from(idoc.querySelectorAll("script")).map((s) => s.textContent || "");
   for (const code of scripts) {
@@ -948,11 +967,9 @@ function extractMindmapTrees(idoc: Document, win: Window): MNode[] {
       if (brace >= 0 && brace - eq < 24) {
         const lit = readBalancedObject(code, brace);
         if (lit) {
-          try {
-            const obj = (win as any).eval("(" + lit + ")");
-            const t = normMindNode(obj);
-            if (t && countMindNodes(t) >= 2) trees.push(t);
-          } catch { /* kein auswertbares Daten-Literal */ }
+          const obj = parseLooseObject(lit);
+          const t = obj ? normMindNode(obj) : null;
+          if (t && countMindNodes(t) >= 2) trees.push(t);
         }
       }
       idx = code.indexOf("treeData", idx + 8);
@@ -1054,14 +1071,19 @@ function triggerGraphics(win: Window): void {
 }
 
 /**
- * Rich-Import: rendert die Datei in einem Sandbox-iframe (Skripte laufen, damit
- * Tailwind & Co. echte Farben berechnen), übernimmt Stile/Boxen/Schriftgrößen
- * auf die Block-Eigenschaften und rastert SVG/Canvas-Grafiken (D3-Mindmap) zu
- * Bildern. Texte bleiben editierbar. Wirft bei Problemen → struktureller Fallback.
+ * Rich-Import: rendert die Datei in einem Sandbox-iframe OHNE Skriptausführung
+ * (nur allow-same-origin) und übernimmt die aus statischem CSS berechneten Stile/
+ * Boxen/Schriftgrößen auf die Block-Eigenschaften; SVG-Grafiken und Mindmap-Bäume
+ * werden zu Bildern verarbeitet. Texte bleiben editierbar. Fehler → struktureller Fallback.
  */
 async function importHtmlRich(html: string): Promise<string> {
   const iframe = document.createElement("iframe");
-  iframe.setAttribute("sandbox", "allow-scripts allow-same-origin");
+  // Sicherheit: NUR allow-same-origin (damit der Parent Layout/getComputedStyle des
+  // iframes lesen darf), aber KEIN allow-scripts. So werden Skripte aus der fremden
+  // HTML-Datei NIE ausgeführt (XSS im App-Origin ausgeschlossen). Farben/Boxen kommen
+  // aus statischem CSS (inline <style>/style=""), Mindmap-Bäume werden aus dem Skript-
+  // TEXT geparst (ohne Ausführung) und über unseren eigenen Renderer neu gezeichnet.
+  iframe.setAttribute("sandbox", "allow-same-origin");
   iframe.style.cssText = "position:fixed;left:-12000px;top:0;width:1100px;height:1500px;border:0;opacity:0;pointer-events:none;";
   document.body.appendChild(iframe);
   try {
@@ -1083,7 +1105,7 @@ async function importHtmlRich(html: string): Promise<string> {
     const title = (idoc.querySelector("title")?.textContent || idoc.querySelector("h1")?.textContent || "Import")
       .replace(/\s+/g, " ").trim().slice(0, 120) || "Import";
 
-    const ctx: ImportCtx = { jobs: [], win, trees: extractMindmapTrees(idoc, win) };
+    const ctx: ImportCtx = { jobs: [], win, trees: extractMindmapTrees(idoc) };
     const pageEls = collectPageContainers(idoc);
     const pages: any[] = [];
     if (pageEls.length > 0) {
