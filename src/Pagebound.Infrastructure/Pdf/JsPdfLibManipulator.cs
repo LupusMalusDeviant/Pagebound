@@ -408,6 +408,36 @@ public sealed class JsPdfLibManipulator : IPdfManipulator
         }
     }
 
+    public async Task<byte[]> CreateBlankAsync(double widthPt, double heightPt, int pageCount, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var result = await _js.InvokeAsync<byte[]>(
+                "pageboundPdfManipulator.createBlankPdf", cancellationToken, widthPt, heightPt, pageCount).ConfigureAwait(false);
+            return result ?? Array.Empty<byte>();
+        }
+        catch (JSException jsex)
+        {
+            throw new InvalidOperationException($"[stage:createBlank] pdf-lib createBlankPdf fehlgeschlagen: {jsex.Message}", jsex);
+        }
+    }
+
+    public async Task<byte[]> AppendBlankPageAsync(Stream pdf, double widthPt, double heightPt, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(pdf);
+        var bytes = await ReadAllAsync(pdf, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var result = await _js.InvokeAsync<byte[]>(
+                "pageboundPdfManipulator.appendBlankPage", cancellationToken, bytes, widthPt, heightPt).ConfigureAwait(false);
+            return result ?? bytes;
+        }
+        catch (JSException jsex)
+        {
+            throw new InvalidOperationException($"[stage:appendBlank] pdf-lib appendBlankPage fehlgeschlagen: {jsex.Message}", jsex);
+        }
+    }
+
     public async Task<byte[]> SetMetadataAsync(Stream pdf, PdfMetadata metadata, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(pdf);

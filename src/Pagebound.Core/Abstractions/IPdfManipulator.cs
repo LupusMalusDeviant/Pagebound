@@ -116,6 +116,16 @@ public interface IPdfManipulator
         IReadOnlyList<FormFieldRegion> fields,
         CancellationToken cancellationToken);
 
+    /// <summary>
+    /// Erzeugt ein leeres PDF mit <paramref name="pageCount"/> weißen Seiten in
+    /// den angegebenen Punkt-Maßen (1pt = 1/72"). Basis für „Neu / leeres
+    /// Dokument" im Formular-Builder.
+    /// </summary>
+    Task<byte[]> CreateBlankAsync(double widthPt, double heightPt, int pageCount, CancellationToken cancellationToken);
+
+    /// <summary>Hängt eine weitere weiße Seite (Punkt-Maße) an ein bestehendes PDF an.</summary>
+    Task<byte[]> AppendBlankPageAsync(Stream pdf, double widthPt, double heightPt, CancellationToken cancellationToken);
+
     /// <summary>Setzt Dokument-Metadaten (Titel/Autor/Betreff/Keywords) im Info-Dictionary.</summary>
     Task<byte[]> SetMetadataAsync(Stream pdf, PdfMetadata metadata, CancellationToken cancellationToken);
 

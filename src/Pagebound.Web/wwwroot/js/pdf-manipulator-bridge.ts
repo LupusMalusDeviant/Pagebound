@@ -1629,6 +1629,29 @@ export async function applyTextEdits(pdfBytes: Uint8Array, edits: TextEditDto[])
 }
 
 // ============================================================================
+// Leeres Dokument erzeugen / Seite anhängen (Formular-Builder „Neu")
+// ----------------------------------------------------------------------------
+// Weiße Seiten in Punkt-Maßen (1pt = 1/72"). Aufrufer (UI) wählt Format +
+// Orientierung und reicht Breite/Höhe in Punkten durch — die Bridge bleibt
+// format-agnostisch. 100 % lokal, keine neue Dependency.
+// ============================================================================
+export async function createBlankPdf(widthPt: number, heightPt: number, pageCount: number): Promise<Uint8Array> {
+  const w = Math.max(1, widthPt);
+  const h = Math.max(1, heightPt);
+  const n = Math.max(1, Math.floor(pageCount || 1));
+  const doc = await PDFDocument.create();
+  for (let i = 0; i < n; i++) doc.addPage([w, h]);
+  doc.setProducer("Pagebound");
+  return await doc.save();
+}
+
+export async function appendBlankPage(pdfBytes: Uint8Array, widthPt: number, heightPt: number): Promise<Uint8Array> {
+  const doc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
+  doc.addPage([Math.max(1, widthPt), Math.max(1, heightPt)]);
+  return await doc.save({ updateMetadata: false });
+}
+
+// ============================================================================
 // AES-256-Krypto (ISO 32000-2 /V5 /R6) über WebCrypto (FA-027)
 // ----------------------------------------------------------------------------
 // Portierung von Pagebound.Infrastructure.Pdf.Encryption.AesR6 nach WebCrypto:
