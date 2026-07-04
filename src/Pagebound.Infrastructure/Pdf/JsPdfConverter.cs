@@ -72,6 +72,22 @@ public sealed class JsPdfConverter : IPdfConverter
                 return new ConversionResult(docx, "docx",
                     "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
             }
+            case ConversionFormat.Xlsx:
+            {
+                // Best-Effort Excel-Export: Tabellen-Heuristik, je Seite ein Blatt.
+                var xlsx = await _js.InvokeAsync<byte[]>($"{Module}.convertToXlsx", cancellationToken, pdf)
+                    .ConfigureAwait(false);
+                return new ConversionResult(xlsx, "xlsx",
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+            }
+            case ConversionFormat.Pptx:
+            {
+                // PowerPoint-Export: je Seite eine Folie mit dem Seitenbild.
+                var pptx = await _js.InvokeAsync<byte[]>($"{Module}.convertToPptx", cancellationToken, pdf, RenderScale)
+                    .ConfigureAwait(false);
+                return new ConversionResult(pptx, "pptx",
+                    "application/vnd.openxmlformats-officedocument.presentationml.presentation");
+            }
             default:
                 throw new ArgumentOutOfRangeException(nameof(format), format, "Unbekanntes Konvertierungsformat.");
         }

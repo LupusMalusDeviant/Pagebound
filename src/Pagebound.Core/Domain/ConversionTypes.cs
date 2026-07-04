@@ -8,8 +8,10 @@ public enum ConversionFormat
     Text,
     Html,
     Csv,
-    // Nur anhängen (nicht einsortieren): Word-Export als Best-Effort-Textfluss.
-    Docx
+    // Nur anhängen (nicht einsortieren): Office-Exporte als Best-Effort.
+    Docx,
+    Xlsx,
+    Pptx
 }
 
 /// <summary>

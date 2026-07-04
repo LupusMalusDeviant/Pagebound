@@ -11,7 +11,7 @@ Konvertiert PDFs in andere Formate — PNG/JPG (FA-030), Text (FA-031), HTML (FA
 | `src/Pagebound.Core/Abstractions/IPdfConverter.cs` | Interface: `ConvertAsync(byte[] pdf, ConversionFormat, ct)` → `ConversionResult` |
 | `src/Pagebound.Core/Abstractions/IImageToPdfConverter.cs` | Interface: Bilder (PNG/JPG) → PDF, je Bild eine Seite in Reihenfolge |
 | `src/Pagebound.Core/Abstractions/IPdfArchiveService.cs` | Interface: `ConvertToPdfAAsync` (PDF/A-2b Best Effort) + `PreparePdfUaAsync` (PDF/UA-1-Kennzeichnung + Bericht) |
-| `src/Pagebound.Core/Domain/ConversionTypes.cs` | `ConversionFormat` (Png, Jpg, Text, Html, Csv, Docx) + `ConversionResult(Bytes, FileExtension, MimeType)` |
+| `src/Pagebound.Core/Domain/ConversionTypes.cs` | `ConversionFormat` (Png, Jpg, Text, Html, Csv, Docx, Xlsx, Pptx) + `ConversionResult(Bytes, FileExtension, MimeType)` |
 | `src/Pagebound.Core/Domain/ImageToPdfTypes.cs` | `PdfImageInput` + `ImageToPdfOptions` |
 | `src/Pagebound.Infrastructure/Pdf/JsPdfConverter.cs` | PDF→X über die PDF.js-Bridge (Seiten-Rendering bzw. Text-Extraktion) |
 | `src/Pagebound.Infrastructure/Pdf/JsImageToPdfConverter.cs` | Bilder→PDF über die pdf-lib-Bridge (`pageboundPdfManipulator.imagesToPdf`) |
@@ -63,5 +63,7 @@ PDF/UA: setzt nur die Kennzeichnung (`/MarkInfo`, `/Lang` als BCP-47, `/DisplayD
 - **PDF→PNG/JPG:** `PdfToolsPage` → `JsPdfConverter.ConvertAsync` → PDF.js rendert jede Seite auf Canvas → Bilddateien → ZIP → `ConversionResult`.
 - **PDF→Text/HTML/CSV:** PDF.js-Text-Extraktion pro Seite → Aufbereitung ins Zielformat → Textdatei als `ConversionResult`.
 - **PDF→DOCX:** Bridge `convertToDocx` (pdfjs-bridge.ts) — PDF.js-Text-Items je Seite in Zeilen (y-Cluster) → Absätze (vertikale Lücke) rekonstruieren, Schriftgröße aus Median-Item-Höhe, Seitenumbruch je PDF-Seite; ein minimal-gültiges .docx wird **von Hand als OOXML-ZIP (fflate) gebaut** — keine docx-Lib, keine neue Laufzeit-Dependency. **Best-Effort-Textfluss, keine 1:1-Layout-Treue** (für Pixel-Treue HTML/PNG nutzen).
+- **PDF→XLSX:** Bridge `convertToXlsx` — dieselbe Tabellen-Heuristik wie CSV (`pageItemsToRows`), je Seite ein Blatt (SpreadsheetML, inline strings, Zahlen als Number). Von Hand als OOXML-ZIP.
+- **PDF→PPTX:** Bridge `convertToPptx` — je Seite `renderPageToCanvas` → PNG, eine Folie mit dem Bild vollflächig (PresentationML mit minimalem Master/Layout/Theme). Reine Bild-Folien, kein Text-Layer.
 - **Bilder→PDF:** `JsImageToPdfConverter` → Bridge `imagesToPdf` → pdf-lib bettet PNG/JPG nativ ein (kein MD5 nötig) → PDF-Bytes.
 - **PDF/A / PDF/UA:** `JsPdfArchiveService` → Bridge `convertToPdfA` / `preparePdfUa` → pdf-lib-Umbau → `PdfArchiveResult` mit Bytes + Warnungen, die die UI anzeigt.

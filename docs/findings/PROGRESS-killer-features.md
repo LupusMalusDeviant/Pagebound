@@ -4,10 +4,12 @@ Plan: [`PLAN-2026-07-04-killer-features.md`](./PLAN-2026-07-04-killer-features.m
 `[ ]` offen · `[x]` erledigt (Commit) · `[!]` blockiert (Grund)
 
 ## Runde 1 — Office-Export (XLSX + PPTX)
-- [ ] **K-01** ConversionFormat.Xlsx/Pptx + Dispatch
+- [x] **K-01** ConversionFormat.Xlsx/Pptx + Dispatch — Build+184 Tests grün
 - [x] **K-02** convertToXlsx (SpreadsheetML) — im Preview verifiziert (ZIP+PK, je Seite ein Blatt, alle XML wohlgeformt, Text in Zellen)
 - [x] **K-03** convertToPptx (PresentationML, Seite=Folie) — implementiert, Typecheck grün; „öffnet in PPT" im Sandbox-Canvas-Hang blockiert (wie convertToImagesZip), Browser-Verify nach Deploy
-- [ ] **K-04** UI-Optionen + i18n + Blueprint
+- [x] **K-04** UI-Optionen + i18n + Blueprint
+
+**Runde 1 (Office-Export) abgeschlossen.**
 
 ## Runde 2 — Muster-Schwärzung
 - [ ] **K-10** findTextMatches Bridge (Regex → BBoxes)

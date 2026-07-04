@@ -21,7 +21,7 @@ Pagebound ist ein datenschutzfreundlicher, quelloffener Adobe-Reader-Ersatz als 
 | PDF-Werkzeuge | Merge, Split, Reorder, Rotate, Compress, AES-256-Encrypt, Stamp, Metadaten — alles via pdf-lib im Browser | [pdf-werkzeuge.md](./pdf-werkzeuge.md) |
 | Formulare (AcroForms) | Felder lesen/füllen/flatten plus Form-Builder zum Platzieren neuer Felder | [formulare.md](./formulare.md) |
 | Stapelverarbeitung | Regeln (Compress/Encrypt/Export) auf mehrere PDFs, ZIP-Ergebnis, Regeln in IndexedDB | [batch.md](./batch.md) |
-| Konvertierung & Standards | PDF→PNG/JPG/Text/HTML/CSV/DOCX, Bilder→PDF, Best-Effort PDF/A-2b und PDF/UA-1 | [konvertierung.md](./konvertierung.md) |
+| Konvertierung & Standards | PDF→PNG/JPG/Text/HTML/CSV/DOCX/XLSX/PPTX, Bilder→PDF, Best-Effort PDF/A-2b und PDF/UA-1 | [konvertierung.md](./konvertierung.md) |
 | OCR | Self-hosted Tesseract.js (eng+deu, Web Worker, kein CDN) mit selektierbarem OCR-Text-Layer | [ocr.md](./ocr.md) |
 | Library & Workspace | PDF-Bibliothek mit Hash-Identität, Tags, Suche, Sidecar-JSON, optionaler Workspace-Ordner (FSA-API) | [library-workspace.md](./library-workspace.md) |
 | Markdown-Export | Highlights + Notizen als Obsidian-kompatibles Markdown mit YAML-Frontmatter und Wikilinks | [markdown-export.md](./markdown-export.md) |
