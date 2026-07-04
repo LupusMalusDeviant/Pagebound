@@ -1651,6 +1651,30 @@ export async function appendBlankPage(pdfBytes: Uint8Array, widthPt: number, hei
   return await doc.save({ updateMetadata: false });
 }
 
+// Seiten-Organizer: neues Dokument aus Quellseiten in gegebener Reihenfolge
+// (ops), je Seite ein Rotations-Delta (0/90/180/270 relativ zur bestehenden
+// Rotation). Ausgelassene Quellseiten = gelöscht. `sourceIndex` ist 0-basiert.
+export interface PageOpDto { sourceIndex: number; rotation: number; }
+export async function organizePages(pdfBytes: Uint8Array, ops: PageOpDto[]): Promise<Uint8Array> {
+  const src = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
+  const count = src.getPageCount();
+  const valid = (ops || []).filter((o) => o && o.sourceIndex >= 0 && o.sourceIndex < count);
+  if (valid.length === 0) throw new Error("Pagebound: keine gültigen Seiten übrig.");
+  const out = await PDFDocument.create();
+  const copied = await out.copyPages(src, valid.map((o) => o.sourceIndex));
+  valid.forEach((o, i) => {
+    const pg = copied[i];
+    const delta = (((Math.round((o.rotation || 0) / 90) * 90) % 360) + 360) % 360;
+    if (delta) {
+      const cur = pg.getRotation().angle || 0;
+      pg.setRotation(degrees(((cur + delta) % 360 + 360) % 360));
+    }
+    out.addPage(pg);
+  });
+  out.setProducer("Pagebound Organize");
+  return await out.save();
+}
+
 // ============================================================================
 // AES-256-Krypto (ISO 32000-2 /V5 /R6) über WebCrypto (FA-027)
 // ----------------------------------------------------------------------------

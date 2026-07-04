@@ -126,6 +126,14 @@ public interface IPdfManipulator
     /// <summary>Hängt eine weitere weiße Seite (Punkt-Maße) an ein bestehendes PDF an.</summary>
     Task<byte[]> AppendBlankPageAsync(Stream pdf, double widthPt, double heightPt, CancellationToken cancellationToken);
 
+    /// <summary>
+    /// Seiten-Organizer: baut ein neues PDF aus den Quellseiten in der Reihenfolge
+    /// von <paramref name="ops"/> (0-basierter <see cref="PageOp.SourceIndex"/>), je
+    /// Seite ein Rotations-Delta (Vielfaches von 90°). Ausgelassene Quellseiten
+    /// werden gelöscht. Leere Liste → PDF unverändert.
+    /// </summary>
+    Task<byte[]> OrganizePagesAsync(Stream pdf, IReadOnlyList<PageOp> ops, CancellationToken cancellationToken);
+
     /// <summary>Setzt Dokument-Metadaten (Titel/Autor/Betreff/Keywords) im Info-Dictionary.</summary>
     Task<byte[]> SetMetadataAsync(Stream pdf, PdfMetadata metadata, CancellationToken cancellationToken);
 
@@ -160,6 +168,13 @@ public sealed record TextEditRegion(
     double FontSize,
     string? Color,
     string? BgColor);
+
+/// <summary>
+/// Eine Seiten-Operation für den Organizer: <see cref="SourceIndex"/> ist die
+/// 0-basierte Quellseite, <see cref="Rotation"/> ein Rotations-Delta in Grad
+/// (Vielfaches von 90°). Die Reihenfolge der Liste = neue Seitenreihenfolge.
+/// </summary>
+public sealed record PageOp(int SourceIndex, int Rotation);
 
 /// <summary>
 /// Ein neu anzulegendes Formularfeld (Roadmap D1). Position in 0..1-Page-Fractions

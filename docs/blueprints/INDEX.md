@@ -17,6 +17,7 @@ Pagebound ist ein datenschutzfreundlicher, quelloffener Adobe-Reader-Ersatz als 
 | Signatur & Integrität | PNG-Unterschrift mit Signer-Metadaten und SHA-256-Integritäts-Hash samt Status-Badge | [signatur-integritaet.md](./signatur-integritaet.md) |
 | Schwärzung (Redaktion) | Destruktive Schwärzung per Seiten-Rasterung, transient, optionaler Audit-Report | [redaktion.md](./redaktion.md) |
 | Text bearbeiten | Inline-Textbearbeitung im Reader (Cover + Redraw), transient, Export als `.edited.pdf` | [text-bearbeiten.md](./text-bearbeiten.md) |
+| Seiten-Organizer | Thumbnails per Drag neu ordnen, drehen, löschen → neue PDF (`/organize`) | [seiten-organizer.md](./seiten-organizer.md) |
 | Split-View & Vergleich | Zwei PDFs nebeneinander plus Text-Diff mit strukturierter Ergebnisansicht | [split-view-vergleich.md](./split-view-vergleich.md) |
 | PDF-Werkzeuge | Merge, Split, Reorder, Rotate, Compress, AES-256-Encrypt, Stamp, Metadaten — alles via pdf-lib im Browser | [pdf-werkzeuge.md](./pdf-werkzeuge.md) |
 | Formulare (AcroForms) | Felder lesen/füllen/flatten plus Form-Builder zum Platzieren neuer Felder | [formulare.md](./formulare.md) |

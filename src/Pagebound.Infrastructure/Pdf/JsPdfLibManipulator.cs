@@ -438,6 +438,25 @@ public sealed class JsPdfLibManipulator : IPdfManipulator
         }
     }
 
+    public async Task<byte[]> OrganizePagesAsync(Stream pdf, IReadOnlyList<PageOp> ops, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(pdf);
+        ArgumentNullException.ThrowIfNull(ops);
+        var bytes = await ReadAllAsync(pdf, cancellationToken).ConfigureAwait(false);
+        if (ops.Count == 0) return bytes;
+        var payload = ops.Select(o => new { sourceIndex = o.SourceIndex, rotation = o.Rotation }).ToArray();
+        try
+        {
+            var result = await _js.InvokeAsync<byte[]>(
+                "pageboundPdfManipulator.organizePages", cancellationToken, bytes, payload).ConfigureAwait(false);
+            return result ?? bytes;
+        }
+        catch (JSException jsex)
+        {
+            throw new InvalidOperationException($"[stage:organize] pdf-lib organizePages fehlgeschlagen: {jsex.Message}", jsex);
+        }
+    }
+
     public async Task<byte[]> SetMetadataAsync(Stream pdf, PdfMetadata metadata, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(pdf);

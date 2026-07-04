@@ -164,12 +164,13 @@
     {
         new("", "reader",  "nav.reader"),
         new("", "form-builder", "nav.formbuilder"),
+        new("", "organize", "nav.organize"),
         new("", "split",   "nav.split"),
         new("", "batch",   "nav.batch"),
     };
 
     private static bool IsPdfRoute(string route) =>
-        route is "reader" or "tools" or "form-builder" or "split" or "compare" or "batch";
+        route is "reader" or "tools" or "form-builder" or "organize" or "split" or "compare" or "batch";
 
     private string _route = "";
     private bool _railOpen;
@@ -189,6 +190,7 @@
         "reader" => L.T("nav.reader"),
         "tools" => L.T("nav.tools"),
         "form-builder" => L.T("nav.formbuilder"),
+        "organize" => L.T("nav.organize"),
         "split" => L.T("nav.split"),
         "compare" => L.T("nav.compare"),
         "batch" => L.T("nav.batch"),

@@ -29,10 +29,12 @@ Plan: [`PLAN-2026-07-04-killer-features.md`](./PLAN-2026-07-04-killer-features.m
 - [ ] **K-32** i18n + Blueprint
 
 ## Runde 5 — Seiten-Organizer
-- [ ] **K-40** organizePages Bridge
-- [ ] **K-41** Infra OrganizePagesAsync + PageOp
-- [ ] **K-42** Organizer-UI (/organize, Thumbnails, Drag/Drehen/Löschen)
-- [ ] **K-43** i18n + Blueprint + Nav
+- [x] **K-40** organizePages Bridge — im Preview verifiziert (reorder, delete, valides PDF)
+- [x] **K-41** Infra OrganizePagesAsync + PageOp — Build+184 Tests grün
+- [x] **K-42** Organizer-UI (/organize) — **im Preview voll verifiziert**: laden→Thumbnails→drehen(90°)→löschen→Anwenden→gültiges organized.pdf (Screenshot); Drag-Reorder compile-verifiziert
+- [x] **K-43** i18n + Blueprint + Nav
+
+**Runde 5 (Seiten-Organizer) abgeschlossen.**
 
 ## Notizen / Abweichungen
 (leer)

@@ -1,0 +1,189 @@
+@page "/organize"
+@using Microsoft.AspNetCore.Components.Forms
+@using Pagebound.Core.Abstractions
+@inject IPdfManipulator Pdf
+@inject ILocalizationService L
+@inject IJSRuntime JS
+
+<PageTitle>@L.T("org.pageTitle")</PageTitle>
+
+<div class="mx-auto max-w-5xl p-4 text-pb-fg">
+    <h1 class="mb-1 text-xl font-semibold">@L.T("org.heading")</h1>
+    <p class="mb-4 text-sm text-pb-fg-muted">@L.T("org.subtitle")</p>
+
+    @if (_pdfBytes is null)
+    {
+        <label class="mb-1 block text-xs font-medium text-pb-fg-muted">@L.T("org.choose")</label>
+        <InputFile class="mb-4 w-full text-sm" OnChange="OnPdfSelected" accept="application/pdf,.pdf" />
+    }
+    else
+    {
+        <div class="mb-3 flex flex-wrap items-center gap-2 text-sm">
+            <span class="truncate text-pb-fg-muted" title="@_fileName">@_fileName · @_kept/@_pageCount @L.T("org.pages")</span>
+            <span class="mx-1 h-4 w-px bg-pb-border"></span>
+            <span class="text-xs text-pb-fg-muted">@L.T("org.hint")</span>
+            <span class="ml-auto flex gap-2">
+                <button class="btn-side is-primary" disabled="@(_busy || _kept == 0)" @onclick="ApplyAsync">
+                    @(_busy ? L.T("common.savingProgress") : L.T("org.apply"))
+                </button>
+                <button class="btn-side" @onclick="ResetAll">@L.T("editor.draft.new")</button>
+            </span>
+        </div>
+        @if (!string.IsNullOrEmpty(_status))
+        {
+            <div class="mb-2 text-xs text-pb-accent">@_status</div>
+        }
+        @if (_renderLimited)
+        {
+            <div class="mb-2 rounded border border-pb-border p-2 text-xs text-pb-fg-muted">@L.T("org.pageLimit", new Dictionary<string, object> { ["max"] = MaxPages })</div>
+        }
+
+        <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+            @for (var i = 0; i < _pages.Count; i++)
+            {
+                var idx = i;
+                var pg = _pages[idx];
+                <div class="@($"relative rounded border p-2 {(pg.Deleted ? "border-red-300/40 opacity-40" : "border-pb-border")} {(_dragOver == idx ? "ring-2 ring-pb-accent" : "")}")"
+                     draggable="true"
+                     @ondragstart="@(() => _dragFrom = idx)"
+                     @ondragover:preventDefault="true"
+                     @ondragenter="@(() => _dragOver = idx)"
+                     @ondragleave="@(() => { if (_dragOver == idx) _dragOver = null; })"
+                     @ondrop="@(() => OnDrop(idx))">
+                    <div class="mb-1 flex items-center justify-between text-xs text-pb-fg-muted">
+                        <span>@(idx + 1). · @L.T("org.source") @(pg.SourceIndex + 1)</span>
+                        <span class="cursor-move" title="@L.T("org.drag")">⠿</span>
+                    </div>
+                    <div class="flex items-center justify-center overflow-hidden rounded bg-white" style="aspect-ratio:@($"{pg.W}/{pg.H}"); min-height:120px">
+                        <img src="data:image/png;base64,@pg.Base64" alt="@L.T("org.source") @(pg.SourceIndex + 1)" draggable="false"
+                             class="max-h-40 max-w-full" style="@($"transform: rotate({pg.Rotation}deg)")" />
+                    </div>
+                    <div class="mt-1 flex items-center justify-center gap-1">
+                        <button class="btn-side px-1" title="@L.T("org.rotateLeft")" disabled="@pg.Deleted" @onclick="@(() => Rotate(idx, -90))">⟲</button>
+                        <button class="btn-side px-1" title="@L.T("org.rotateRight")" disabled="@pg.Deleted" @onclick="@(() => Rotate(idx, 90))">⟳</button>
+                        @if (pg.Deleted)
+                        {
+                            <button class="btn-side px-1 text-pb-accent" title="@L.T("org.restore")" @onclick="@(() => pg.Deleted = false)">↺</button>
+                        }
+                        else
+                        {
+                            <button class="btn-side px-1 text-[#dc2626]" title="@L.T("common.delete")" @onclick="@(() => Delete(idx))">✕</button>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private const int MaxPages = 60;
+    private const double RenderScale = 0.5;
+
+    private sealed class OrgPage
+    {
+        public int SourceIndex { get; init; }
+        public string Base64 { get; init; } = "";
+        public int W { get; init; }
+        public int H { get; init; }
+        public int Rotation { get; set; }   // Delta in Grad (0/90/180/270)
+        public bool Deleted { get; set; }
+    }
+
+    private sealed record LoadResult(string Id, int PageCount, string? Title);
+
+    private byte[]? _pdfBytes;
+    private string _fileName = "";
+    private int _pageCount;
+    private bool _renderLimited;
+    private readonly List<OrgPage> _pages = new();
+    private int? _dragFrom;
+    private int? _dragOver;
+    private bool _busy;
+    private string? _status;
+
+    private int _kept => _pages.Count(p => !p.Deleted);
+
+    private async Task OnPdfSelected(InputFileChangeEventArgs e)
+    {
+        const long max = 128 * 1024 * 1024;
+        await using var stream = e.File.OpenReadStream(max);
+        using var ms = new MemoryStream();
+        await stream.CopyToAsync(ms);
+        _pdfBytes = ms.ToArray();
+        _fileName = e.File.Name;
+        _status = null;
+        _pages.Clear();
+
+        var loaded = await JS.InvokeAsync<LoadResult>("pageboundPdf.loadPdf", _pdfBytes, null);
+        _pageCount = loaded.PageCount;
+        var renderCount = Math.Min(_pageCount, MaxPages);
+        _renderLimited = _pageCount > MaxPages;
+        for (var p = 1; p <= renderCount; p++)
+        {
+            var r = await JS.InvokeAsync<System.Text.Json.JsonElement>("pageboundPdf.renderPage", loaded.Id, p, RenderScale);
+            _pages.Add(new OrgPage
+            {
+                SourceIndex = p - 1,
+                Base64 = r.GetProperty("rasterBase64").GetString() ?? "",
+                W = r.GetProperty("widthPx").GetInt32(),
+                H = r.GetProperty("heightPx").GetInt32(),
+            });
+            StateHasChanged();
+        }
+    }
+
+    private void Rotate(int idx, int delta)
+    {
+        var p = _pages[idx];
+        p.Rotation = ((p.Rotation + delta) % 360 + 360) % 360;
+    }
+
+    private void Delete(int idx) => _pages[idx].Deleted = true;
+
+    private void OnDrop(int to)
+    {
+        _dragOver = null;
+        if (_dragFrom is null || _dragFrom == to) { _dragFrom = null; return; }
+        var item = _pages[_dragFrom.Value];
+        _pages.RemoveAt(_dragFrom.Value);
+        _pages.Insert(to, item);
+        _dragFrom = null;
+    }
+
+    private void ResetAll()
+    {
+        _pdfBytes = null;
+        _fileName = "";
+        _pages.Clear();
+        _status = null;
+        _dragFrom = null;
+        _dragOver = null;
+    }
+
+    private async Task ApplyAsync()
+    {
+        if (_pdfBytes is null || _busy) return;
+        var ops = _pages.Where(p => !p.Deleted).Select(p => new PageOp(p.SourceIndex, p.Rotation)).ToList();
+        if (ops.Count == 0) return;
+        _busy = true;
+        _status = null;
+        try
+        {
+            using var stream = new MemoryStream(_pdfBytes);
+            var result = await Pdf.OrganizePagesAsync(stream, ops, CancellationToken.None).ConfigureAwait(false);
+            var baseFile = Path.GetFileNameWithoutExtension(string.IsNullOrWhiteSpace(_fileName) ? "dokument" : _fileName);
+            await JS.InvokeVoidAsync("pageboundShortcuts.downloadBytes",
+                baseFile + ".organized.pdf", Convert.ToBase64String(result), "application/pdf");
+            _status = L.T("org.done", new Dictionary<string, object> { ["count"] = ops.Count });
+        }
+        catch (Exception ex)
+        {
+            _status = L.T("org.error", new Dictionary<string, object> { ["message"] = ex.Message });
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}
