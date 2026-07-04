@@ -694,10 +694,10 @@ body.pb-app-bg { background: var(--bg-base); }
    SCREENS — screens.css (Editorial)
    ============================================================================= */
 .ed { max-width: 1000px; margin: 0 auto; padding: 0 var(--sp-6) var(--sp-8); }
-.masthead-pg { border-top: 2px solid var(--ink); padding-top: var(--sp-4); margin: var(--sp-6) 0 var(--sp-7); }
+.masthead-pg { border-top: 1px solid var(--line); padding-top: var(--sp-4); margin: var(--sp-6) 0 var(--sp-6); }
 .folio-line { font-family: var(--font-mono); font-size: 0.7rem; letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-3); display: flex; gap: 0.9em; flex-wrap: wrap; align-items: center; }
 .folio-line .sep { color: var(--ink-4); }
-.wordmark-xl { font-family: var(--font-display); font-weight: 500; font-size: clamp(3rem, 9vw, 6rem); line-height: 0.92; letter-spacing: -0.025em; margin: var(--sp-4) 0 var(--sp-5); }
+.wordmark-xl { font-family: var(--font-display); font-weight: 500; font-size: clamp(2.4rem, 6vw, 3.75rem); line-height: 0.95; letter-spacing: -0.02em; margin: var(--sp-4) 0 var(--sp-4); }
 .wordmark-xl em { font-style: italic; color: var(--accent); }
 .standfirst { font-family: var(--font-display); font-size: clamp(1.22rem, 2.4vw, 1.65rem); line-height: 1.42; color: var(--ink-2); max-width: 32em; font-weight: 400; text-wrap: pretty; }
 .standfirst em { font-style: italic; color: var(--ink); }
@@ -710,7 +710,7 @@ body.pb-app-bg { background: var(--bg-base); }
 .ed-main { min-width: 0; }
 .ed-sec { margin-top: var(--sp-8); }
 .ed-sec:first-child { margin-top: 0; }
-.ed-h { font-family: var(--font-display); font-size: clamp(1.45rem, 2.6vw, 1.95rem); font-weight: 500; letter-spacing: -0.01em; padding-bottom: var(--sp-3); border-bottom: 1px solid var(--ink); margin-bottom: var(--sp-5); display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-3); }
+.ed-h { font-family: var(--font-display); font-size: clamp(1.3rem, 2.2vw, 1.65rem); font-weight: 500; letter-spacing: -0.01em; padding-bottom: var(--sp-3); border-bottom: 1px solid var(--line); margin-bottom: var(--sp-5); display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-3); }
 .ed-h-meta { font-family: var(--font-mono); font-size: 0.68rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-4); flex: none; }
 
 .toc { display: flex; flex-direction: column; }
@@ -741,7 +741,7 @@ body.pb-app-bg { background: var(--bg-base); }
 .spec-note code { color: var(--accent); }
 
 .ed-margin { display: flex; flex-direction: column; gap: var(--sp-6); position: sticky; top: var(--sp-5); }
-.m-h { font-family: var(--font-mono); font-size: 0.64rem; letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-3); padding-bottom: var(--sp-2); border-bottom: 1px solid var(--ink); margin-bottom: var(--sp-3); }
+.m-h { font-family: var(--font-mono); font-size: 0.64rem; letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-3); padding-bottom: var(--sp-2); border-bottom: 1px solid var(--line); margin-bottom: var(--sp-3); }
 .m-facts { display: flex; flex-direction: column; gap: var(--sp-3); margin: 0; }
 .m-fact { display: flex; flex-direction: column; gap: 1px; }
 .m-fact dt { font-family: var(--font-mono); font-size: 0.6rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-4); }
@@ -753,7 +753,7 @@ body.pb-app-bg { background: var(--bg-base); }
 
 @media (max-width: 860px) {
   .ed-grid { grid-template-columns: 1fr; gap: var(--sp-6); }
-  .ed-margin { position: static; flex-direction: row; flex-wrap: wrap; gap: var(--sp-6); margin-top: var(--sp-4); padding-top: var(--sp-5); border-top: 2px solid var(--ink); }
+  .ed-margin { position: static; flex-direction: row; flex-wrap: wrap; gap: var(--sp-6); margin-top: var(--sp-4); padding-top: var(--sp-5); border-top: 1px solid var(--line); }
   .ed-margin > * { flex: 1 1 240px; }
 }
 @media (max-width: 640px) {
