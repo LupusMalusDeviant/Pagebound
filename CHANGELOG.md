@@ -19,6 +19,7 @@ Code-Review.
 - **Inline „Text bearbeiten"** im Reader: bestehende Textzeile anklicken, überdecken und neu setzen
 - **Formular-Builder „Leeres Dokument"** mit Formatauswahl und „Seite hinzufügen"
 - **MCP**: `pdf_to_docx` und `pdf_edit_text` (Parität zu DOCX-Export und Text-Bearbeiten)
+- **Designer-Mindmap direkt editierbar**: Doppelklick auf einen Knoten benennt ihn um, ＋/× am gewählten Knoten legen Unterknoten an bzw. löschen; Zoom/Pan und zugeklappte Äste bleiben beim Bearbeiten erhalten (inkrementelles D3-Update statt Neuaufbau)
 
 ### Geändert
 - **Reader-Werkzeugleiste in Kategorie-Menüs** (Zoom · Auswählen · Bearbeiten · Hinzufügen · Zeichnen · Signatur · Ansicht · Export) mit klareren Dropdowns statt gestapelter Leisten
@@ -29,6 +30,10 @@ Code-Review.
 - **Absturz beim Speichern** durch Endlos-Rekursion in `ReplaceAnnotation`/`RemoveAnnotation`
 - Toter `<link>` auf ein nie erzeugtes Scoped-CSS-Bundle (404 → falscher MIME-Typ)
 - Ghost-Drag bei schnellem Klick, Datum-Format aus i18n abgesichert, unbekannte Annotationstypen werden gemeldet statt still verworfen (aus dem Code-Review F-01…F-21)
+- **Designer**: Overlay-Selektion bleibt nicht mehr auf einer entfernten/anderen Seite hängen; Einzelfolien-Ansicht kehrt nach dem Export sofort zurück; dieselbe Vorlage lässt sich erneut anwenden
+
+### Sicherheit
+- **HTML-Import gehärtet**: keine Nachlade-Requests an fremde Hosts mehr (100 % offline) und der Import-iframe führt keine Skripte aus fremden Dateien mehr aus (`allow-same-origin` ohne `allow-scripts`, Mindmap-Daten ohne `eval`) — kein Skript-Ausführungs-Pfad im App-Origin
 
 ### Infrastruktur
 - **Wächter gegen externe Requests** (`tools/privacy-check`) überwacht die Web-Abhängigkeiten
