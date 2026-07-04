@@ -14,8 +14,41 @@
 
     @if (_pdfBytes is null)
     {
-        <label class="mb-1 block text-xs font-medium text-pb-fg-muted">@L.T("fb.choose")</label>
-        <InputFile class="mb-4 w-full text-sm" OnChange="OnPdfSelected" accept="application/pdf,.pdf" />
+        <div class="mb-3 flex flex-wrap gap-2">
+            <button type="button" class="btn-side @(_startMode == "existing" ? "is-on" : "")" @onclick="@(() => _startMode = "existing")">@L.T("fb.start.existing")</button>
+            <button type="button" class="btn-side @(_startMode == "blank" ? "is-on" : "")" @onclick="@(() => _startMode = "blank")">@L.T("fb.start.blank")</button>
+        </div>
+        @if (_startMode == "existing")
+        {
+            <label class="mb-1 block text-xs font-medium text-pb-fg-muted">@L.T("fb.choose")</label>
+            <InputFile class="mb-4 w-full text-sm" OnChange="OnPdfSelected" accept="application/pdf,.pdf" />
+        }
+        else
+        {
+            <div class="mb-4 flex flex-wrap items-end gap-3 rounded border border-pb-border p-3">
+                <label class="flex flex-col gap-1 text-xs text-pb-fg-muted">@L.T("fb.blank.format")
+                    <select @bind="_blankFormat" class="rounded border border-pb-border bg-pb-bg px-2 py-1 text-sm text-pb-fg">
+                        @foreach (var fmt in BlankFormats)
+                        {
+                            <option value="@fmt.Key">@fmt.Label</option>
+                        }
+                    </select>
+                </label>
+                <label class="flex flex-col gap-1 text-xs text-pb-fg-muted">@L.T("fb.blank.orientation")
+                    <select @bind="_blankOrientation" class="rounded border border-pb-border bg-pb-bg px-2 py-1 text-sm text-pb-fg">
+                        <option value="portrait">@L.T("fb.blank.portrait")</option>
+                        <option value="landscape">@L.T("fb.blank.landscape")</option>
+                    </select>
+                </label>
+                <label class="flex flex-col gap-1 text-xs text-pb-fg-muted">@L.T("fb.blank.pages")
+                    <input type="number" min="1" max="@MaxRenderPages" @bind="_blankPageCount"
+                           class="w-20 rounded border border-pb-border bg-pb-bg px-2 py-1 text-sm text-pb-fg" />
+                </label>
+                <button type="button" class="btn-side is-primary" disabled="@_busy" @onclick="CreateBlankAsync">
+                    @(_busy ? L.T("common.savingProgress") : L.T("fb.blank.create"))
+                </button>
+            </div>
+        }
     }
     else
     {
@@ -26,6 +59,7 @@
             <button class="btn-side @(_placeType == "checkbox" ? "is-on" : "")" @onclick="@(() => TogglePlace("checkbox"))">@L.T("fb.addCheckbox")</button>
             <span class="text-xs text-pb-fg-muted">@(_placeType is null ? L.T("fb.hint") : L.T("fb.placeHint"))</span>
             <span class="ml-auto flex gap-1">
+                <button class="btn-side" disabled="@(_busy || _pageCount >= MaxRenderPages)" @onclick="AddPageAsync">@L.T("fb.addPage")</button>
                 <button class="btn-side is-primary" disabled="@(_fields.Count == 0 || _busy)" @onclick="ExportAsync">
                     @(_busy ? L.T("common.savingProgress") : L.T("fb.export", new Dictionary<string, object> { ["n"] = _fields.Count }))
                 </button>
@@ -123,6 +157,33 @@
     private int _nameCounter = 1;
     private DotNetObjectReference<FormBuilderPage>? _selfRef;
 
+    // „Neu / leeres Dokument"
+    private string _startMode = "existing";      // existing | blank
+    private string _blankFormat = "A4";
+    private string _blankOrientation = "portrait"; // portrait | landscape
+    private int _blankPageCount = 1;
+    // Aktuelles Seitenformat in Punkten (für „Seite hinzufügen"); aus Seite 1 abgeleitet.
+    private double _docW = 595.28;
+    private double _docH = 841.89;
+
+    // Standardformate in Punkten (1pt = 1/72"), Hochformat (Breite < Höhe).
+    private static readonly (string Key, string Label, double W, double H)[] BlankFormats =
+    {
+        ("A4", "A4", 595.28, 841.89),
+        ("Letter", "Letter", 612, 792),
+        ("A3", "A3", 841.89, 1190.55),
+        ("A5", "A5", 419.53, 595.28),
+        ("Legal", "Legal", 612, 1008),
+    };
+
+    private static (double W, double H) ResolveFormat(string key, string orientation)
+    {
+        var fmt = BlankFormats.FirstOrDefault(f => f.Key == key);
+        var w = fmt.Key is null ? 595.28 : fmt.W;
+        var h = fmt.Key is null ? 841.89 : fmt.H;
+        return orientation == "landscape" ? (h, w) : (w, h);
+    }
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender)
@@ -138,10 +199,56 @@
         await using var stream = e.File.OpenReadStream(max);
         using var ms = new MemoryStream();
         await stream.CopyToAsync(ms);
-        _pdfBytes = ms.ToArray();
-        _fileName = e.File.Name;
+        await LoadAndRenderAsync(ms.ToArray(), e.File.Name, clearFields: true);
+    }
+
+    // „Leeres Dokument": weiße Seiten im gewählten Format erzeugen und wie eine
+    // geladene PDF behandeln (gleicher Platzier-/Export-Flow).
+    private async Task CreateBlankAsync()
+    {
+        if (_busy) return;
+        _busy = true;
+        try
+        {
+            var (w, h) = ResolveFormat(_blankFormat, _blankOrientation);
+            var n = Math.Clamp(_blankPageCount, 1, MaxRenderPages);
+            var bytes = await Pdf.CreateBlankAsync(w, h, n, CancellationToken.None);
+            await LoadAndRenderAsync(bytes, "leeres-dokument.pdf", clearFields: true);
+        }
+        catch (Exception ex)
+        {
+            _status = L.T("fb.error", new Dictionary<string, object> { ["message"] = ex.Message });
+        }
+        finally { _busy = false; }
+    }
+
+    // Eine weitere weiße Seite (aktuelles Format) anhängen; platzierte Felder
+    // bleiben erhalten (sie sind seitenindexiert, das Anhängen am Ende stört nicht).
+    private async Task AddPageAsync()
+    {
+        if (_pdfBytes is null || _busy || _pageCount >= MaxRenderPages) return;
+        _busy = true;
+        try
+        {
+            using var ms = new MemoryStream(_pdfBytes);
+            var bytes = await Pdf.AppendBlankPageAsync(ms, _docW, _docH, CancellationToken.None);
+            await LoadAndRenderAsync(bytes, _fileName, clearFields: false);
+        }
+        catch (Exception ex)
+        {
+            _status = L.T("fb.error", new Dictionary<string, object> { ["message"] = ex.Message });
+        }
+        finally { _busy = false; }
+    }
+
+    // Lädt Bytes, rendert die Seiten und leitet das aktuelle Seitenformat (für
+    // „Seite hinzufügen") aus Seite 1 ab. Felder werden optional erhalten.
+    private async Task LoadAndRenderAsync(byte[] bytes, string fileName, bool clearFields)
+    {
+        _pdfBytes = bytes;
+        _fileName = fileName;
         _status = null;
-        _fields.Clear();
+        if (clearFields) { _fields.Clear(); _selectedField = null; _nameCounter = 1; }
         _pageImages.Clear();
 
         var loaded = await JS.InvokeAsync<LoadResult>("pageboundPdf.loadPdf", _pdfBytes, null);
@@ -156,6 +263,11 @@
                 r.GetProperty("widthPx").GetInt32(),
                 r.GetProperty("heightPx").GetInt32()));
             StateHasChanged();
+        }
+        if (_pageImages.Count > 0)
+        {
+            _docW = _pageImages[0].WidthPx / RenderScale;
+            _docH = _pageImages[0].HeightPx / RenderScale;
         }
     }
 
