@@ -13,7 +13,10 @@
             aria-expanded="@(_open ? "true" : "false")"
             @onclick="Toggle">
         <span>@Label</span>
-        <span class="text-[0.7em] opacity-70" aria-hidden="true">▾</span>
+        <svg class="@($"w-3.5 h-3.5 shrink-0 -mr-0.5 transition-transform duration-150 {(_open ? "rotate-180" : "")}")"
+             viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path d="m4 6 4 4 4-4" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
     </button>
     @if (_open)
     {

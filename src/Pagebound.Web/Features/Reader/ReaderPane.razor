@@ -202,11 +202,17 @@
                 @L.T("reader.tool.select")
             </button>
 
-            <ToolbarMenu Label="@L.T("reader.menu.text")" Title="@L.T("reader.menu.text")"
+            <ToolbarMenu Label="@L.T("reader.menu.edit")" Title="@L.T("reader.menu.edit")"
+                         Active="@(_annotationMode is AnnotationMode.EditText or AnnotationMode.Redaction)">
+                <button type="button" class="@($"pb-menuitem {(_annotationMode == AnnotationMode.EditText ? "is-on" : "")}")" @onclick="@(() => SetAnnotationMode(AnnotationMode.EditText))" title="@L.T("reader.edit.title")">@L.T("reader.edit.tool")</button>
+                <button type="button" class="@($"pb-menuitem {(_annotationMode == AnnotationMode.Redaction ? "is-on" : "")}")" @onclick="@(() => SetAnnotationMode(AnnotationMode.Redaction))" title="@L.T("reader.redact.title")">@L.T("reader.redact.tool")</button>
+            </ToolbarMenu>
+
+            <ToolbarMenu Label="@L.T("reader.menu.add")" Title="@L.T("reader.menu.add")"
                          Active="@(_annotationMode is AnnotationMode.StickyNote or AnnotationMode.FreeText or AnnotationMode.DateStamp)">
-                <button type="button" class="@($"pb-menuitem {(_annotationMode == AnnotationMode.StickyNote ? "is-on" : "")}")" @onclick="@(() => SetAnnotationMode(AnnotationMode.StickyNote))" title="@L.T("reader.tool.note.title")">@L.T("reader.tool.note")</button>
                 <button type="button" class="@($"pb-menuitem {(_annotationMode == AnnotationMode.FreeText ? "is-on" : "")}")" @onclick="@(() => SetAnnotationMode(AnnotationMode.FreeText))" title="@L.T("reader.tool.text.title")">@L.T("reader.tool.text")</button>
                 <button type="button" class="@($"pb-menuitem {(_annotationMode == AnnotationMode.DateStamp ? "is-on" : "")}")" @onclick="@(() => SetAnnotationMode(AnnotationMode.DateStamp))" title="@L.T("reader.tool.date.title")">@L.T("reader.tool.date")</button>
+                <button type="button" class="@($"pb-menuitem {(_annotationMode == AnnotationMode.StickyNote ? "is-on" : "")}")" @onclick="@(() => SetAnnotationMode(AnnotationMode.StickyNote))" title="@L.T("reader.tool.note.title")">@L.T("reader.tool.note")</button>
             </ToolbarMenu>
 
             <ToolbarMenu Label="@L.T("reader.menu.draw")" Title="@L.T("reader.menu.draw")" Active="@IsDrawingMode(_annotationMode)">
@@ -214,12 +220,6 @@
                 <button type="button" class="@($"pb-menuitem {(_annotationMode == AnnotationMode.RectShape ? "is-on" : "")}")" @onclick="@(() => SetAnnotationMode(AnnotationMode.RectShape))" title="@L.T("reader.draw.rect.title")">@L.T("reader.draw.rect")</button>
                 <button type="button" class="@($"pb-menuitem {(_annotationMode == AnnotationMode.ArrowShape ? "is-on" : "")}")" @onclick="@(() => SetAnnotationMode(AnnotationMode.ArrowShape))" title="@L.T("reader.draw.arrow.title")">@L.T("reader.draw.arrow")</button>
                 <button type="button" class="@($"pb-menuitem {(_annotationMode == AnnotationMode.LineShape ? "is-on" : "")}")" @onclick="@(() => SetAnnotationMode(AnnotationMode.LineShape))" title="@L.T("reader.draw.line.title")">@L.T("reader.draw.line")</button>
-            </ToolbarMenu>
-
-            <ToolbarMenu Label="@L.T("reader.menu.edit")" Title="@L.T("reader.menu.edit")"
-                         Active="@(_annotationMode is AnnotationMode.EditText or AnnotationMode.Redaction)">
-                <button type="button" class="@($"pb-menuitem {(_annotationMode == AnnotationMode.EditText ? "is-on" : "")}")" @onclick="@(() => SetAnnotationMode(AnnotationMode.EditText))" title="@L.T("reader.edit.title")">@L.T("reader.edit.tool")</button>
-                <button type="button" class="@($"pb-menuitem {(_annotationMode == AnnotationMode.Redaction ? "is-on" : "")}")" @onclick="@(() => SetAnnotationMode(AnnotationMode.Redaction))" title="@L.T("reader.redact.title")">@L.T("reader.redact.tool")</button>
             </ToolbarMenu>
 
             <ToolbarMenu Label="@L.T("reader.menu.signature")" Title="@L.T("reader.menu.signature")"
