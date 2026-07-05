@@ -1024,6 +1024,13 @@ async function renderPageSvg(doc: PDFDocumentProxy, pageNumber: number, scale: n
     }
   }
 
+  // Konnte NICHTS vektorisiert werden (reine Rastergrafik, ein Bildformat, das die
+  // Extraktion nicht trifft, oder Sonderfüllungen/Muster), wäre das SVG leer (nur weißer
+  // Hintergrund). Dann lieber ein eingebettetes Seiten-Raster — zeigt den Inhalt statt
+  // einer weißen Seite. Seiten MIT Vektor-Text/-Pfaden haben Body-Inhalt und bleiben
+  // scharfer Vektor (Zoom-fest).
+  if (body.length === 0) return rasterFallback();
+
   // Genutzte Fonts einbetten (dedupliziert). createFontFaceRule liefert eine
   // @font-face-Regel mit den Font-Daten als data-URL; font-family = loadedName.
   const fontRules: string[] = [];
