@@ -88,6 +88,14 @@ public sealed class JsPdfConverter : IPdfConverter
                 return new ConversionResult(pptx, "pptx",
                     "application/vnd.openxmlformats-officedocument.presentationml.presentation");
             }
+            case ConversionFormat.Svg:
+            {
+                // Editierbarer Vektor-SVG-Export: je Seite ein SVG (Pfade + eingebetteter
+                // Text/Fonts), seitenweise erzeugt und als ZIP gebündelt.
+                var svgZip = await _js.InvokeAsync<byte[]>($"{Module}.convertToSvgZip", cancellationToken, pdf, RenderScale)
+                    .ConfigureAwait(false);
+                return new ConversionResult(svgZip, "zip", "application/zip");
+            }
             default:
                 throw new ArgumentOutOfRangeException(nameof(format), format, "Unbekanntes Konvertierungsformat.");
         }

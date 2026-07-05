@@ -11,7 +11,10 @@ public enum ConversionFormat
     // Nur anhängen (nicht einsortieren): Office-Exporte als Best-Effort.
     Docx,
     Xlsx,
-    Pptx
+    Pptx,
+    // Editierbarer Vektor-SVG-Export (pdfjs-Operatorliste → SVG mit eingebetteten Fonts);
+    // ein SVG je Seite, als ZIP gebündelt.
+    Svg
 }
 
 /// <summary>
