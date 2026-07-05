@@ -353,6 +353,25 @@ export function downloadFile(
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+/**
+ * Öffnet base64-Bytes als Blob in einem neuen Browser-Tab (für ansehbare Formate
+ * wie SVG/PDF/PNG/Text). Der Aufruf muss aus einer Nutzer-Geste kommen (Button),
+ * sonst blockt der Popup-Blocker. 100 % lokal — die Blob-URL ist same-origin.
+ */
+export function openBytesInNewTab(base64: string, mimeType: string): void {
+  try {
+    const bin = atob(base64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    const url = URL.createObjectURL(new Blob([bytes], { type: mimeType }));
+    window.open(url, "_blank", "noopener");
+    // Nicht sofort widerrufen — der neue Tab lädt die URL asynchron.
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  } catch {
+    /* ignore */
+  }
+}
+
 // ============================================================================
 // Drawing capture (FA-013 Stift, FA-014 Formen)
 // ----------------------------------------------------------------------------

@@ -321,11 +321,17 @@
         </div>
         @if (_convertStatus is not null)
         {
-            <div class="max-w-4xl mx-auto mt-2 rounded border border-green-300/40 bg-green-50/10 px-3 py-2 text-sm text-pb-fg">
-                @_convertStatus
+            <div class="max-w-4xl mx-auto mt-2 flex items-center gap-2 rounded border border-green-300/40 bg-green-50/10 px-3 py-2 text-sm text-pb-fg">
+                <span class="flex-1">@_convertStatus</span>
+                @if (_lastConvertBytes is not null && IsViewableInBrowser(_lastConvertMime))
+                {
+                    <button type="button"
+                            class="shrink-0 rounded border border-pb-border bg-pb-bg px-2 py-0.5 text-pb-accent hover:bg-pb-surface"
+                            @onclick="OpenLastInBrowserAsync">@L.T("tools.convert.open")</button>
+                }
                 <button type="button"
-                        class="float-right text-pb-fg-muted hover:text-pb-fg"
-                        @onclick="@(() => _convertStatus = null)"
+                        class="shrink-0 text-pb-fg-muted hover:text-pb-fg"
+                        @onclick="@(() => { _convertStatus = null; _lastConvertBytes = null; })"
                         aria-label="@L.T("common.close")">✕</button>
             </div>
         }
@@ -742,6 +748,10 @@
     private bool _isConverting;
     private ConversionFormat _convertFormat = ConversionFormat.Png;
     private string? _convertStatus;
+    // Letztes Konvertierungs-Ergebnis, damit „Im Browser öffnen" es ohne erneute
+    // Konvertierung in einem neuen Tab anzeigen kann (nur bei ansehbaren Formaten).
+    private byte[]? _lastConvertBytes;
+    private string? _lastConvertMime;
 
     private static readonly (PdfPageSizeMode Mode, string LabelKey)[] ImagePageSizeModes =
     {
@@ -1236,6 +1246,8 @@
         if (_originalPdfBytes is null || _isConverting) return;
         _isConverting = true;
         _convertStatus = null;
+        _lastConvertBytes = null;
+        _lastConvertMime = null;
         _errorMessage = null;
         try
         {
@@ -1247,6 +1259,8 @@
                 filename,
                 Convert.ToBase64String(result.Bytes),
                 result.MimeType).ConfigureAwait(false);
+            _lastConvertBytes = result.Bytes;
+            _lastConvertMime = result.MimeType;
             _convertStatus = L.T("tools.convert.done", new Dictionary<string, object> { ["file"] = filename });
         }
         catch (Exception ex)
@@ -1258,6 +1272,23 @@
             _isConverting = false;
             await InvokeAsync(StateHasChanged);
         }
+    }
+
+    // Formate, die der Browser direkt in einem neuen Tab darstellen kann. ZIP
+    // (Bilder-/SVG-Mehrseiter) und Office-Dateien sind bewusst NICHT dabei.
+    private static bool IsViewableInBrowser(string? mime) => mime is
+        "image/svg+xml" or "application/pdf" or "image/png" or "image/jpeg"
+        or "text/plain" or "text/html" or "text/csv";
+
+    /// <summary>Öffnet das zuletzt konvertierte Ergebnis in einem neuen Browser-Tab
+    /// (nur ansehbare Formate; keine erneute Konvertierung nötig).</summary>
+    private async Task OpenLastInBrowserAsync()
+    {
+        if (_lastConvertBytes is null || !IsViewableInBrowser(_lastConvertMime)) return;
+        await JS.InvokeVoidAsync(
+            "pageboundShortcuts.openBytesInNewTab",
+            Convert.ToBase64String(_lastConvertBytes),
+            _lastConvertMime).ConfigureAwait(false);
     }
 
     private static string BuildConvertedFilename(string? originalName, string extension)
