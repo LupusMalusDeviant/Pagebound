@@ -1047,15 +1047,20 @@ async function renderPageSvg(doc: PDFDocumentProxy, pageNumber: number, scale: n
   );
 }
 
-/** PDF → Vektor-SVG je Seite, gebündelt als ZIP (seitenweise erzeugt → OOM-sicher). */
-export async function convertToSvgZip(data: Uint8Array, scale: number): Promise<Uint8Array> {
+/** PDF → editierbares Vektor-SVG. Einseitig → EIN SVG (direkt im Browser öffenbar,
+ *  beginnt mit "<"); mehrseitig → ZIP mit einem SVG je Seite (beginnt mit "PK").
+ *  Seitenweise erzeugt → OOM-sicher. Die C#-Seite erkennt das Format am Magic-Byte
+ *  und setzt Endung/MIME. */
+export async function convertToSvg(data: Uint8Array, scale: number): Promise<Uint8Array> {
   return withTransientDoc(data, async (doc) => {
+    const enc = new TextEncoder();
+    if (doc.numPages === 1) {
+      return enc.encode(await renderPageSvg(doc, 1, scale));
+    }
     const files: Record<string, Uint8Array> = {};
     const pad = String(doc.numPages).length;
-    const enc = new TextEncoder();
     for (let i = 1; i <= doc.numPages; i++) {
-      const svg = await renderPageSvg(doc, i, scale);
-      files[`seite-${String(i).padStart(pad, "0")}.svg`] = enc.encode(svg);
+      files[`seite-${String(i).padStart(pad, "0")}.svg`] = enc.encode(await renderPageSvg(doc, i, scale));
     }
     return zipSync(files, { level: 6 });
   });

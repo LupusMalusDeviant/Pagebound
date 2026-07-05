@@ -44,17 +44,32 @@ public sealed class SvgConversionTests
     private static byte[] SamplePdf() => new byte[] { 0x25, 0x50, 0x44, 0x46 }; // "%PDF"
 
     [Fact]
-    public async Task Svg_Dispatch_CallsBridgeAndReturnsZip()
+    public async Task Svg_MultiPage_PkBytes_ReturnsZip()
     {
-        var js = new FakeJsRuntime(result: new byte[] { 1, 2, 3 });
+        var zip = new byte[] { 0x50, 0x4B, 3, 4 }; // "PK.." = ZIP-Magic-Byte
+        var js = new FakeJsRuntime(result: zip);
         var converter = new JsPdfConverter(js);
 
         var result = await converter.ConvertAsync(SamplePdf(), ConversionFormat.Svg, CancellationToken.None);
 
-        js.LastIdentifier.ShouldBe("pageboundPdf.convertToSvgZip");
+        js.LastIdentifier.ShouldBe("pageboundPdf.convertToSvg");
         result.FileExtension.ShouldBe("zip");
         result.MimeType.ShouldBe("application/zip");
-        result.Bytes.ShouldBe(new byte[] { 1, 2, 3 });
+        result.Bytes.ShouldBe(zip);
+    }
+
+    [Fact]
+    public async Task Svg_SinglePage_SvgBytes_ReturnsSvg()
+    {
+        var svg = System.Text.Encoding.UTF8.GetBytes("<svg/>"); // beginnt mit "<", kein ZIP
+        var js = new FakeJsRuntime(result: svg);
+        var converter = new JsPdfConverter(js);
+
+        var result = await converter.ConvertAsync(SamplePdf(), ConversionFormat.Svg, CancellationToken.None);
+
+        js.LastIdentifier.ShouldBe("pageboundPdf.convertToSvg");
+        result.FileExtension.ShouldBe("svg");
+        result.MimeType.ShouldBe("image/svg+xml");
     }
 
     [Fact]

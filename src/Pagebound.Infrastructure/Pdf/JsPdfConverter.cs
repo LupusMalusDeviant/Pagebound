@@ -90,11 +90,15 @@ public sealed class JsPdfConverter : IPdfConverter
             }
             case ConversionFormat.Svg:
             {
-                // Editierbarer Vektor-SVG-Export: je Seite ein SVG (Pfade + eingebetteter
-                // Text/Fonts), seitenweise erzeugt und als ZIP gebündelt.
-                var svgZip = await _js.InvokeAsync<byte[]>($"{Module}.convertToSvgZip", cancellationToken, pdf, RenderScale)
+                // Editierbarer Vektor-SVG-Export. Einseitig → ein SVG (direkt im Browser
+                // öffenbar), mehrseitig → ZIP mit einem SVG je Seite. Die Bridge liefert
+                // rohe Bytes; das Format erkennen wir am Magic-Byte ("PK" = ZIP, sonst SVG).
+                var svg = await _js.InvokeAsync<byte[]>($"{Module}.convertToSvg", cancellationToken, pdf, RenderScale)
                     .ConfigureAwait(false);
-                return new ConversionResult(svgZip, "zip", "application/zip");
+                var isZip = svg.Length >= 2 && svg[0] == 0x50 && svg[1] == 0x4B; // "PK"
+                return isZip
+                    ? new ConversionResult(svg, "zip", "application/zip")
+                    : new ConversionResult(svg, "svg", "image/svg+xml");
             }
             default:
                 throw new ArgumentOutOfRangeException(nameof(format), format, "Unbekanntes Konvertierungsformat.");
