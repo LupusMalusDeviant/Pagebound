@@ -933,7 +933,13 @@ async function renderPageSvg(doc: PDFDocumentProxy, pageNumber: number, scale: n
 
   const rasterFallback = async (): Promise<string> => {
     try {
-      const canvas = await renderPageToCanvas(doc, pageNumber, scale);
+      // Das Raster mit HÖHERER Auflösung als der Vektor-Scale rendern, damit es beim
+      // Zoomen länger scharf bleibt: bis 4× die Vektor-Auflösung, aber auf ~5000 px
+      // Kantenlänge gedeckelt (Datei-/WASM-Speichergröße). Die <image>-Anzeigegröße
+      // bleibt W×H — es steckt nur mehr Bildpunkt drin. Grenze bleibt die Auflösung
+      // der Quell-Bitmap: mehr Detail als im Original steckt, kann kein Raster zeigen.
+      const boost = Math.max(1, Math.min(4, 5000 / Math.max(W, H)));
+      const canvas = await renderPageToCanvas(doc, pageNumber, scale * boost);
       const url = canvas.toDataURL("image/png");
       return `${SVG_PROLOG}${svgRoot(W, H)}<image width="${W}" height="${H}" href="${url}" xlink:href="${url}"/></svg>`;
     } catch {
