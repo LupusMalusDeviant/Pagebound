@@ -911,6 +911,14 @@ function svgImageToDataUrl(img: unknown): string | null {
   }
 }
 
+// Standalone-SVG: XML-Prolog + Namespaces. xmlns:xlink wird deklariert, weil strenge
+// SVG-1.1-Parser (Krita/Qt) Bilder nur über xlink:href finden, nicht über das neuere
+// SVG-2-`href`. Bilder unten setzen deshalb BEIDE Attribute.
+const SVG_PROLOG = `<?xml version="1.0" encoding="UTF-8"?>\n`;
+function svgRoot(W: number, H: number): string {
+  return `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`;
+}
+
 // Eine Seite → Vektor-SVG-String. Bei un-vektorisierbarem Material (Verlauf,
 // nicht extrahierbares Bild, keine Operator-Liste) → eingebettetes Seiten-Raster.
 async function renderPageSvg(doc: PDFDocumentProxy, pageNumber: number, scale: number): Promise<string> {
@@ -927,9 +935,9 @@ async function renderPageSvg(doc: PDFDocumentProxy, pageNumber: number, scale: n
     try {
       const canvas = await renderPageToCanvas(doc, pageNumber, scale);
       const url = canvas.toDataURL("image/png");
-      return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><image width="${W}" height="${H}" href="${url}"/></svg>`;
+      return `${SVG_PROLOG}${svgRoot(W, H)}<image width="${W}" height="${H}" href="${url}" xlink:href="${url}"/></svg>`;
     } catch {
-      return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"></svg>`;
+      return `${SVG_PROLOG}${svgRoot(W, H)}</svg>`;
     }
   };
 
@@ -1010,7 +1018,7 @@ async function renderPageSvg(doc: PDFDocumentProxy, pageNumber: number, scale: n
         } catch { dataUrl = null; }
         if (dataUrl) {
           const m = svgMul(ctm, [1, 0, 0, -1, 0, 1]); // Einheitsquadrat der Bild-Konvention + Y-Flip
-          body.push(`<image transform="${svgMatStr(m)}" width="1" height="1" preserveAspectRatio="none" href="${dataUrl}"/>`);
+          body.push(`<image transform="${svgMatStr(m)}" width="1" height="1" preserveAspectRatio="none" href="${dataUrl}" xlink:href="${dataUrl}"/>`);
         }
         // Nicht extrahierbares Bild → nur DIESES Bild überspringen. Die Seite wird
         // NICHT komplett gerastert — scharfer, editierbarer Vektor-Text ist wichtiger
@@ -1046,7 +1054,7 @@ async function renderPageSvg(doc: PDFDocumentProxy, pageNumber: number, scale: n
   const style = fontRules.length ? `<style>${fontRules.join("\n")}</style>` : "";
 
   return (
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">` +
+    SVG_PROLOG + svgRoot(W, H) +
     style +
     `<rect width="100%" height="100%" fill="#ffffff"/>` +
     `<g transform="${svgMatStr(root)}">${body.join("")}</g>` +
