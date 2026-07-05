@@ -847,33 +847,37 @@ function spikeMul(m1: SpikeMat, m2: SpikeMat): SpikeMat {
 function spikeMatStr(m: SpikeMat): string {
   return `matrix(${m.map((n) => +n.toFixed(4)).join(" ")})`;
 }
-function spikeColor(c: ArrayLike<number> | null | undefined): string {
-  if (!c) return "#000000";
-  const h = (n: number) => Math.max(0, Math.min(255, Math.round(n))).toString(16).padStart(2, "0");
-  return `#${h(c[0])}${h(c[1])}${h(c[2])}`;
+// pdf.js v6 liefert Fill-/Stroke-Farben bereits als fertigen CSS-String
+// ("#rrggbb"). Numerischer Fallback → Graustufe (0..1).
+function spikeAsColor(v: unknown): string {
+  if (typeof v === "string" && v) return v;
+  if (typeof v === "number") return spikeGray(v);
+  return "#000000";
 }
 function spikeGray(g: number): string {
   const v = Math.max(0, Math.min(255, Math.round(g * 255)));
-  return spikeColor([v, v, v]);
+  const h = v.toString(16).padStart(2, "0");
+  return `#${h}${h}${h}`;
 }
 function spikeXmlEsc(s: string): string {
   return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-// constructPath-Args (v6: [subOps, coords, ...]) → SVG-path-d-Fragment. Unbekannte
-// Sub-Ops brechen NUR diesen Pfad ab (unklarer Koordinaten-Verbrauch), kein Crash.
-function spikeDecodePath(subOps: number[], co: number[], OPS: Record<string, number>): string {
-  let d = "", k = 0, cx = 0, cy = 0;
+// Ein Subpfad (v6-Format: flaches [segOp, coords…]) → SVG-path-d-Fragment.
+// Segment-Codes (empirisch aus getOperatorList v6): 0=moveTo(2), 1=lineTo(2),
+// 2/3=cubic curveTo(6), 4=closePath(0). Unbekannter Code → Subpfad hier beenden
+// (unklarer Koordinaten-Verbrauch), kein Crash.
+function spikeDecodeSubpath(seg: ArrayLike<number>): string {
+  let d = "", k = 0;
   const n = (v: number) => +v.toFixed(3);
-  for (const p of subOps) {
-    if (p === OPS.moveTo) { cx = co[k++]; cy = co[k++]; d += `M ${n(cx)} ${n(cy)} `; }
-    else if (p === OPS.lineTo) { cx = co[k++]; cy = co[k++]; d += `L ${n(cx)} ${n(cy)} `; }
-    else if (p === OPS.curveTo) { const x1 = co[k++], y1 = co[k++], x2 = co[k++], y2 = co[k++]; cx = co[k++]; cy = co[k++]; d += `C ${n(x1)} ${n(y1)} ${n(x2)} ${n(y2)} ${n(cx)} ${n(cy)} `; }
-    else if (p === OPS.curveTo2) { const x2 = co[k++], y2 = co[k++], ex = co[k++], ey = co[k++]; d += `C ${n(cx)} ${n(cy)} ${n(x2)} ${n(y2)} ${n(ex)} ${n(ey)} `; cx = ex; cy = ey; }
-    else if (p === OPS.curveTo3) { const x1 = co[k++], y1 = co[k++], ex = co[k++], ey = co[k++]; d += `C ${n(x1)} ${n(y1)} ${n(ex)} ${n(ey)} ${n(ex)} ${n(ey)} `; cx = ex; cy = ey; }
-    else if (p === OPS.rectangle) { const x = co[k++], y = co[k++], w = co[k++], h = co[k++]; d += `M ${n(x)} ${n(y)} h ${n(w)} v ${n(h)} h ${n(-w)} Z `; cx = x; cy = y; }
-    else if (p === OPS.closePath) { d += "Z "; }
-    else { return d + " <!--UNKNOWN_SUBOP--> "; }
+  const len = seg.length;
+  while (k < len) {
+    const op = seg[k++];
+    if (op === 0) d += `M ${n(seg[k++])} ${n(seg[k++])} `;
+    else if (op === 1) d += `L ${n(seg[k++])} ${n(seg[k++])} `;
+    else if (op === 2 || op === 3) d += `C ${n(seg[k++])} ${n(seg[k++])} ${n(seg[k++])} ${n(seg[k++])} ${n(seg[k++])} ${n(seg[k++])} `;
+    else if (op === 4) d += "Z ";
+    else break;
   }
   return d;
 }
@@ -901,22 +905,12 @@ export async function convertToSvgSpike(data: Uint8Array, pageNumber: number, sc
     let ctm: SpikeMat = SPIKE_IDENT;
     const stack: SpikeMat[] = [];
     let fill = "#000000", stroke = "#000000", lineWidth = 1;
-    let pathD = "";
     let textMatrix: SpikeMat = SPIKE_IDENT, lineMatrix: SpikeMat = SPIKE_IDENT, fontSize = 10;
     const body: string[] = [];
     const counts: Record<string, number> = {};
     const skipped: Record<string, number> = {};
+    let firstErr: string | null = null;
     const note = (name: string, map: Record<string, number>) => { map[name] = (map[name] || 0) + 1; };
-
-    const emitPath = (fillCol: string | null, strokeCol: string | null, eo: boolean) => {
-      if (!pathD.trim()) { pathD = ""; return; }
-      const parts = [`transform="${spikeMatStr(ctm)}"`, `d="${pathD.trim()}"`];
-      parts.push(`fill="${fillCol ?? "none"}"`);
-      if (fillCol && eo) parts.push(`fill-rule="evenodd"`);
-      if (strokeCol) parts.push(`stroke="${strokeCol}"`, `stroke-width="${+lineWidth.toFixed(3)}"`);
-      body.push(`<path ${parts.join(" ")}/>`);
-      pathD = "";
-    };
 
     const fn = opList.fnArray, argsAll = opList.argsArray as unknown[][];
     for (let i = 0; i < fn.length; i++) {
@@ -928,16 +922,27 @@ export async function convertToSvgSpike(data: Uint8Array, pageNumber: number, sc
         if (op === OPS.save) stack.push(ctm);
         else if (op === OPS.restore) ctm = stack.pop() ?? SPIKE_IDENT;
         else if (op === OPS.transform) ctm = spikeMul(ctm, spikeToMat(a as number[]));
-        else if (op === OPS.setFillRGBColor) fill = spikeColor(a[0] as ArrayLike<number>);
-        else if (op === OPS.setStrokeRGBColor) stroke = spikeColor(a[0] as ArrayLike<number>);
-        else if (op === OPS.setFillGray) fill = spikeGray(a[0] as number);
-        else if (op === OPS.setStrokeGray) stroke = spikeGray(a[0] as number);
+        else if (op === OPS.setFillRGBColor) fill = spikeAsColor(a[0]);
+        else if (op === OPS.setStrokeRGBColor) stroke = spikeAsColor(a[0]);
+        else if (op === OPS.setFillGray) fill = spikeAsColor(a[0]);
+        else if (op === OPS.setStrokeGray) stroke = spikeAsColor(a[0]);
         else if (op === OPS.setLineWidth) lineWidth = a[0] as number;
-        else if (op === OPS.constructPath) pathD += spikeDecodePath((a[0] as number[]), (a[1] as number[]), OPS);
-        else if (op === OPS.fill || op === OPS.eoFill) emitPath(fill, null, op === OPS.eoFill);
-        else if (op === OPS.stroke) emitPath(null, stroke, false);
-        else if (op === OPS.fillStroke || op === OPS.eoFillStroke) emitPath(fill, stroke, op === OPS.eoFillStroke);
-        else if (op === OPS.endPath) pathD = "";
+        else if (op === OPS.constructPath) {
+          // v6: [paintOp, [subpath-segmente], minMax] — Paint (fill/stroke) ist fusioniert.
+          const paint = opName[a[0] as number] ?? "";
+          const subpaths = a[1] as ArrayLike<number>[];
+          let d = "";
+          if (Array.isArray(subpaths)) for (const sp of subpaths) d += spikeDecodeSubpath(sp);
+          const doFill = /fill/i.test(paint), doStroke = /stroke/i.test(paint);
+          if (d.trim() && (doFill || doStroke)) {
+            const parts = [`transform="${spikeMatStr(ctm)}"`, `d="${d.trim()}"`, `fill="${doFill ? fill : "none"}"`];
+            if (doFill && /eo/i.test(paint)) parts.push(`fill-rule="evenodd"`);
+            if (doStroke) parts.push(`stroke="${stroke}"`, `stroke-width="${+lineWidth.toFixed(3)}"`);
+            body.push(`<path ${parts.join(" ")}/>`);
+          } else if (!doFill && !doStroke) {
+            note(name, skipped); // z. B. reiner Clip-Pfad — für den Spike übersprungen
+          }
+        }
         else if (op === OPS.beginText) { textMatrix = SPIKE_IDENT; lineMatrix = SPIKE_IDENT; }
         else if (op === OPS.setFont) fontSize = Math.abs(a[1] as number) || 10;
         else if (op === OPS.setTextMatrix) { textMatrix = spikeToMat(a as number[]); lineMatrix = textMatrix; }
@@ -959,12 +964,13 @@ export async function convertToSvgSpike(data: Uint8Array, pageNumber: number, sc
         } else {
           note(name, skipped); // kontrollierte Degradation: unbekannte Op überspringen
         }
-      } catch {
+      } catch (e) {
+        if (!firstErr) firstErr = name + ": " + String((e as Error)?.message ?? e);
         note(name, skipped);
       }
     }
 
-    const report = JSON.stringify({ page: pageNumber, size: [W, H], ops: counts, skipped });
+    const report = JSON.stringify({ page: pageNumber, size: [W, H], ops: counts, skipped, firstErr });
     return (
       `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">` +
       `<!-- spike-coverage ${spikeXmlEsc(report)} -->` +
