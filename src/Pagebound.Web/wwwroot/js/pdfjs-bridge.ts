@@ -821,20 +821,22 @@ export async function convertToImagesZip(
 }
 
 // ============================================================================
-// SPIKE (Bean PDF-Tool-caes) — PDF → Vektor-SVG. WEGWERF-CODE, nach dem Go/No-Go
-// wieder entfernen. Übersetzt die niedrigstufigen Zeichen-Operationen EINER Seite
-// (page.getOperatorList) in ein minimales Vektor-SVG: Pfade als <path>, Text als
-// <text> (skalierbar/auswählbar; Glyph-Umriss-Treue ist die Folge-Frage). Nicht
-// unterstützte Ops werden gezählt und übersprungen (kontrollierte Degradation,
-// kein Crash). Gibt den SVG-String zurück, inkl. Coverage-Kommentar mit Op-Zählung.
+// PDF → Vektor-SVG (Bean PDF-Tool-fq0m). Übersetzt die niedrigstufigen Zeichen-
+// Operationen einer Seite (page.getOperatorList) in skalierbares, EDITIERBARES
+// Vektor-SVG: Pfade als <path>, Text als <text> mit EINGEBETTETEN Original-Fonts
+// (@font-face via FontFaceObject.createFontFaceRule aus page.commonObjs — derselbe
+// Loader, den PDF.js für seine eigene Textebene nutzt), Rasterbilder als <image>.
+// Lässt sich eine Seite nicht sinnvoll vektorisieren (Verläufe / Bild-Extraktion
+// scheitert), fällt sie kontrolliert auf ein eingebettetes Seiten-Raster zurück
+// (Ausgabe sieht nie kaputt aus). 100 % lokal, keine externen Requests.
 // ============================================================================
-type SpikeMat = [number, number, number, number, number, number];
-const SPIKE_IDENT: SpikeMat = [1, 0, 0, 1, 0, 0];
+type SvgMat = [number, number, number, number, number, number];
+const SVG_IDENT: SvgMat = [1, 0, 0, 1, 0, 0];
 
-function spikeToMat(a: ArrayLike<number>): SpikeMat {
+function svgToMat(a: ArrayLike<number>): SvgMat {
   return [a[0], a[1], a[2], a[3], a[4], a[5]];
 }
-function spikeMul(m1: SpikeMat, m2: SpikeMat): SpikeMat {
+function svgMul(m1: SvgMat, m2: SvgMat): SvgMat {
   return [
     m1[0] * m2[0] + m1[2] * m2[1],
     m1[1] * m2[0] + m1[3] * m2[1],
@@ -844,22 +846,22 @@ function spikeMul(m1: SpikeMat, m2: SpikeMat): SpikeMat {
     m1[1] * m2[4] + m1[3] * m2[5] + m1[5]
   ];
 }
-function spikeMatStr(m: SpikeMat): string {
+function svgMatStr(m: SvgMat): string {
   return `matrix(${m.map((n) => +n.toFixed(4)).join(" ")})`;
 }
-// pdf.js v6 liefert Fill-/Stroke-Farben bereits als fertigen CSS-String
-// ("#rrggbb"). Numerischer Fallback → Graustufe (0..1).
-function spikeAsColor(v: unknown): string {
+// pdf.js v6 liefert Fill-/Stroke-Farben bereits als fertigen CSS-String ("#rrggbb").
+// Numerischer Fallback → Graustufe (0..1).
+function svgAsColor(v: unknown): string {
   if (typeof v === "string" && v) return v;
-  if (typeof v === "number") return spikeGray(v);
+  if (typeof v === "number") return svgGray(v);
   return "#000000";
 }
-function spikeGray(g: number): string {
+function svgGray(g: number): string {
   const v = Math.max(0, Math.min(255, Math.round(g * 255)));
   const h = v.toString(16).padStart(2, "0");
   return `#${h}${h}${h}`;
 }
-function spikeXmlEsc(s: string): string {
+function svgXmlEsc(s: string): string {
   return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
@@ -867,7 +869,7 @@ function spikeXmlEsc(s: string): string {
 // Segment-Codes (empirisch aus getOperatorList v6): 0=moveTo(2), 1=lineTo(2),
 // 2/3=cubic curveTo(6), 4=closePath(0). Unbekannter Code → Subpfad hier beenden
 // (unklarer Koordinaten-Verbrauch), kein Crash.
-function spikeDecodeSubpath(seg: ArrayLike<number>): string {
+function svgDecodeSubpath(seg: ArrayLike<number>): string {
   let d = "", k = 0;
   const n = (v: number) => +v.toFixed(3);
   const len = seg.length;
@@ -882,102 +884,173 @@ function spikeDecodeSubpath(seg: ArrayLike<number>): string {
   return d;
 }
 
-export async function convertToSvgSpike(data: Uint8Array, pageNumber: number, scale: number): Promise<string> {
-  return withTransientDoc(data, async (doc) => {
-    const OPS = (pdfjsLib as unknown as { OPS: Record<string, number> }).OPS;
-    const opName: Record<number, string> = {};
-    for (const key of Object.keys(OPS)) opName[OPS[key]] = key;
+// Zeichnet ein PDF.js-Bildobjekt (aus page.objs) zu einer PNG-data-URL. null bei
+// Fehler/unbekanntem Format → Aufrufer degradiert die Seite auf Raster.
+function svgImageToDataUrl(img: unknown): string | null {
+  try {
+    const o = img as { bitmap?: ImageBitmap };
+    if (!o || !o.bitmap) return null;
+    const canvas = document.createElement("canvas");
+    canvas.width = o.bitmap.width;
+    canvas.height = o.bitmap.height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    ctx.drawImage(o.bitmap, 0, 0);
+    return canvas.toDataURL("image/png");
+  } catch {
+    return null;
+  }
+}
 
-    const page = await doc.getPage(pageNumber);
-    const viewport = page.getViewport({ scale });
-    const W = Math.ceil(viewport.width), H = Math.ceil(viewport.height);
-    const root = spikeToMat(viewport.transform as unknown as number[]);
+// Eine Seite → Vektor-SVG-String. Bei un-vektorisierbarem Material (Verlauf,
+// nicht extrahierbares Bild, keine Operator-Liste) → eingebettetes Seiten-Raster.
+async function renderPageSvg(doc: PDFDocumentProxy, pageNumber: number, scale: number): Promise<string> {
+  const OPS = (pdfjsLib as unknown as { OPS: Record<string, number> }).OPS;
+  const opName: Record<number, string> = {};
+  for (const key of Object.keys(OPS)) opName[OPS[key]] = key;
 
-    let opList: { fnArray: number[]; argsArray: unknown[] };
+  const page = await doc.getPage(pageNumber);
+  const viewport = page.getViewport({ scale });
+  const W = Math.ceil(viewport.width), H = Math.ceil(viewport.height);
+  const root = svgToMat(viewport.transform as unknown as number[]);
+
+  const rasterFallback = async (): Promise<string> => {
     try {
-      opList = await page.getOperatorList() as unknown as { fnArray: number[]; argsArray: unknown[] };
+      const canvas = await renderPageToCanvas(doc, pageNumber, scale);
+      const url = canvas.toDataURL("image/png");
+      return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><image width="${W}" height="${H}" href="${url}"/></svg>`;
     } catch {
-      // Fehlerpfad: Operator-Liste nicht gewinnbar → kontrolliert leeres SVG, kein Crash,
-      // keine internen Details geleakt.
-      return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"><!-- spike: operator list unavailable --></svg>`;
+      return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"></svg>`;
     }
+  };
 
-    let ctm: SpikeMat = SPIKE_IDENT;
-    const stack: SpikeMat[] = [];
-    let fill = "#000000", stroke = "#000000", lineWidth = 1;
-    let textMatrix: SpikeMat = SPIKE_IDENT, lineMatrix: SpikeMat = SPIKE_IDENT, fontSize = 10;
-    const body: string[] = [];
-    const counts: Record<string, number> = {};
-    const skipped: Record<string, number> = {};
-    let firstErr: string | null = null;
-    const note = (name: string, map: Record<string, number>) => { map[name] = (map[name] || 0) + 1; };
+  let opList: { fnArray: number[]; argsArray: unknown[][] };
+  try {
+    opList = await page.getOperatorList() as unknown as { fnArray: number[]; argsArray: unknown[][] };
+  } catch {
+    return rasterFallback();
+  }
 
-    const fn = opList.fnArray, argsAll = opList.argsArray as unknown[][];
-    for (let i = 0; i < fn.length; i++) {
-      const op = fn[i];
-      const a = argsAll[i] || [];
-      const name = opName[op] ?? String(op);
-      note(name, counts);
-      try {
-        if (op === OPS.save) stack.push(ctm);
-        else if (op === OPS.restore) ctm = stack.pop() ?? SPIKE_IDENT;
-        else if (op === OPS.transform) ctm = spikeMul(ctm, spikeToMat(a as number[]));
-        else if (op === OPS.setFillRGBColor) fill = spikeAsColor(a[0]);
-        else if (op === OPS.setStrokeRGBColor) stroke = spikeAsColor(a[0]);
-        else if (op === OPS.setFillGray) fill = spikeAsColor(a[0]);
-        else if (op === OPS.setStrokeGray) stroke = spikeAsColor(a[0]);
-        else if (op === OPS.setLineWidth) lineWidth = a[0] as number;
-        else if (op === OPS.constructPath) {
-          // v6: [paintOp, [subpath-segmente], minMax] — Paint (fill/stroke) ist fusioniert.
-          const paint = opName[a[0] as number] ?? "";
-          const subpaths = a[1] as ArrayLike<number>[];
-          let d = "";
-          if (Array.isArray(subpaths)) for (const sp of subpaths) d += spikeDecodeSubpath(sp);
-          const doFill = /fill/i.test(paint), doStroke = /stroke/i.test(paint);
-          if (d.trim() && (doFill || doStroke)) {
-            const parts = [`transform="${spikeMatStr(ctm)}"`, `d="${d.trim()}"`, `fill="${doFill ? fill : "none"}"`];
-            if (doFill && /eo/i.test(paint)) parts.push(`fill-rule="evenodd"`);
-            if (doStroke) parts.push(`stroke="${stroke}"`, `stroke-width="${+lineWidth.toFixed(3)}"`);
-            body.push(`<path ${parts.join(" ")}/>`);
-          } else if (!doFill && !doStroke) {
-            note(name, skipped); // z. B. reiner Clip-Pfad — für den Spike übersprungen
-          }
+  const store = page as unknown as {
+    commonObjs: { has(n: string): boolean; get(n: string): unknown };
+    objs: { has(n: string): boolean; get(n: string): unknown };
+  };
+  let ctm: SvgMat = SVG_IDENT;
+  const stack: SvgMat[] = [];
+  let fill = "#000000", stroke = "#000000", lineWidth = 1;
+  let textMatrix: SvgMat = SVG_IDENT, lineMatrix: SvgMat = SVG_IDENT, fontSize = 10, fontName = "";
+  const body: string[] = [];
+  const usedFonts = new Set<string>();
+  let degraded = false;
+
+  const fn = opList.fnArray, argsAll = opList.argsArray;
+  for (let i = 0; i < fn.length; i++) {
+    const op = fn[i];
+    const a = argsAll[i] || [];
+    try {
+      if (op === OPS.save) stack.push(ctm);
+      else if (op === OPS.restore) ctm = stack.pop() ?? SVG_IDENT;
+      else if (op === OPS.transform) ctm = svgMul(ctm, svgToMat(a as number[]));
+      else if (op === OPS.setFillRGBColor) fill = svgAsColor(a[0]);
+      else if (op === OPS.setStrokeRGBColor) stroke = svgAsColor(a[0]);
+      else if (op === OPS.setFillGray) fill = svgAsColor(a[0]);
+      else if (op === OPS.setStrokeGray) stroke = svgAsColor(a[0]);
+      else if (op === OPS.setLineWidth) lineWidth = a[0] as number;
+      else if (op === OPS.constructPath) {
+        // v6: [paintOp, [subpath-segmente], minMax] — Paint (fill/stroke) ist fusioniert.
+        const paint = opName[a[0] as number] ?? "";
+        const subpaths = a[1] as ArrayLike<number>[];
+        let d = "";
+        if (Array.isArray(subpaths)) for (const sp of subpaths) d += svgDecodeSubpath(sp);
+        const doFill = /fill/i.test(paint), doStroke = /stroke/i.test(paint);
+        if (d.trim() && (doFill || doStroke)) {
+          const parts = [`transform="${svgMatStr(ctm)}"`, `d="${d.trim()}"`, `fill="${doFill ? fill : "none"}"`];
+          if (doFill && /eo/i.test(paint)) parts.push(`fill-rule="evenodd"`);
+          if (doStroke) parts.push(`stroke="${stroke}"`, `stroke-width="${+lineWidth.toFixed(3)}"`);
+          body.push(`<path ${parts.join(" ")}/>`);
         }
-        else if (op === OPS.beginText) { textMatrix = SPIKE_IDENT; lineMatrix = SPIKE_IDENT; }
-        else if (op === OPS.setFont) fontSize = Math.abs(a[1] as number) || 10;
-        else if (op === OPS.setTextMatrix) { textMatrix = spikeToMat(a as number[]); lineMatrix = textMatrix; }
-        else if (op === OPS.nextLine) { lineMatrix = spikeMul(lineMatrix, [1, 0, 0, 1, 0, -fontSize]); textMatrix = lineMatrix; }
-        else if (op === OPS.moveText) { lineMatrix = spikeMul(lineMatrix, [1, 0, 0, 1, a[0] as number, a[1] as number]); textMatrix = lineMatrix; }
-        else if (op === OPS.showText || op === OPS.nextLineShowText) {
-          const glyphs = (op === OPS.nextLineShowText ? a[0] : a[0]) as unknown[];
-          let str = "";
-          if (Array.isArray(glyphs)) {
-            for (const g of glyphs) {
-              if (g && typeof g === "object" && "unicode" in (g as object)) str += (g as { unicode: string }).unicode;
-              // Zahlen = horizontale Positionsanpassung → für den Spike ignoriert
-            }
-          }
-          if (str.trim()) {
-            const m = spikeMul(spikeMul(ctm, textMatrix), [1, 0, 0, -1, 0, 0]); // Y-Flip für aufrechte Glyphen
-            body.push(`<text transform="${spikeMatStr(m)}" font-size="${+fontSize.toFixed(3)}" font-family="sans-serif" fill="${fill}">${spikeXmlEsc(str)}</text>`);
-          }
-        } else {
-          note(name, skipped); // kontrollierte Degradation: unbekannte Op überspringen
-        }
-      } catch (e) {
-        if (!firstErr) firstErr = name + ": " + String((e as Error)?.message ?? e);
-        note(name, skipped);
       }
+      else if (op === OPS.beginText) { textMatrix = SVG_IDENT; lineMatrix = SVG_IDENT; }
+      else if (op === OPS.setFont) {
+        fontName = String(a[0] ?? "");
+        if (fontName) usedFonts.add(fontName);
+        fontSize = Math.abs(a[1] as number) || 10;
+      }
+      else if (op === OPS.setTextMatrix) { textMatrix = svgToMat(a as number[]); lineMatrix = textMatrix; }
+      else if (op === OPS.nextLine) { lineMatrix = svgMul(lineMatrix, [1, 0, 0, 1, 0, -fontSize]); textMatrix = lineMatrix; }
+      else if (op === OPS.moveText) { lineMatrix = svgMul(lineMatrix, [1, 0, 0, 1, a[0] as number, a[1] as number]); textMatrix = lineMatrix; }
+      else if (op === OPS.showText || op === OPS.nextLineShowText) {
+        const glyphs = a[0] as unknown[];
+        let str = "";
+        if (Array.isArray(glyphs)) {
+          for (const g of glyphs) {
+            if (g && typeof g === "object" && "unicode" in (g as object)) str += (g as { unicode: string }).unicode;
+          }
+        }
+        if (str.trim()) {
+          const m = svgMul(svgMul(ctm, textMatrix), [1, 0, 0, -1, 0, 0]); // Y-Flip für aufrechte Glyphen
+          const fam = fontName ? `'${fontName}', sans-serif` : "sans-serif";
+          body.push(`<text transform="${svgMatStr(m)}" font-size="${+fontSize.toFixed(3)}" font-family="${fam}" fill="${fill}">${svgXmlEsc(str)}</text>`);
+        }
+      }
+      else if (op === OPS.paintImageXObject || op === OPS.paintInlineImageXObject) {
+        const imgName = String(a[0] ?? "");
+        let dataUrl: string | null = null;
+        try {
+          const img = imgName && store.objs.has(imgName) ? store.objs.get(imgName) : null;
+          dataUrl = img ? svgImageToDataUrl(img) : null;
+        } catch { dataUrl = null; }
+        if (dataUrl) {
+          const m = svgMul(ctm, [1, 0, 0, -1, 0, 1]); // Einheitsquadrat der Bild-Konvention + Y-Flip
+          body.push(`<image transform="${svgMatStr(m)}" width="1" height="1" preserveAspectRatio="none" href="${dataUrl}"/>`);
+        } else {
+          degraded = true; // Bild nicht extrahierbar → ganze Seite als Raster
+        }
+      }
+      else if (op === OPS.shadingFill) {
+        degraded = true; // Verlauf nicht vektorisierbar → ganze Seite als Raster
+      }
+    } catch {
+      // einzelne Op fehlgeschlagen → überspringen (kontrollierte Degradation)
     }
+  }
 
-    const report = JSON.stringify({ page: pageNumber, size: [W, H], ops: counts, skipped, firstErr });
-    return (
-      `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">` +
-      `<!-- spike-coverage ${spikeXmlEsc(report)} -->` +
-      `<rect width="100%" height="100%" fill="#ffffff"/>` +
-      `<g transform="${spikeMatStr(root)}">${body.join("")}</g>` +
-      `</svg>`
-    );
+  if (degraded) return rasterFallback();
+
+  // Genutzte Fonts einbetten (dedupliziert). createFontFaceRule liefert eine
+  // @font-face-Regel mit den Font-Daten als data-URL; font-family = loadedName.
+  const fontRules: string[] = [];
+  for (const name of usedFonts) {
+    try {
+      const fontObj = store.commonObjs.has(name)
+        ? store.commonObjs.get(name) as { createFontFaceRule?: () => string | null }
+        : null;
+      const rule = fontObj && typeof fontObj.createFontFaceRule === "function" ? fontObj.createFontFaceRule() : null;
+      if (rule) fontRules.push(rule);
+    } catch { /* Font ohne Daten → Text nutzt die generische Ersatzfamilie */ }
+  }
+  const style = fontRules.length ? `<style>${fontRules.join("\n")}</style>` : "";
+
+  return (
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">` +
+    style +
+    `<rect width="100%" height="100%" fill="#ffffff"/>` +
+    `<g transform="${svgMatStr(root)}">${body.join("")}</g>` +
+    `</svg>`
+  );
+}
+
+/** PDF → Vektor-SVG je Seite, gebündelt als ZIP (seitenweise erzeugt → OOM-sicher). */
+export async function convertToSvgZip(data: Uint8Array, scale: number): Promise<Uint8Array> {
+  return withTransientDoc(data, async (doc) => {
+    const files: Record<string, Uint8Array> = {};
+    const pad = String(doc.numPages).length;
+    const enc = new TextEncoder();
+    for (let i = 1; i <= doc.numPages; i++) {
+      const svg = await renderPageSvg(doc, i, scale);
+      files[`seite-${String(i).padStart(pad, "0")}.svg`] = enc.encode(svg);
+    }
+    return zipSync(files, { level: 6 });
   });
 }
 
