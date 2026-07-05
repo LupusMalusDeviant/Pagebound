@@ -888,14 +888,23 @@ function svgDecodeSubpath(seg: ArrayLike<number>): string {
 // Fehler/unbekanntem Format → Aufrufer degradiert die Seite auf Raster.
 function svgImageToDataUrl(img: unknown): string | null {
   try {
-    const o = img as { bitmap?: ImageBitmap };
-    if (!o || !o.bitmap) return null;
+    const o = img as { bitmap?: ImageBitmap; data?: Uint8Array | Uint8ClampedArray; width?: number; height?: number };
+    if (!o) return null;
+    const w = o.width ?? (o.bitmap ? o.bitmap.width : 0);
+    const h = o.height ?? (o.bitmap ? o.bitmap.height : 0);
+    if (!w || !h) return null;
     const canvas = document.createElement("canvas");
-    canvas.width = o.bitmap.width;
-    canvas.height = o.bitmap.height;
+    canvas.width = w;
+    canvas.height = h;
     const ctx = canvas.getContext("2d");
     if (!ctx) return null;
-    ctx.drawImage(o.bitmap, 0, 0);
+    if (o.bitmap) {
+      ctx.drawImage(o.bitmap, 0, 0);
+    } else if (o.data && o.data.length >= w * h * 4) {
+      ctx.putImageData(new ImageData(new Uint8ClampedArray(o.data.slice(0, w * h * 4)), w, h), 0, 0);
+    } else {
+      return null; // unbekanntes Format (z. B. RGB/CMYK ohne bitmap) → Bild wird übersprungen
+    }
     return canvas.toDataURL("image/png");
   } catch {
     return null;
@@ -941,7 +950,6 @@ async function renderPageSvg(doc: PDFDocumentProxy, pageNumber: number, scale: n
   let textMatrix: SvgMat = SVG_IDENT, lineMatrix: SvgMat = SVG_IDENT, fontSize = 10, fontName = "";
   const body: string[] = [];
   const usedFonts = new Set<string>();
-  let degraded = false;
 
   const fn = opList.fnArray, argsAll = opList.argsArray;
   for (let i = 0; i < fn.length; i++) {
@@ -1003,19 +1011,18 @@ async function renderPageSvg(doc: PDFDocumentProxy, pageNumber: number, scale: n
         if (dataUrl) {
           const m = svgMul(ctm, [1, 0, 0, -1, 0, 1]); // Einheitsquadrat der Bild-Konvention + Y-Flip
           body.push(`<image transform="${svgMatStr(m)}" width="1" height="1" preserveAspectRatio="none" href="${dataUrl}"/>`);
-        } else {
-          degraded = true; // Bild nicht extrahierbar → ganze Seite als Raster
         }
+        // Nicht extrahierbares Bild → nur DIESES Bild überspringen. Die Seite wird
+        // NICHT komplett gerastert — scharfer, editierbarer Vektor-Text ist wichtiger
+        // als ein einzelnes Bild (sonst pixelt beim Zoomen die ganze Seite).
       }
-      else if (op === OPS.shadingFill) {
-        degraded = true; // Verlauf nicht vektorisierbar → ganze Seite als Raster
-      }
+      // OPS.shadingFill (Verläufe) lassen sich nicht vektorisieren → weglassen;
+      // Text/Pfade bleiben scharf. Ein fehlender Verlaufs-Hintergrund ist besser als
+      // eine komplett gerasterte Seite.
     } catch {
       // einzelne Op fehlgeschlagen → überspringen (kontrollierte Degradation)
     }
   }
-
-  if (degraded) return rasterFallback();
 
   // Genutzte Fonts einbetten (dedupliziert). createFontFaceRule liefert eine
   // @font-face-Regel mit den Font-Daten als data-URL; font-family = loadedName.
