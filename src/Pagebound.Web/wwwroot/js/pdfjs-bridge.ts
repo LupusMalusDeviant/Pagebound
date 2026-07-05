@@ -821,6 +821,161 @@ export async function convertToImagesZip(
 }
 
 // ============================================================================
+// SPIKE (Bean PDF-Tool-caes) — PDF → Vektor-SVG. WEGWERF-CODE, nach dem Go/No-Go
+// wieder entfernen. Übersetzt die niedrigstufigen Zeichen-Operationen EINER Seite
+// (page.getOperatorList) in ein minimales Vektor-SVG: Pfade als <path>, Text als
+// <text> (skalierbar/auswählbar; Glyph-Umriss-Treue ist die Folge-Frage). Nicht
+// unterstützte Ops werden gezählt und übersprungen (kontrollierte Degradation,
+// kein Crash). Gibt den SVG-String zurück, inkl. Coverage-Kommentar mit Op-Zählung.
+// ============================================================================
+type SpikeMat = [number, number, number, number, number, number];
+const SPIKE_IDENT: SpikeMat = [1, 0, 0, 1, 0, 0];
+
+function spikeToMat(a: ArrayLike<number>): SpikeMat {
+  return [a[0], a[1], a[2], a[3], a[4], a[5]];
+}
+function spikeMul(m1: SpikeMat, m2: SpikeMat): SpikeMat {
+  return [
+    m1[0] * m2[0] + m1[2] * m2[1],
+    m1[1] * m2[0] + m1[3] * m2[1],
+    m1[0] * m2[2] + m1[2] * m2[3],
+    m1[1] * m2[2] + m1[3] * m2[3],
+    m1[0] * m2[4] + m1[2] * m2[5] + m1[4],
+    m1[1] * m2[4] + m1[3] * m2[5] + m1[5]
+  ];
+}
+function spikeMatStr(m: SpikeMat): string {
+  return `matrix(${m.map((n) => +n.toFixed(4)).join(" ")})`;
+}
+function spikeColor(c: ArrayLike<number> | null | undefined): string {
+  if (!c) return "#000000";
+  const h = (n: number) => Math.max(0, Math.min(255, Math.round(n))).toString(16).padStart(2, "0");
+  return `#${h(c[0])}${h(c[1])}${h(c[2])}`;
+}
+function spikeGray(g: number): string {
+  const v = Math.max(0, Math.min(255, Math.round(g * 255)));
+  return spikeColor([v, v, v]);
+}
+function spikeXmlEsc(s: string): string {
+  return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+// constructPath-Args (v6: [subOps, coords, ...]) → SVG-path-d-Fragment. Unbekannte
+// Sub-Ops brechen NUR diesen Pfad ab (unklarer Koordinaten-Verbrauch), kein Crash.
+function spikeDecodePath(subOps: number[], co: number[], OPS: Record<string, number>): string {
+  let d = "", k = 0, cx = 0, cy = 0;
+  const n = (v: number) => +v.toFixed(3);
+  for (const p of subOps) {
+    if (p === OPS.moveTo) { cx = co[k++]; cy = co[k++]; d += `M ${n(cx)} ${n(cy)} `; }
+    else if (p === OPS.lineTo) { cx = co[k++]; cy = co[k++]; d += `L ${n(cx)} ${n(cy)} `; }
+    else if (p === OPS.curveTo) { const x1 = co[k++], y1 = co[k++], x2 = co[k++], y2 = co[k++]; cx = co[k++]; cy = co[k++]; d += `C ${n(x1)} ${n(y1)} ${n(x2)} ${n(y2)} ${n(cx)} ${n(cy)} `; }
+    else if (p === OPS.curveTo2) { const x2 = co[k++], y2 = co[k++], ex = co[k++], ey = co[k++]; d += `C ${n(cx)} ${n(cy)} ${n(x2)} ${n(y2)} ${n(ex)} ${n(ey)} `; cx = ex; cy = ey; }
+    else if (p === OPS.curveTo3) { const x1 = co[k++], y1 = co[k++], ex = co[k++], ey = co[k++]; d += `C ${n(x1)} ${n(y1)} ${n(ex)} ${n(ey)} ${n(ex)} ${n(ey)} `; cx = ex; cy = ey; }
+    else if (p === OPS.rectangle) { const x = co[k++], y = co[k++], w = co[k++], h = co[k++]; d += `M ${n(x)} ${n(y)} h ${n(w)} v ${n(h)} h ${n(-w)} Z `; cx = x; cy = y; }
+    else if (p === OPS.closePath) { d += "Z "; }
+    else { return d + " <!--UNKNOWN_SUBOP--> "; }
+  }
+  return d;
+}
+
+export async function convertToSvgSpike(data: Uint8Array, pageNumber: number, scale: number): Promise<string> {
+  return withTransientDoc(data, async (doc) => {
+    const OPS = (pdfjsLib as unknown as { OPS: Record<string, number> }).OPS;
+    const opName: Record<number, string> = {};
+    for (const key of Object.keys(OPS)) opName[OPS[key]] = key;
+
+    const page = await doc.getPage(pageNumber);
+    const viewport = page.getViewport({ scale });
+    const W = Math.ceil(viewport.width), H = Math.ceil(viewport.height);
+    const root = spikeToMat(viewport.transform as unknown as number[]);
+
+    let opList: { fnArray: number[]; argsArray: unknown[] };
+    try {
+      opList = await page.getOperatorList() as unknown as { fnArray: number[]; argsArray: unknown[] };
+    } catch {
+      // Fehlerpfad: Operator-Liste nicht gewinnbar → kontrolliert leeres SVG, kein Crash,
+      // keine internen Details geleakt.
+      return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"><!-- spike: operator list unavailable --></svg>`;
+    }
+
+    let ctm: SpikeMat = SPIKE_IDENT;
+    const stack: SpikeMat[] = [];
+    let fill = "#000000", stroke = "#000000", lineWidth = 1;
+    let pathD = "";
+    let textMatrix: SpikeMat = SPIKE_IDENT, lineMatrix: SpikeMat = SPIKE_IDENT, fontSize = 10;
+    const body: string[] = [];
+    const counts: Record<string, number> = {};
+    const skipped: Record<string, number> = {};
+    const note = (name: string, map: Record<string, number>) => { map[name] = (map[name] || 0) + 1; };
+
+    const emitPath = (fillCol: string | null, strokeCol: string | null, eo: boolean) => {
+      if (!pathD.trim()) { pathD = ""; return; }
+      const parts = [`transform="${spikeMatStr(ctm)}"`, `d="${pathD.trim()}"`];
+      parts.push(`fill="${fillCol ?? "none"}"`);
+      if (fillCol && eo) parts.push(`fill-rule="evenodd"`);
+      if (strokeCol) parts.push(`stroke="${strokeCol}"`, `stroke-width="${+lineWidth.toFixed(3)}"`);
+      body.push(`<path ${parts.join(" ")}/>`);
+      pathD = "";
+    };
+
+    const fn = opList.fnArray, argsAll = opList.argsArray as unknown[][];
+    for (let i = 0; i < fn.length; i++) {
+      const op = fn[i];
+      const a = argsAll[i] || [];
+      const name = opName[op] ?? String(op);
+      note(name, counts);
+      try {
+        if (op === OPS.save) stack.push(ctm);
+        else if (op === OPS.restore) ctm = stack.pop() ?? SPIKE_IDENT;
+        else if (op === OPS.transform) ctm = spikeMul(ctm, spikeToMat(a as number[]));
+        else if (op === OPS.setFillRGBColor) fill = spikeColor(a[0] as ArrayLike<number>);
+        else if (op === OPS.setStrokeRGBColor) stroke = spikeColor(a[0] as ArrayLike<number>);
+        else if (op === OPS.setFillGray) fill = spikeGray(a[0] as number);
+        else if (op === OPS.setStrokeGray) stroke = spikeGray(a[0] as number);
+        else if (op === OPS.setLineWidth) lineWidth = a[0] as number;
+        else if (op === OPS.constructPath) pathD += spikeDecodePath((a[0] as number[]), (a[1] as number[]), OPS);
+        else if (op === OPS.fill || op === OPS.eoFill) emitPath(fill, null, op === OPS.eoFill);
+        else if (op === OPS.stroke) emitPath(null, stroke, false);
+        else if (op === OPS.fillStroke || op === OPS.eoFillStroke) emitPath(fill, stroke, op === OPS.eoFillStroke);
+        else if (op === OPS.endPath) pathD = "";
+        else if (op === OPS.beginText) { textMatrix = SPIKE_IDENT; lineMatrix = SPIKE_IDENT; }
+        else if (op === OPS.setFont) fontSize = Math.abs(a[1] as number) || 10;
+        else if (op === OPS.setTextMatrix) { textMatrix = spikeToMat(a as number[]); lineMatrix = textMatrix; }
+        else if (op === OPS.nextLine) { lineMatrix = spikeMul(lineMatrix, [1, 0, 0, 1, 0, -fontSize]); textMatrix = lineMatrix; }
+        else if (op === OPS.moveText) { lineMatrix = spikeMul(lineMatrix, [1, 0, 0, 1, a[0] as number, a[1] as number]); textMatrix = lineMatrix; }
+        else if (op === OPS.showText || op === OPS.nextLineShowText) {
+          const glyphs = (op === OPS.nextLineShowText ? a[0] : a[0]) as unknown[];
+          let str = "";
+          if (Array.isArray(glyphs)) {
+            for (const g of glyphs) {
+              if (g && typeof g === "object" && "unicode" in (g as object)) str += (g as { unicode: string }).unicode;
+              // Zahlen = horizontale Positionsanpassung → für den Spike ignoriert
+            }
+          }
+          if (str.trim()) {
+            const m = spikeMul(spikeMul(ctm, textMatrix), [1, 0, 0, -1, 0, 0]); // Y-Flip für aufrechte Glyphen
+            body.push(`<text transform="${spikeMatStr(m)}" font-size="${+fontSize.toFixed(3)}" font-family="sans-serif" fill="${fill}">${spikeXmlEsc(str)}</text>`);
+          }
+        } else {
+          note(name, skipped); // kontrollierte Degradation: unbekannte Op überspringen
+        }
+      } catch {
+        note(name, skipped);
+      }
+    }
+
+    const report = JSON.stringify({ page: pageNumber, size: [W, H], ops: counts, skipped });
+    return (
+      `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">` +
+      `<!-- spike-coverage ${spikeXmlEsc(report)} -->` +
+      `<rect width="100%" height="100%" fill="#ffffff"/>` +
+      `<g transform="${spikeMatStr(root)}">${body.join("")}</g>` +
+      `</svg>`
+    );
+  });
+}
+
+// ============================================================================
 // PDF → DOCX (Word, OOXML) — Best-Effort Textfluss, 100 % lokal, keine Dependency
 // ----------------------------------------------------------------------------
 // PDF hat kein Absatz-/Struktur-Modell. Wir rekonstruieren aus getTextContent:
