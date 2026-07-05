@@ -131,3 +131,16 @@ samples/**/*.pagebound.json
 # --- Internes / nicht versionieren -----------------------------------------
 # Lokale Planungs-/Roadmap-Notizen — bleiben rein lokal, NICHT im oeffentlichen Repo
 .planning/
+
+# Factory runtime / local-only state
+.claude/lessons-learned.md
+.claude/.lessons-queue
+.claude/.lessons-processed
+.claude/.auto-drive-state
+.claude/.locks/
+.claude/auto-drive.off
+.claude/gate-guard.off
+
+# Beans Issue-Tracker — rein lokal, NICHT ins Repo
+.beans/
+.beans.yml
