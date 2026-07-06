@@ -1556,7 +1556,7 @@
     // Modus nicht wieder an einer der beiden Stellen vergessen wird.
     private static bool IsPlacementMode(AnnotationMode mode) =>
         mode is AnnotationMode.StickyNote or AnnotationMode.FreeText or AnnotationMode.DateStamp
-            or AnnotationMode.EditText;
+            or AnnotationMode.EditText or AnnotationMode.Signature;
 
     // Schwärzungs-Bereiche (FA — echte Redaktion). Transient (NICHT in der Sidecar
     // — Redaktion ist destruktiv und gehört nicht in die wiederherstellbaren
@@ -3547,7 +3547,11 @@
             var mime = string.IsNullOrEmpty(file.ContentType) ? "image/png" : file.ContentType;
             _activeSignatureImage = $"data:{mime};base64,{base64}";
             _activeSignatureFilename = file.Name;
-            _annotationMode = AnnotationMode.Signature;
+            // Wie der Zeichnen-Flow (OnSignatureDrawnAsync): über die Methode in
+            // den Platzieren-Modus wechseln, nicht das Feld direkt setzen — sonst
+            // bleibt beim Wechsel aus einem Zeichenmodus der JS-Pointer-Listener
+            // hängen und fängt die Platzieren-Klicks ab.
+            await SetAnnotationMode(AnnotationMode.Signature);
         }
         catch (Exception ex)
         {
