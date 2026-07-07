@@ -203,7 +203,7 @@ function buildInteractive(
     const enter = node.enter().append("g").attr("class", "mnode")
       .attr("transform", `translate(${source.y0},${source.x0})`)
       .style("cursor", "pointer")
-      .on("click", (e: any, d: any) => { e.stopPropagation(); if (editingId) return; getDotNet()?.invokeMethodAsync("OnMindNodeClicked", blockId, d.data.id); })
+      .on("click", (e: any, d: any) => { e.stopPropagation(); if (editingId) return; getDotNet()?.invokeMethodAsync("OnMindNodeClicked", blockId, d.data.id).catch(() => { /* Komponente disposed */ }); })
       .on("dblclick", (e: any, d: any) => { e.stopPropagation(); startEdit(d); });
 
     enter.append("rect").attr("class", "mrect")
@@ -225,13 +225,13 @@ function buildInteractive(
 
     // Aktions-Buttons, nur am gewählten Knoten sichtbar (siehe applySelected).
     const addG = enter.append("g").attr("class", "mact-add").style("display", "none").style("cursor", "pointer")
-      .on("click", (e: any, d: any) => { e.stopPropagation(); getDotNet()?.invokeMethodAsync("OnMindNodeAddChild", blockId, d.data.id); });
+      .on("click", (e: any, d: any) => { e.stopPropagation(); getDotNet()?.invokeMethodAsync("OnMindNodeAddChild", blockId, d.data.id).catch(() => { /* Komponente disposed */ }); });
     addG.append("title").text("+");
     addG.append("circle").attr("r", 9).attr("fill", "#4A7C59");
     addG.append("text").text("+").attr("text-anchor", "middle").attr("dy", "0.33em")
       .style("font-size", "17px").style("font-weight", "700").style("fill", "#fff").style("pointer-events", "none");
     const delG = enter.append("g").attr("class", "mact-del").style("display", "none").style("cursor", "pointer")
-      .on("click", (e: any, d: any) => { e.stopPropagation(); getDotNet()?.invokeMethodAsync("OnMindNodeDeleteNode", blockId, d.data.id); });
+      .on("click", (e: any, d: any) => { e.stopPropagation(); getDotNet()?.invokeMethodAsync("OnMindNodeDeleteNode", blockId, d.data.id).catch(() => { /* Komponente disposed */ }); });
     delG.append("title").text("×");
     delG.append("circle").attr("r", 9).attr("fill", "#C1553A");
     delG.append("text").text("×").attr("text-anchor", "middle").attr("dy", "0.33em")
@@ -288,7 +288,7 @@ function buildInteractive(
       const val = el.value;
       editingId = null;
       fo.remove();
-      if (save && val !== d.data.label) getDotNet()?.invokeMethodAsync("OnMindNodeRenamed", blockId, d.data.id, val);
+      if (save && val !== d.data.label) getDotNet()?.invokeMethodAsync("OnMindNodeRenamed", blockId, d.data.id, val).catch(() => { /* Komponente disposed */ });
       else applySelected();
     };
     el.addEventListener("keydown", (ev: KeyboardEvent) => {

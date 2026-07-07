@@ -194,18 +194,21 @@ function wireShortcuts(): void {
     const inEdit = !!target?.closest?.(".pb-edit, [contenteditable='true'], input, textarea, select");
     const mod = e.ctrlKey || e.metaKey;
     const key = e.key.toLowerCase();
+    // .catch an jedem Aufruf: feuert ein Shortcut während die Editor-Komponente
+    // disposed wird, rejectet invokeMethodAsync mit "no tracked object id …" —
+    // ohne catch ein "Uncaught (in promise)". ?. macht es zusätzlich null-sicher.
     if (mod && key === "s") {
       e.preventDefault();
-      void editorRef.invokeMethodAsync("OnShortcut", "save");
+      void editorRef?.invokeMethodAsync("OnShortcut", "save").catch(() => { /* Komponente disposed */ });
     } else if (mod && !inEdit && key === "z" && !e.shiftKey) {
       e.preventDefault();
-      void editorRef.invokeMethodAsync("OnShortcut", "undo");
+      void editorRef?.invokeMethodAsync("OnShortcut", "undo").catch(() => { /* Komponente disposed */ });
     } else if (mod && !inEdit && (key === "y" || (key === "z" && e.shiftKey))) {
       e.preventDefault();
-      void editorRef.invokeMethodAsync("OnShortcut", "redo");
+      void editorRef?.invokeMethodAsync("OnShortcut", "redo").catch(() => { /* Komponente disposed */ });
     } else if (!mod && !inEdit && (e.key === "Delete" || e.key === "Backspace")) {
       e.preventDefault();
-      void editorRef.invokeMethodAsync("OnShortcut", "delete");
+      void editorRef?.invokeMethodAsync("OnShortcut", "delete").catch(() => { /* Komponente disposed */ });
     }
   });
 }
@@ -253,7 +256,7 @@ function wireOverlayInteractions(): void {
       void editorRef?.invokeMethodAsync("OnOverlayGeometry", id,
         parseFloat(overlay.style.left) || 0,
         parseFloat(overlay.style.top) || 0,
-        parseFloat(overlay.style.width) || startWidth);
+        parseFloat(overlay.style.width) || startWidth).catch(() => { /* Komponente disposed */ });
     };
     handle.addEventListener("pointermove", onMove);
     handle.addEventListener("pointerup", onUp);
@@ -296,7 +299,7 @@ function wireTouchBlockReorder(): void {
       clearMark();
       const pageIdx = targetPage?.id?.startsWith("pb-page-") ? parseInt(targetPage.id.slice("pb-page-".length), 10) : -1;
       if (targetBlock?.dataset.blk || pageIdx >= 0) {
-        void editorRef?.invokeMethodAsync("OnBlockTouchDrop", source.dataset.blk, targetBlock?.dataset.blk ?? null, pageIdx);
+        void editorRef?.invokeMethodAsync("OnBlockTouchDrop", source.dataset.blk, targetBlock?.dataset.blk ?? null, pageIdx).catch(() => { /* Komponente disposed */ });
       }
     };
     handle.addEventListener("pointermove", onMove);
@@ -348,7 +351,9 @@ export function registerFileDrop(dotnetRef: DotNetRef): void {
         }
       }
       if (payload.length > 0) {
-        await dotnetRef.invokeMethodAsync("OnFilesDropped", pageIndex, payload);
+        // .catch: liegt in einer fire-and-forget async-IIFE — ein Reject (Ref
+        // disposed) würde sonst als "Uncaught (in promise)" durchschlagen.
+        await dotnetRef.invokeMethodAsync("OnFilesDropped", pageIndex, payload).catch(() => { /* Komponente disposed */ });
       }
     })();
   });

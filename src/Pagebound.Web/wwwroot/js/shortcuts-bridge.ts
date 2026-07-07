@@ -74,9 +74,11 @@ export function register(ref: DotNetRef): void {
     const sc = shortcutFor(e);
     if (!sc) return;
     if (sc.preventDefault) e.preventDefault();
-    // Fire-and-forget; errors on the C# side are surfaced through Blazor's
-    // own unhandled-exception channel, no need to attach a catch here.
-    void activeRef?.invokeMethodAsync("HandleShortcut", sc.id);
+    // Fire-and-forget. .catch ist nötig: feuert ein Tastendruck genau während die
+    // Komponente disposed wird (Navigation), rejectet invokeMethodAsync mit
+    // "There is no tracked object with id …" — ohne catch wird das ein
+    // "Uncaught (in promise)" in der Konsole. Der Reject bedeutet nur "Ref weg".
+    void activeRef?.invokeMethodAsync("HandleShortcut", sc.id).catch(() => { /* Komponente disposed */ });
   };
   window.addEventListener("keydown", handler);
 }
@@ -261,7 +263,9 @@ export function dragElementToFraction(
     document.removeEventListener("pointermove", onMove);
     document.removeEventListener("pointerup", onUp);
     document.removeEventListener("pointercancel", onUp);
-    void dotNetRef.invokeMethodAsync(callbackMethod, callbackArg, finalX, finalY);
+    // .catch: endet der Drag erst nachdem die Reader-Komponente disposed wurde,
+    // ist die Ref weg → Reject bewusst schlucken statt "Uncaught (in promise)".
+    void dotNetRef.invokeMethodAsync(callbackMethod, callbackArg, finalX, finalY).catch(() => { /* Komponente disposed */ });
   };
 
   document.addEventListener("pointermove", onMove);
@@ -323,7 +327,8 @@ export function resizeElementToFraction(
     document.removeEventListener("pointermove", onMove);
     document.removeEventListener("pointerup", onUp);
     document.removeEventListener("pointercancel", onUp);
-    void dotNetRef.invokeMethodAsync(callbackMethod, callbackArg, finalW, finalH);
+    // .catch: Ref evtl. schon disposed (s. o.) → Reject schlucken.
+    void dotNetRef.invokeMethodAsync(callbackMethod, callbackArg, finalW, finalH).catch(() => { /* Komponente disposed */ });
   };
 
   document.addEventListener("pointermove", onMove);
@@ -617,7 +622,8 @@ export function startDrawingCapture(
     }
     clearPreview();
     if (result) {
-      void dotNetRef.invokeMethodAsync(callbackMethod, result);
+      // .catch: Ref evtl. schon disposed (Mode-Wechsel/Navigation) → Reject schlucken.
+      void dotNetRef.invokeMethodAsync(callbackMethod, result).catch(() => { /* Komponente disposed */ });
     }
   }
 

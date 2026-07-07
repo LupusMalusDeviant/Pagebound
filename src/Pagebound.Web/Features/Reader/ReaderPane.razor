@@ -48,6 +48,7 @@
             else
             {
                 <InputFile OnChange="HandleFileSelected"
+                           name="pdf-open"
                            accept=".pdf"
                            class="block text-sm file:mr-3 file:rounded file:border-0 file:bg-pb-accent file:px-3 file:py-1.5 file:font-semibold file:text-[var(--accent-ink)] file:cursor-pointer cursor-pointer" />
             }
@@ -233,7 +234,7 @@
                        selbst via _signatureMenu.ForceClose(). *@
                     <label class="pb-menuitem cursor-pointer" @onclick:stopPropagation title="@L.T("reader.tool.signature.loadTitle")">
                         @L.T("reader.tool.signature.load")
-                        <InputFile OnChange="HandleSignatureImageSelectedAsync" accept=".png,.jpg,.jpeg,image/png,image/jpeg" class="hidden" />
+                        <InputFile OnChange="HandleSignatureImageSelectedAsync" name="signature-image" accept=".png,.jpg,.jpeg,image/png,image/jpeg" class="hidden" />
                     </label>
                 }
                 else
@@ -318,7 +319,7 @@
                 }
                 <label class="pb-menuitem cursor-pointer @(_handle is null ? "opacity-40 cursor-not-allowed" : "")" title="@L.T("reader.sidecar.importTitle")">
                     @L.T("reader.sidecar.import")
-                    <InputFile OnChange="HandleSidecarFileSelectedAsync" accept=".json,application/json" disabled="@(_handle is null)" class="hidden" />
+                    <InputFile OnChange="HandleSidecarFileSelectedAsync" name="sidecar-import" accept=".json,application/json" disabled="@(_handle is null)" class="hidden" />
                 </label>
             </ToolbarMenu>
         </div>

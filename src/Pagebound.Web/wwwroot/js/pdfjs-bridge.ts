@@ -1663,11 +1663,13 @@ export function registerFormBuilder(dotnetRef: { invokeMethodAsync(method: strin
       field.removeEventListener("pointerup", onUp);
       field.removeEventListener("pointercancel", onUp);
       const id = field.dataset.fbId ?? "";
+      // .catch: Geste endet evtl. nach Dispose der Form-Builder-Komponente →
+      // Reject (Ref weg) schlucken statt "Uncaught (in promise)".
       void fbRef?.invokeMethodAsync("OnFieldGeometry", id,
         parseFloat(field.style.left) || 0,
         parseFloat(field.style.top) || 0,
         parseFloat(field.style.width) || startWidth,
-        parseFloat(field.style.height) || startHeight);
+        parseFloat(field.style.height) || startHeight).catch(() => { /* Komponente disposed */ });
     };
     field.addEventListener("pointermove", onMove);
     field.addEventListener("pointerup", onUp);
