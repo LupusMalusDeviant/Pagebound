@@ -3136,7 +3136,6 @@
 
     private async Task HandlePdfClickAsync(MouseEventArgs e)
     {
-        Console.WriteLine($"[SIG-DIAG] PDF-Klick angekommen: mode={_annotationMode} isPlacing={_isPlacing} activeImg={_activeSignatureImage != null}");
         // Reentrancy-Guard (F-08): ein schneller zweiter Klick darf nicht am
         // await-Punkt (JS-Interop / CreateAsync) durchlaufen und doppelt
         // platzieren. Schützt alle vier Platzierungs-Modi auf einmal. Der Modus
@@ -3535,7 +3534,6 @@
     {
         var file = e.File;
         _errorMessage = null;
-        Console.WriteLine($"[SIG-DIAG] OnChange gefeuert: file={file?.Name} size={file?.Size} type={file?.ContentType}");
 
         if (file.Size > MaxSignatureBytes)
         {
@@ -3564,7 +3562,6 @@
             // hängen und fängt die Platzieren-Klicks ab.
             await SetAnnotationMode(AnnotationMode.Signature);
             _signatureMenu?.ForceClose(); // Menü zu → Backdrop weg → Platzieren-Klick erreicht die Seite
-            Console.WriteLine($"[SIG-DIAG] geladen: activeImg={_activeSignatureImage != null} mode={_annotationMode}, Menue geschlossen");
         }
         catch (Exception ex)
         {
@@ -3586,7 +3583,6 @@
 
     private async Task PlaceSignatureAsync(MouseEventArgs e)
     {
-        Console.WriteLine($"[SIG-DIAG] PlaceSignatureAsync erreicht: activeImg={_activeSignatureImage != null} pdfId={_currentPdfId != null}");
         if (_activeSignatureImage is null) return;
         if (_currentPdfId is null) return;
 
@@ -3595,7 +3591,6 @@
             PdfImageSelector,
             e.ClientX,
             e.ClientY);
-        Console.WriteLine($"[SIG-DIAG] fraction={(fraction is null ? "null" : $"{fraction.X:F2},{fraction.Y:F2}")}");
         if (fraction is null) return;
 
         // Default-Größe: 25 % Breite, 8 % Höhe — ausreichend für eine

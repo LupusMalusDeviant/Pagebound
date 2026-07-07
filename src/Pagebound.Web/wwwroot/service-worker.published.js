@@ -27,7 +27,19 @@ async function onInstall(event) {
         .filter(asset => offlineAssetsInclude.some(pattern => pattern.test(asset.url)))
         .filter(asset => !offlineAssetsExclude.some(pattern => pattern.test(asset.url)))
         .map(asset => new Request(asset.url, { integrity: asset.hash, cache: 'no-cache' }));
-    await caches.open(cacheName).then(cache => cache.addAll(assetsRequests));
+    // Einzeln cachen statt cache.addAll(): addAll ist all-or-nothing — schlägt EIN
+    // Asset fehl (Integrity-Mismatch/Netz-Hiccup während eines Deploys), rejectet der
+    // ganze Aufruf und der NEUE Cache bleibt LEER → onActivate löscht den alten →
+    // alle Navigationen fallen auf fetch() zurück und werfen bei Pech "Failed to
+    // fetch", der Nutzer hängt auf altem/kaputtem Stand fest. Mit allSettled cachen
+    // die übrigen Assets (v.a. index.html + Framework) trotzdem → der neue Build
+    // kommt sauber an. Nicht gecachte Einzel-Assets holt onFetch online nach.
+    const cache = await caches.open(cacheName);
+    const results = await Promise.allSettled(assetsRequests.map(req => cache.add(req)));
+    const failed = results.filter(r => r.status === 'rejected').length;
+    if (failed > 0) {
+        console.warn(`Service worker: ${failed} Asset(s) nicht gecacht (werden online nachgeladen)`);
+    }
 
     // skipWaiting: neue SW-Version übernimmt sofort, ohne darauf zu warten,
     // dass alle Tabs geschlossen werden. Ohne das bleibt der alte SW aktiv
@@ -54,25 +66,47 @@ async function onActivate(event) {
 }
 
 async function onFetch(event) {
-    let cachedResponse = null;
-    if (event.request.method === 'GET') {
-        // i18n-Bundles immer frisch vom Netz holen (s.o.), damit der nächste
-        // Boot nach einem Sprachwechsel garantiert das richtige Bundle bekommt.
-        const url = new URL(event.request.url);
-        if (url.pathname.startsWith('/resources/') && url.pathname.endsWith('.json')) {
-            return fetch(event.request);
-        }
-
-        // For all navigation requests, try to serve index.html from cache,
-        // unless that request is for an offline resource.
-        // If you need some URLs to be server-rendered, edit the following check to exclude those URLs
-        const shouldServeIndexHtml = event.request.mode === 'navigate'
-            && !manifestUrlList.some(url => url === event.request.url);
-
-        const request = shouldServeIndexHtml ? 'index.html' : event.request;
-        const cache = await caches.open(cacheName);
-        cachedResponse = await cache.match(request);
+    if (event.request.method !== 'GET') {
+        return fetch(event.request);
     }
 
-    return cachedResponse || fetch(event.request);
+    const url = new URL(event.request.url);
+    const cache = await caches.open(cacheName);
+
+    // i18n-Bundles immer frisch vom Netz holen (s.o.), damit der nächste Boot nach
+    // einem Sprachwechsel garantiert das richtige Bundle bekommt — aber mit
+    // Cache-Fallback, falls offline, statt hart zu scheitern.
+    if (url.pathname.startsWith('/resources/') && url.pathname.endsWith('.json')) {
+        try {
+            return await fetch(event.request);
+        } catch {
+            return (await cache.match(event.request)) ?? Response.error();
+        }
+    }
+
+    // For all navigation requests, try to serve index.html from cache,
+    // unless that request is for an offline resource.
+    const shouldServeIndexHtml = event.request.mode === 'navigate'
+        && !manifestUrlList.some(u => u === event.request.url);
+
+    const cachedResponse = await cache.match(shouldServeIndexHtml ? 'index.html' : event.request);
+    if (cachedResponse) {
+        return cachedResponse;
+    }
+
+    // Nicht im Cache → Netz. Scheitert das (Update-Race während eines Deploys /
+    // offline), für Navigationen auf gecachtes index.html zurückfallen, statt die
+    // Navigation mit "Failed to fetch" crashen zu lassen — genau dieser unbehandelte
+    // Reject hat Nutzer auf altem/kaputtem Stand hängen lassen.
+    try {
+        return await fetch(event.request);
+    } catch (err) {
+        if (shouldServeIndexHtml) {
+            const fallback = await cache.match('index.html');
+            if (fallback) {
+                return fallback;
+            }
+        }
+        throw err;
+    }
 }
