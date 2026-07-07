@@ -226,9 +226,13 @@
                          Active="@(_annotationMode == AnnotationMode.Signature || _signerPanelOpen)">
                 @if (_activeSignatureImage is null)
                 {
-                    <label class="pb-menuitem cursor-pointer" title="@L.T("reader.tool.signature.loadTitle")">
+                    @* WICHTIG: Der InputFile darf NICHT hier ins Menü-Panel — ein Klick
+                       blubbert auf @onclick=Close, das Menü schließt und entfernt den
+                       Input aus dem DOM, BEVOR sein change-Event feuert → OnChange käme
+                       nie an, das PNG würde nie geladen. Stattdessen triggert dieses
+                       Label den persistenten Input (unter der Leiste) per for=. *@
+                    <label for="pb-signature-file" class="pb-menuitem cursor-pointer" title="@L.T("reader.tool.signature.loadTitle")">
                         @L.T("reader.tool.signature.load")
-                        <InputFile OnChange="HandleSignatureImageSelectedAsync" accept=".png,.jpg,.jpeg,image/png,image/jpeg" class="hidden" />
                     </label>
                 }
                 else
@@ -311,12 +315,20 @@
                         @(_isSavingToWorkspace ? L.T("reader.workspace.saving") : L.T("reader.workspace.save"))
                     </button>
                 }
-                <label class="pb-menuitem cursor-pointer @(_handle is null ? "opacity-40 cursor-not-allowed" : "")" title="@L.T("reader.sidecar.importTitle")">
+                <label for="pb-sidecar-file" class="pb-menuitem cursor-pointer @(_handle is null ? "opacity-40 cursor-not-allowed" : "")" title="@L.T("reader.sidecar.importTitle")">
                     @L.T("reader.sidecar.import")
-                    <InputFile OnChange="HandleSidecarFileSelectedAsync" accept=".json,application/json" disabled="@(_handle is null)" class="hidden" />
                 </label>
             </ToolbarMenu>
         </div>
+
+        @* Persistente, versteckte Datei-Inputs — MÜSSEN außerhalb der ToolbarMenus
+           liegen (siehe Kommentar am Signatur-Label): ein Input im Menü-Panel wird
+           beim Klick mitsamt dem Panel aus dem DOM entfernt, bevor sein change feuert.
+           Die Menü-Einträge triggern sie per <label for="…">. *@
+        <InputFile id="pb-signature-file" OnChange="HandleSignatureImageSelectedAsync"
+                   accept=".png,.jpg,.jpeg,image/png,image/jpeg" class="hidden" />
+        <InputFile id="pb-sidecar-file" OnChange="HandleSidecarFileSelectedAsync"
+                   accept=".json,application/json" disabled="@(_handle is null)" class="hidden" />
 
         @* Kontextleisten unter der Menüleiste — erscheinen je aktivem Modus. *@
         @if (_annotationMode == AnnotationMode.Redaction || _redactions.Count > 0)
