@@ -46,4 +46,18 @@
     private bool _open;
     private void Toggle() => _open = !_open;
     private void Close() => _open = false;
+
+    /// <summary>
+    /// Von außen schließen — z. B. nachdem ein Menü-Eintrag asynchron eine Datei
+    /// geladen hat (Signatur-PNG) und der Reader in den Platzieren-Modus wechselt.
+    /// Der Backdrop würde sonst offen bleiben und den ersten Platzieren-Klick
+    /// abfangen. StateHasChanged, weil der Aufruf von außerhalb des eigenen
+    /// Event-Zyklus kommt.
+    /// </summary>
+    public void ForceClose()
+    {
+        if (!_open) return;
+        _open = false;
+        StateHasChanged();
+    }
 }

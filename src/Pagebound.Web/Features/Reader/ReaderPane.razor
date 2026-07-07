@@ -222,11 +222,16 @@
                 <button type="button" class="@($"pb-menuitem {(_annotationMode == AnnotationMode.LineShape ? "is-on" : "")}")" @onclick="@(() => SetAnnotationMode(AnnotationMode.LineShape))" title="@L.T("reader.draw.line.title")">@L.T("reader.draw.line")</button>
             </ToolbarMenu>
 
-            <ToolbarMenu Label="@L.T("reader.menu.signature")" Title="@L.T("reader.menu.signature")"
+            <ToolbarMenu @ref="_signatureMenu" Label="@L.T("reader.menu.signature")" Title="@L.T("reader.menu.signature")"
                          Active="@(_annotationMode == AnnotationMode.Signature || _signerPanelOpen)">
                 @if (_activeSignatureImage is null)
                 {
-                    <label class="pb-menuitem cursor-pointer" title="@L.T("reader.tool.signature.loadTitle")">
+                    @* stopPropagation: der Klick darf NICHT auf das Panel-@onclick=Close
+                       durchblubbern — sonst schließt das Menü und reißt den InputFile aus
+                       dem DOM, bevor sein change-Event feuert (OnChange käme nie an, das
+                       PNG würde nie geladen). Nach dem Laden schließt der Handler das Menü
+                       selbst via _signatureMenu.ForceClose(). *@
+                    <label class="pb-menuitem cursor-pointer" @onclick:stopPropagation title="@L.T("reader.tool.signature.loadTitle")">
                         @L.T("reader.tool.signature.load")
                         <InputFile OnChange="HandleSignatureImageSelectedAsync" accept=".png,.jpg,.jpeg,image/png,image/jpeg" class="hidden" />
                     </label>
@@ -1742,6 +1747,10 @@
     private string? _activeSignatureImage; // Data-URL
     private string? _activeSignatureFilename;
     private const int MaxSignatureBytes = 2 * 1024 * 1024; // 2 MB
+    // Referenz auf das Signatur-Menü, um es nach dem PNG-Laden zu schließen
+    // (das Lade-Label nutzt stopPropagation, damit OnChange feuert — dadurch
+    // bleibt das Menü offen und muss aktiv geschlossen werden).
+    private ToolbarMenu? _signatureMenu;
 
     // Signatur zeichnen (Canvas → PNG-Data-URL, wie ein hochgeladenes PNG).
     private bool _signaturePadOpen;
@@ -3554,7 +3563,8 @@
             // bleibt beim Wechsel aus einem Zeichenmodus der JS-Pointer-Listener
             // hängen und fängt die Platzieren-Klicks ab.
             await SetAnnotationMode(AnnotationMode.Signature);
-            Console.WriteLine($"[SIG-DIAG] geladen: activeImg={_activeSignatureImage != null} mode={_annotationMode}");
+            _signatureMenu?.ForceClose(); // Menü zu → Backdrop weg → Platzieren-Klick erreicht die Seite
+            Console.WriteLine($"[SIG-DIAG] geladen: activeImg={_activeSignatureImage != null} mode={_annotationMode}, Menue geschlossen");
         }
         catch (Exception ex)
         {
