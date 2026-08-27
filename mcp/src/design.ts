@@ -50,6 +50,18 @@ export interface EditorBlock {
   rows?: string[][] | null;
   headerRow?: boolean;
   mind?: MindmapNode | null; // nur Mindmap-Block: Wurzel des Knoten-Baums
+
+  // --- Datenbindung (siehe design-data.ts) ---
+  /** Block nur ausgeben, wenn dieser Datenpfad einen Wert hat. */
+  when?: string;
+  /** Block nur ausgeben, wenn dieser Datenpfad KEINEN Wert hat. */
+  unless?: string;
+  /**
+   * Datenpfad einer Liste. Bei Tabellen wird die Zeile nach der Kopfzeile zur
+   * Schablone (weitere Zeilen sind Fußzeilen); andere Blöcke werden je
+   * Eintrag wiederholt.
+   */
+  repeat?: string;
 }
 
 export interface EditorOverlay {
@@ -107,7 +119,7 @@ export const LAYOUTS: LayoutInfo[] = [
   { name: "A6Landscape", widthMm: 148, heightMm: 105, marginMm: 10 },
 ];
 
-function layoutOf(name: string): LayoutInfo {
+export function layoutOf(name: string): LayoutInfo {
   const found = LAYOUTS.find((l) => l.name.toLowerCase() === name.toLowerCase());
   if (!found) throw new ToolError(`Unbekanntes Layout '${name}'. Erlaubt: ${LAYOUTS.map((l) => l.name).join(", ")}.`);
   return found;
@@ -148,7 +160,7 @@ function sanitizeColorOrNull(value: unknown): string | null {
   return sanitizeColor(value, "#ffffff");
 }
 
-function mixWithWhite(hex: string, percent: number): string {
+export function mixWithWhite(hex: string, percent: number): string {
   let c = sanitizeColor(hex, "#000000");
   if (c.length === 4) c = `#${c[1]}${c[1]}${c[2]}${c[2]}${c[3]}${c[3]}`;
   const p = Math.min(100, Math.max(0, percent)) / 100;
@@ -213,6 +225,59 @@ const DESIGNS: Array<CatalogDesign & { create: Factory }> = [
       P("Gemäß § 19 UStG wird keine Umsatzsteuer ausgewiesen (Kleinunternehmerregelung)."),
       Divider(),
       P("Zahlbar innerhalb von 14 Tagen ohne Abzug auf folgendes Konto:<br>Bank · IBAN DE00 0000 0000 0000 0000 00 · BIC XXXXXXXX"))),
+  },
+  {
+    kind: "invoice-data", title: "Rechnung (Vorlage mit Datenbindung)", layout: "A4Portrait", theme: null,
+    description: "Rechnung mit allen Pflichtangaben nach § 14 UStG als {{platzhalter}}, Positionstabelle je Listeneintrag und BEIDEN Umsatzsteuer-Fällen in einem Dokument (bedingte Blöcke über 'kleinunternehmer'). Füllen mit design_merge_data.",
+    create: () => doc("Rechnung {{rechnung.nummer}}", "A4Portrait", null, Page(
+      // § 14 Abs. 4 Nr. 1: Name und Anschrift des leistenden Unternehmers
+      P("{{verkaeufer.name}} · {{verkaeufer.strasse}} · {{verkaeufer.plz}} {{verkaeufer.ort}}", "left", 8),
+      // § 14 Abs. 4 Nr. 1: Name und Anschrift des Leistungsempfängers
+      P("<br>{{kunde.name}}"),
+      { ...P("{{kunde.zusatz}}"), when: "kunde.zusatz" },
+      P("{{kunde.strasse}}<br>{{kunde.plz}} {{kunde.ort}}"),
+      // § 14 Abs. 4 Nr. 3: Ausstellungsdatum
+      P("{{verkaeufer.ort}}, {{rechnung.datum}}", "right"),
+      // § 14 Abs. 4 Nr. 4: fortlaufende Rechnungsnummer
+      H("Rechnung {{rechnung.nummer}}", 1),
+      // § 14 Abs. 4 Nr. 6: Zeitpunkt der Leistung
+      P("Leistungszeitpunkt: {{rechnung.leistungszeitpunkt}}"),
+      P("Sehr geehrte Damen und Herren,<br>vielen Dank für Ihren Auftrag. Wir berechnen Ihnen die folgenden Leistungen:"),
+      // § 14 Abs. 4 Nr. 5: Menge und Art der Leistung — je Eintrag von 'positionen'.
+      // Fall A, Kleinunternehmer nach § 19: keine Steuerspalte, keine Steuersumme.
+      {
+        ...Tbl(true,
+          ["Pos.", "Menge", "Einheit", "Bezeichnung", "Einzelpreis", "Betrag"],
+          ["{{index}}", "{{menge}}", "{{einheit}}", "{{bezeichnung}}", "{{einzelpreis}}", "{{betrag}}"],
+          ["", "", "", "", "Gesamtbetrag", "{{summen.gesamt}}"]),
+        when: "kleinunternehmer", repeat: "positionen",
+      },
+      // Fall B, Regelbesteuerung: Steuersatz je Position (§ 14 Abs. 4 Nr. 8).
+      {
+        ...Tbl(true,
+          ["Pos.", "Menge", "Einheit", "Bezeichnung", "Einzelpreis", "USt.", "Netto"],
+          ["{{index}}", "{{menge}}", "{{einheit}}", "{{bezeichnung}}", "{{einzelpreis}}", "{{steuersatz}}", "{{betrag}}"]),
+        unless: "kleinunternehmer", repeat: "positionen",
+      },
+      // § 14 Abs. 4 Nr. 7/8: nach Steuersätzen aufgeschlüsseltes Entgelt.
+      {
+        ...Tbl(true,
+          ["Steuersatz", "Netto", "Steuerbetrag"],
+          ["{{satz}}", "{{netto}}", "{{steuer}}"]),
+        unless: "kleinunternehmer", repeat: "summen.steuersaetze",
+      },
+      {
+        ...P("<strong>Gesamt netto {{summen.netto}} · Umsatzsteuer {{summen.steuer}} · Gesamtbetrag brutto {{summen.brutto}}</strong>", "right"),
+        unless: "kleinunternehmer",
+      },
+      // § 14 Abs. 4 Nr. 7: im Voraus vereinbarte Minderungen des Entgelts.
+      { ...P("Im Voraus vereinbarte Minderung des Entgelts: {{rechnung.minderung}}"), when: "rechnung.minderung" },
+      { ...P("Gemäß § 19 UStG wird keine Umsatzsteuer ausgewiesen (Kleinunternehmerregelung)."), when: "kleinunternehmer" },
+      Divider(),
+      P("Zahlbar bis {{rechnung.zahlungsziel}} ohne Abzug auf folgendes Konto:<br>{{verkaeufer.bank}} · IBAN {{verkaeufer.iban}} · BIC {{verkaeufer.bic}}"),
+      // § 14 Abs. 4 Nr. 2: Steuernummer ODER Umsatzsteuer-Identifikationsnummer.
+      { ...P("Steuernummer: {{verkaeufer.steuernummer}}", "left", 9), when: "verkaeufer.steuernummer" },
+      { ...P("USt-IdNr.: {{verkaeufer.ustid}}", "left", 9), when: "verkaeufer.ustid" })),
   },
   {
     kind: "letter", title: "Geschäftsbrief (DIN 5008)", layout: "A4Portrait", theme: null,
@@ -431,6 +496,14 @@ export function validateDesign(raw: string): { doc: EditorDocument; issues: stri
         fill: b.fill === true,
         headerRow: b.headerRow !== false,
       };
+      // Datenbindung: Pfade sind eng begrenzt, damit hier nichts anderes
+      // durchrutscht als ein Verweis auf einen Wert.
+      for (const key of ["when", "unless", "repeat"] as const) {
+        const raw = (b as unknown as Record<string, unknown>)[key];
+        if (typeof raw !== "string" || raw.length === 0) continue;
+        if (/^[A-Za-z0-9_.#-]{1,80}$/.test(raw)) block[key] = raw;
+        else issues.push(`${where}: '${key}' ist kein gültiger Datenpfad ('${raw}') — entfernt.`);
+      }
       if (typeof b.text === "string") block.text = stripDangerousHtml(b.text, issues, where);
       if (typeof b.alt === "string") block.alt = b.alt.slice(0, 200);
       if (typeof b.shape === "string") block.shape = ["rectangle", "line", "divider"].includes(b.shape) ? b.shape : "rectangle";

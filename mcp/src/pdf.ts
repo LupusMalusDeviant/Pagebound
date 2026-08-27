@@ -23,7 +23,47 @@ import {
 import { zipSync } from "fflate";
 
 /** Erwartbare, dem Agenten erklärbare Fehler (vs. unerwartete Exceptions). */
-export class ToolError extends Error {}
+import { createHash } from "node:crypto";
+
+/**
+ * Fehlerkennungen für Aufrufer, die auf einen Fehler REAGIEREN müssen: den
+ * Nutzer fragen (falsches Zertifikatspasswort), die Eingabe korrigieren
+ * (ungültige Seitenangabe) oder den Betrieb alarmieren (interner Fehler).
+ * Der Text ist für Menschen, der Code für Programme — er gehört zur
+ * öffentlichen Schnittstelle und ändert sich nicht ohne neue Version.
+ *
+ *  INVALID_INPUT      Parameter fehlen, widersprechen sich oder sind ungültig.
+ *  INPUT_TOO_LARGE    Eingabe überschreitet das Größenlimit des Servers.
+ *  PAGE_LIMIT         Eingabe überschreitet das Seitenlimit des Servers.
+ *  PDF_CORRUPT        Keine gültige PDF / unlesbare Struktur.
+ *  PDF_ENCRYPTED      Eingabe ist passwortgeschützt — erst entschlüsseln.
+ *  CERT_PASSWORD      P12/PFX ließ sich nicht öffnen (Passwort/Datei).
+ *  CERT_INVALID       P12/PFX ohne nutzbaren Schlüssel oder Zertifikat.
+ *  FILE_READ          Lokale Datei nicht lesbar (nur stdio-Modus).
+ *  FILE_WRITE         Lokale Ausgabe nicht schreibbar (nur stdio-Modus).
+ *  UNSUPPORTED        Fall ist gültig, aber von diesem Server nicht abgedeckt.
+ *  PROCESSING_FAILED  Operation an diesem Dokument fehlgeschlagen.
+ *  INTERNAL           Fehler in Pagebound selbst — bitte melden.
+ */
+export type ToolErrorCode =
+  | "INVALID_INPUT"
+  | "INPUT_TOO_LARGE"
+  | "PAGE_LIMIT"
+  | "PDF_CORRUPT"
+  | "PDF_ENCRYPTED"
+  | "CERT_PASSWORD"
+  | "CERT_INVALID"
+  | "FILE_READ"
+  | "FILE_WRITE"
+  | "UNSUPPORTED"
+  | "PROCESSING_FAILED"
+  | "INTERNAL";
+
+export class ToolError extends Error {
+  constructor(message: string, readonly code: ToolErrorCode = "INVALID_INPUT") {
+    super(message);
+  }
+}
 
 const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
@@ -33,21 +73,44 @@ const MAX_PAGES = Number(process.env.MCP_MAX_PAGES) || 0;
 
 function enforcePages(count: number): void {
   if (MAX_PAGES && count > MAX_PAGES) {
-    throw new ToolError(`PDF hat ${count} Seiten — das Limit dieses Servers liegt bei ${MAX_PAGES}.`);
+    throw new ToolError(`PDF hat ${count} Seiten — das Limit dieses Servers liegt bei ${MAX_PAGES}.`, "PAGE_LIMIT");
   }
 }
 
 async function loadDoc(bytes: Uint8Array): Promise<PDFDocument> {
   let doc: PDFDocument;
   try {
-    doc = await PDFDocument.load(bytes);
+    doc = await PDFDocument.load(bytes, NO_METADATA_BUMP);
   } catch (e) {
     const m = errMsg(e);
-    if (/encrypt/i.test(m)) throw new ToolError(`PDF ist passwortgeschützt/verschlüsselt — bitte zuerst entschlüsseln. (${m})`);
-    throw new ToolError(`Keine gültige PDF oder beschädigt (${m}).`);
+    if (/encrypt/i.test(m)) throw new ToolError(`PDF ist passwortgeschützt/verschlüsselt — bitte zuerst entschlüsseln. (${m})`, "PDF_ENCRYPTED");
+    throw new ToolError(`Keine gültige PDF oder beschädigt (${m}).`, "PDF_CORRUPT");
   }
   enforcePages(doc.getPageCount());
   return doc;
+}
+
+// --- Reproduzierbarkeit (gleiche Eingabe → gleiche Bytes) --------------------
+// pdf-lib ruft beim LADEN und beim ERZEUGEN eines Dokuments ungefragt
+// updateInfoDict() auf und schreibt /Producer sowie /ModDate (und bei neuen
+// Dokumenten /CreationDate) mit der aktuellen Uhrzeit ins Info-Dict. Zwei
+// identische Aufrufe liefern damit unterschiedliche Bytes — für Aufrufer, die
+// jedes Dokument in eine Hash-Kette hängen, ist das wertlos.
+//
+// Deshalb wird das Info-Dict überall bewusst NICHT automatisch angefasst.
+// Metadaten setzt, wer sie will, ausdrücklich (pdf_set_metadata) — und dann
+// mit einem Datum, das von außen kommt, nicht von der Systemuhr.
+export const NO_METADATA_BUMP = { updateMetadata: false } as const;
+
+/**
+ * Ableitung einer /ID aus dem Inhalt statt aus dem Zufallsgenerator: gleiche
+ * Eingabe → gleiche Kennung. 16 Bytes als Hex-Großbuchstaben, wie es die
+ * Trailer-/ID erwartet.
+ */
+export function deterministicFileId(...seeds: Array<Uint8Array | string>): string {
+  const h = createHash("sha256");
+  for (const s of seeds) h.update(typeof s === "string" ? Buffer.from(s, "utf8") : Buffer.from(s));
+  return h.digest("hex").slice(0, 32).toUpperCase();
 }
 
 const save = (doc: PDFDocument) => doc.save({ useObjectStreams: true });
@@ -107,7 +170,7 @@ export async function getInfo(bytes: Uint8Array): Promise<PdfInfo> {
 
 export async function merge(inputs: Uint8Array[]): Promise<{ bytes: Uint8Array; pageCount: number }> {
   if (inputs.length < 2) throw new ToolError("Zum Zusammenführen werden mindestens zwei Eingabe-PDFs benötigt.");
-  const out = await PDFDocument.create();
+  const out = await PDFDocument.create(NO_METADATA_BUMP);
   for (const input of inputs) {
     const src = await loadDoc(input);
     const copied = await out.copyPages(src, src.getPageIndices());
@@ -119,7 +182,7 @@ export async function merge(inputs: Uint8Array[]): Promise<{ bytes: Uint8Array; 
 export async function extractPages(input: Uint8Array, pages: string): Promise<{ bytes: Uint8Array; pageCount: number }> {
   const src = await loadDoc(input);
   const want = parsePageSpec(pages, src.getPageCount());
-  const out = await PDFDocument.create();
+  const out = await PDFDocument.create(NO_METADATA_BUMP);
   const copied = await out.copyPages(src, want.map((p) => p - 1));
   copied.forEach((p) => out.addPage(p));
   return { bytes: await save(out), pageCount: out.getPageCount() };
@@ -131,7 +194,7 @@ export async function deletePages(input: Uint8Array, pages: string): Promise<{ b
   const remove = new Set(parsePageSpec(pages, total));
   if (remove.size >= total) throw new ToolError(`Es würden alle ${total} Seiten gelöscht — mindestens eine muss bleiben.`);
   const keep = [...Array(total).keys()].map((i) => i + 1).filter((p) => !remove.has(p));
-  const out = await PDFDocument.create();
+  const out = await PDFDocument.create(NO_METADATA_BUMP);
   const copied = await out.copyPages(src, keep.map((p) => p - 1));
   copied.forEach((p) => out.addPage(p));
   return { bytes: await save(out), pageCount: out.getPageCount(), deleted: remove.size };
@@ -156,7 +219,7 @@ export async function reorderPages(input: Uint8Array, order: number[]): Promise<
   if (order.length !== total) throw new ToolError(`Die Reihenfolge muss genau ${total} Seiten enthalten. Erhalten: ${order.length}.`);
   if (new Set(order).size !== total) throw new ToolError("Jede Seite darf in der Reihenfolge genau einmal vorkommen.");
   for (const p of order) if (p < 1 || p > total) throw new ToolError(`Seite ${p} liegt außerhalb (1–${total}).`);
-  const out = await PDFDocument.create();
+  const out = await PDFDocument.create(NO_METADATA_BUMP);
   const copied = await out.copyPages(src, order.map((p) => p - 1));
   copied.forEach((p) => out.addPage(p));
   return { bytes: await save(out), pageCount: out.getPageCount() };
@@ -170,7 +233,7 @@ const PAGE_SIZES: Record<Exclude<PageSizeMode, "image">, [number, number]> = {
 
 export async function imagesToPdf(images: Uint8Array[], pageSize: PageSizeMode): Promise<{ bytes: Uint8Array; pageCount: number }> {
   if (images.length === 0) throw new ToolError("Mindestens ein Bild angeben.");
-  const doc = await PDFDocument.create();
+  const doc = await PDFDocument.create(NO_METADATA_BUMP);
   for (const bytes of images) {
     const isPng = bytes[0] === 0x89 && bytes[1] === 0x50;
     const isJpg = bytes[0] === 0xff && bytes[1] === 0xd8;
@@ -213,7 +276,7 @@ export async function split(input: Uint8Array, afterPages: string): Promise<{ pa
   const parts: Uint8Array[] = [];
   const pageCounts: number[] = [];
   for (const [start, end] of ranges) {
-    const out = await PDFDocument.create();
+    const out = await PDFDocument.create(NO_METADATA_BUMP);
     const idx: number[] = [];
     for (let i = start; i < end; i++) idx.push(i);
     const copied = await out.copyPages(src, idx);
@@ -235,6 +298,9 @@ export interface StampOptions {
   pageNumberPosition?: PageNumberPosition;
   pageNumberStartAt?: number;
 }
+
+/** Feste Zeit für ZIP-Einträge im DOCX-Export (siehe NO_METADATA_BUMP). */
+const DOCX_FIXED_MTIME = new Date("1980-01-01T00:00:00Z");
 
 const clampNum = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
@@ -346,7 +412,7 @@ function formFieldPageNumber(field: any, widgetPageMap: Map<unknown, number>): n
 }
 
 export async function getFormFields(input: Uint8Array): Promise<FormFieldDto[]> {
-  const doc = await PDFDocument.load(input, { ignoreEncryption: true });
+  const doc = await PDFDocument.load(input, { ...NO_METADATA_BUMP, ignoreEncryption: true });
   const fields = doc.getForm().getFields();
   if (!fields || fields.length === 0) return [];
 
@@ -383,7 +449,7 @@ export async function fillForm(
   values: FormFieldValue[],
   flatten: boolean
 ): Promise<{ bytes: Uint8Array; filled: number; skipped: string[] }> {
-  const doc = await PDFDocument.load(input, { ignoreEncryption: true });
+  const doc = await PDFDocument.load(input, { ...NO_METADATA_BUMP, ignoreEncryption: true });
   const form = doc.getForm();
   const skipped: string[] = [];
   let filled = 0;
@@ -437,7 +503,7 @@ export async function extractText(bytes: Uint8Array, pages?: string): Promise<{ 
   try {
     doc = await pdfjs.getDocument({ data: bytes, verbosity: 0 }).promise;
   } catch (e) {
-    throw new ToolError(`Text-Extraktion fehlgeschlagen (${errMsg(e)}).`);
+    throw new ToolError(`Text-Extraktion fehlgeschlagen (${errMsg(e)}).`, "PROCESSING_FAILED");
   }
   try {
     const total = doc.numPages;
@@ -516,7 +582,7 @@ export async function extractTablesCsv(bytes: Uint8Array, pages?: string): Promi
   try {
     doc = await pdfjs.getDocument({ data: bytes, verbosity: 0 }).promise;
   } catch (e) {
-    throw new ToolError(`Tabellen-Extraktion fehlgeschlagen (${errMsg(e)}).`);
+    throw new ToolError(`Tabellen-Extraktion fehlgeschlagen (${errMsg(e)}).`, "PROCESSING_FAILED");
   }
   try {
     const total = doc.numPages;
@@ -665,7 +731,7 @@ export async function toDocx(bytes: Uint8Array): Promise<{ bytes: Uint8Array; pa
   try {
     doc = await pdfjs.getDocument({ data: bytes, verbosity: 0 }).promise;
   } catch (e) {
-    throw new ToolError(`DOCX-Konvertierung fehlgeschlagen (${errMsg(e)}).`);
+    throw new ToolError(`DOCX-Konvertierung fehlgeschlagen (${errMsg(e)}).`, "PROCESSING_FAILED");
   }
   try {
     const total = doc.numPages;
@@ -725,7 +791,10 @@ export async function toDocx(bytes: Uint8Array): Promise<{ bytes: Uint8Array; pa
       "word/_rels/document.xml.rels": enc.encode(docRels),
       "word/styles.xml": enc.encode(stylesXml),
     };
-    return { bytes: zipSync(files, { level: 6 }), pageCount: total };
+    // Feste Zeit statt Systemuhr: fflate schreibt sonst die aktuelle Zeit in
+    // jeden ZIP-Eintrag, und zwei identische Exporte unterschieden sich in den
+    // Bytes. 1980-01-01 ist der früheste Zeitpunkt, den das ZIP-Format kennt.
+    return { bytes: zipSync(files, { level: 6, mtime: DOCX_FIXED_MTIME }), pageCount: total };
   } finally {
     await doc.loadingTask.destroy();
   }
@@ -773,7 +842,7 @@ export async function applyTextReplacements(
   try {
     jdoc = await pdfjs.getDocument({ data: bytes.slice(), verbosity: 0 }).promise;
   } catch (e) {
-    throw new ToolError(`Text-Ersetzen fehlgeschlagen (${errMsg(e)}).`);
+    throw new ToolError(`Text-Ersetzen fehlgeschlagen (${errMsg(e)}).`, "PROCESSING_FAILED");
   }
   try {
     const total = jdoc.numPages;
@@ -802,7 +871,7 @@ export async function applyTextReplacements(
   if (edits.length === 0) return { bytes, replaced: 0 };
 
   // 2) Cover + Redraw via pdf-lib.
-  const doc = await PDFDocument.load(bytes, { ignoreEncryption: true });
+  const doc = await PDFDocument.load(bytes, { ...NO_METADATA_BUMP, ignoreEncryption: true });
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const pages = doc.getPages();
   const fg = hexToRgbColor(opts.color, rgb(0.07, 0.07, 0.07));
@@ -898,7 +967,7 @@ export async function createFields(input: Uint8Array, fields: NewField[]): Promi
         tf.addToPage(page, rect);
       }
     } catch (e) {
-      throw new ToolError(`Feld '${f.name}' nicht anlegbar (${errMsg(e)}). Name evtl. schon vergeben?`);
+      throw new ToolError(`Feld '${f.name}' nicht anlegbar (${errMsg(e)}). Name evtl. schon vergeben?`, "PROCESSING_FAILED");
     }
     created++;
   }

@@ -4,7 +4,7 @@ Kontext für Claude-Code-Sessions in diesem Projekt (Repo-Ordner: `PDF-Tool`, Pr
 
 ## Projektkontext
 
-- **Stack:** Blazor WebAssembly (.NET 10), datenschutzfreundlicher PDF-Reader/-Editor als statische Offline-PWA. Rendering via PDF.js (JS-Interop), Manipulation via pdf-lib (JS), Verschlüsselung AES-256/R6 via WebCrypto, OCR via Tesseract.js (self-hosted). PLUS separates TypeScript-MCP-Paket unter `mcp/` (24 Tools, stdio + Streamable HTTP). Apache 2.0.
+- **Stack:** Blazor WebAssembly (.NET 10), datenschutzfreundlicher PDF-Reader/-Editor als statische Offline-PWA. Rendering via PDF.js (JS-Interop), Manipulation via pdf-lib (JS), Verschlüsselung AES-256/R6 via WebCrypto, OCR via Tesseract.js (self-hosted). PLUS separates TypeScript-MCP-Paket unter `mcp/` (29 Tools, stdio + Streamable HTTP). Apache 2.0.
 - **Einstiegspunkte:** `src/Pagebound.Web/Program.cs` (23 Services hinter IXxx, DI); `mcp/src/index.ts` (MCP-Server, „reuses the same engines").
 - **Struktur:** `src/Pagebound.Core/` (Domain/Crypto/Library/Abstractions), `src/Pagebound.Infrastructure/`, `src/Pagebound.Web/` (Blazor-UI — u.a. God-Components `ReaderPane.razor` ~4375 Z., `DesignerPage.razor` ~2635 Z.), `mcp/` (TS-Paket), `tests/`, `infra/` (Docker/nginx), `tools/` (privacy-check.mjs), `docs/` (ADRs), `SECURITY.md`.
 - **Tests:** xUnit in `tests/`, run: `dotnet test Pagebound.slnx`. 168 Unit-Tests (fast nur `Pagebound.Core`), 3 self-skipping E2E-Smokes. **`Pagebound.Web.Tests` ist eine leere Hülle → die ~11k-LOC-UI-Schicht ist ungetestet.**

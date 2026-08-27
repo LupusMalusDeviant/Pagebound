@@ -19,27 +19,53 @@ for (const k of ["log", "info", "debug", "warn"] as const) {
 }
 
 import { readFile, writeFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import * as path from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import type { ErrorRequestHandler } from "express";
 import { z } from "zod";
 import * as pdf from "./pdf.js";
 import * as design from "./design.js";
+import * as designPdf from "./design-pdf.js";
+import * as designData from "./design-data.js";
 import * as pdfa from "./pdfa.js";
 import * as pdfua from "./pdfua.js";
 import * as sign from "./sign.js";
 import { encryptPdf } from "./encrypt.js";
 
 const CHARACTER_LIMIT = 25_000;
-const MAX_PDF_BYTES = Number(process.env.MCP_MAX_PDF_BYTES) || 25 * 1024 * 1024; // 25 MB
-const HTTP_BODY_LIMIT = "40mb"; // base64 von 25 MB ≈ 33 MB + JSON-RPC-Overhead
+
+// Größenlimit je Eingabedatei (PDF, Bild, Zertifikat, Anhang). Der Container
+// setzt es per MCP_MAX_PDF_BYTES; 25 MB ist der Default für den lokalen Betrieb.
+const MAX_PDF_BYTES = Number(process.env.MCP_MAX_PDF_BYTES) || 25 * 1024 * 1024;
+
+// Das HTTP-Body-Limit wird daraus ABGELEITET statt separat gepflegt (die beiden
+// Zahlen waren auseinandergelaufen): base64 bläht um 4/3 auf, dazu der
+// JSON-RPC-Rahmen und mehrere Dateien in einem Aufruf.
+const HTTP_BODY_LIMIT = `${Math.ceil((MAX_PDF_BYTES * 4) / 3 / 1048576) + 8}mb`;
+
+/**
+ * Serverversion aus der package.json — eine Quelle statt zweier (die beiden
+ * Zahlen standen vorher auf 1.6.0 und 1.5.0). Aufrufer pinnen darauf; jede
+ * Verhaltensänderung bekommt eine neue Version (siehe README).
+ */
+function readServerVersion(): string {
+  try {
+    const raw = readFileSync(new URL("../package.json", import.meta.url), "utf8");
+    const pkg = JSON.parse(raw) as { version?: unknown };
+    if (typeof pkg.version === "string" && pkg.version.length > 0) return pkg.version;
+  } catch { /* unten ehrlich melden statt eine Zahl zu erfinden */ }
+  return "0.0.0-unknown";
+}
+const SERVER_VERSION = readServerVersion();
 
 // --- I/O resolution (path OR base64) -----------------------------------------
 
 function enforceSize(bytes: Uint8Array, what = "PDF"): Uint8Array {
   if (bytes.length > MAX_PDF_BYTES) {
-    throw new pdf.ToolError(`${what} ist ${(bytes.length / 1048576).toFixed(1)} MB groß — Limit sind ${(MAX_PDF_BYTES / 1048576).toFixed(0)} MB.`);
+    throw new pdf.ToolError(`${what} ist ${(bytes.length / 1048576).toFixed(1)} MB groß — Limit sind ${(MAX_PDF_BYTES / 1048576).toFixed(0)} MB.`, "INPUT_TOO_LARGE");
   }
   return bytes;
 }
@@ -51,7 +77,7 @@ async function loadPdf(args: { path?: string; dataBase64?: string }): Promise<Ui
     try {
       return enforceSize(new Uint8Array(await readFile(args.path)));
     } catch (e) {
-      throw new pdf.ToolError(`Datei nicht lesbar: '${args.path}' (${e instanceof Error ? e.message : String(e)}).`);
+      throw new pdf.ToolError(`Datei nicht lesbar: '${args.path}' (${e instanceof Error ? e.message : String(e)}).`, "FILE_READ");
     }
   }
   throw new pdf.ToolError("Eingabe fehlt: 'path' (lokal) oder 'dataBase64' (remote) angeben.");
@@ -68,7 +94,7 @@ async function loadImages(paths?: string[], list?: string[]): Promise<Uint8Array
   if (paths && paths.length) {
     return Promise.all(paths.map(async (p) => {
       try { return enforceSize(new Uint8Array(await readFile(p)), "Bild"); }
-      catch (e) { throw new pdf.ToolError(`Bild nicht lesbar: '${p}' (${e instanceof Error ? e.message : String(e)}).`); }
+      catch (e) { throw new pdf.ToolError(`Bild nicht lesbar: '${p}' (${e instanceof Error ? e.message : String(e)}).`, "FILE_READ"); }
     }));
   }
   throw new pdf.ToolError("Eingabe fehlt: 'imagePaths' (lokal) oder 'imagesBase64' (remote) angeben.");
@@ -77,7 +103,7 @@ async function loadImages(paths?: string[], list?: string[]): Promise<Uint8Array
 async function emitPdf(bytes: Uint8Array, outputPath?: string): Promise<Record<string, unknown>> {
   if (outputPath) {
     try { await writeFile(outputPath, bytes); }
-    catch (e) { throw new pdf.ToolError(`Ausgabe nicht schreibbar: '${outputPath}' (${e instanceof Error ? e.message : String(e)}).`); }
+    catch (e) { throw new pdf.ToolError(`Ausgabe nicht schreibbar: '${outputPath}' (${e instanceof Error ? e.message : String(e)}).`, "FILE_WRITE"); }
     return { outputPath, bytes: bytes.length };
   }
   return { dataBase64: bytesToB64(bytes), bytes: bytes.length };
@@ -96,7 +122,7 @@ async function emitParts(
     for (let i = 0; i < parts.length; i++) {
       const file = path.join(outputDir, `${baseName}-part${i + 1}.pdf`);
       try { await writeFile(file, parts[i]); }
-      catch (e) { throw new pdf.ToolError(`Teil ${i + 1} nicht schreibbar: '${file}' (${e instanceof Error ? e.message : String(e)}).`); }
+      catch (e) { throw new pdf.ToolError(`Teil ${i + 1} nicht schreibbar: '${file}' (${e instanceof Error ? e.message : String(e)}).`, "FILE_WRITE"); }
       outputPaths.push(file);
     }
     return { partCount: parts.length, pageCounts, outputPaths };
@@ -114,14 +140,25 @@ const bytesToB64 = (b: Uint8Array): string => Buffer.from(b).toString("base64");
 
 type ToolResult = { content: { type: "text"; text: string }[]; structuredContent?: Record<string, unknown>; isError?: boolean };
 const ok = (s: Record<string, unknown>, summary: string): ToolResult => ({ content: [{ type: "text", text: summary }], structuredContent: s });
-const fail = (m: string): ToolResult => ({ content: [{ type: "text", text: `Fehler: ${m}` }], isError: true });
+/**
+ * Fehlerantwort mit maschinenlesbarer Kennung. Der Code steht im
+ * structuredContent (für Programme) UND im Text (für Agenten und Logs) —
+ * siehe ToolErrorCode in pdf.ts für die Bedeutung der Kennungen.
+ */
+const fail = (m: string, code: pdf.ToolErrorCode): ToolResult => ({
+  content: [{ type: "text", text: `Fehler [${code}]: ${m}` }],
+  structuredContent: { error: { code, message: m } },
+  isError: true,
+});
 
 function guard<T>(handler: (args: T) => Promise<ToolResult>) {
   return async (args: T): Promise<ToolResult> => {
     try { return await handler(args); }
     catch (e) {
-      if (e instanceof pdf.ToolError) return fail(e.message);
-      return fail(`Unerwarteter Fehler: ${e instanceof Error ? e.message : String(e)}`);
+      if (e instanceof pdf.ToolError) return fail(e.message, e.code);
+      // Alles Unerwartete ist ein Fehler in Pagebound, nicht in der Eingabe.
+      console.error("Unerwarteter Fehler:", e);
+      return fail(`Unerwarteter Fehler: ${e instanceof Error ? e.message : String(e)}`, "INTERNAL");
     }
   };
 }
@@ -462,23 +499,87 @@ Eingabe: 'path'/'dataBase64', 'fields'. Ausgabe: 'outputPath' oder 'dataBase64'.
     return ok({ created: r.created, ...(await emitPdf(r.bytes, a.outputPath)) }, `${r.created} Feld(er) angelegt.`);
   }));
 
+  // Anhang für PDF/A-3: Inhalt entweder als lokaler Pfad ODER inline base64.
+  const attachmentIn = z.object({
+    name: z.string().describe("Dateiname im PDF (/F und /UF), z. B. 'factur-x.xml'."),
+    path: z.string().optional().describe("Lokaler Pfad zur Datei (stdio-Modus)."),
+    dataBase64: z.string().optional().describe("Dateiinhalt als base64 (remote/HTTP-Modus)."),
+    mimeType: z.string().optional().describe("MIME-Typ für /Subtype (Default: 'application/octet-stream'; für ZUGFeRD/Factur-X: 'text/xml')."),
+    description: z.string().optional().describe("Beschreibung des Anhangs (/Desc)."),
+    relationship: z.enum(["Source", "Data", "Alternative", "Supplement", "Unspecified"]).optional()
+      .describe("/AFRelationship (Default: 'Alternative' — der Fall der E-Rechnung)."),
+  });
+
   server.registerTool("pdf_to_pdfa", {
-    title: "PDF → PDF/A (Best Effort)",
-    description: `Konvertiert eine PDF Richtung PDF/A-2b — BEST EFFORT, KEINE Konformitätsgarantie. Setzt XMP-Metadaten (pdfaid:part=2, conformance=B), bettet einen sRGB-OutputIntent (GTS_PDFA1, ICC-Profil) ein, entfernt /OpenAction, Dokument-JavaScript und Additional Actions, flattet optional AcroForm-Felder und setzt eine Trailer-ID. Nicht eingebettete Standard-14-Fonts (Helvetica/Times/Courier) werden mit 'embedFonts' (Default: true) durch metrisch kompatible, eingebettete Liberation-Fonts (SIL OFL 1.1) ersetzt; andere nicht eingebettete Schriften (inkl. Symbol/ZapfDingbats) werden nur in 'warnings' gemeldet. Ergebnis für Archivzwecke extern prüfen (z. B. veraPDF).
-Eingabe: 'path'/'dataBase64', optional 'flattenForm' (Default: true), 'embedFonts' (Default: true). Ausgabe: 'outputPath' oder 'dataBase64'. Returns: { warnings, ... }.`,
+    title: "PDF → PDF/A-2b oder PDF/A-3b (Best Effort)",
+    description: `Konvertiert eine PDF Richtung PDF/A-2b (Default) oder PDF/A-3b — BEST EFFORT, KEINE Konformitätsgarantie. Setzt XMP-Metadaten (pdfaid:part=2|3, conformance=B), bettet einen sRGB-OutputIntent (GTS_PDFA1, ICC-Profil) ein, entfernt /OpenAction, Dokument-JavaScript und Additional Actions, flattet optional AcroForm-Felder und setzt eine Trailer-ID. Nicht eingebettete Standard-14-Fonts (Helvetica/Times/Courier) werden mit 'embedFonts' (Default: true) durch metrisch kompatible, eingebettete Liberation-Fonts (SIL OFL 1.1) ersetzt; andere nicht eingebettete Schriften (inkl. Symbol/ZapfDingbats) werden nur in 'warnings' gemeldet.
+E-RECHNUNG: mit 'part': 3 lassen sich über 'attachments' beliebige Dateien einbetten (EmbeddedFile-Stream + Filespec mit /AFRelationship, eingetragen in /Names /EmbeddedFiles UND im /AF-Array des Katalogs). 'facturX' schreibt zusätzlich die ZUGFeRD/Factur-X-Kennzeichnung ins XMP (fx:DocumentType, fx:DocumentFileName, fx:Version, fx:ConformanceLevel) samt des von PDF/A geforderten pdfaExtension-Schemas. Anhänge ohne part=3 werden abgelehnt (PDF/A-2 erlaubt nur eingebettete PDF/A-Dateien). Ergebnis für Archivzwecke extern prüfen (z. B. veraPDF).
+Eingabe: 'path'/'dataBase64', optional 'flattenForm' (Default: true), 'embedFonts' (Default: true), 'part' (2|3), 'attachments', 'facturX'. Ausgabe: 'outputPath' oder 'dataBase64'. Returns: { part, attachments, warnings, ... }.`,
     inputSchema: {
       ...srcIn,
       flattenForm: z.boolean().optional().describe("AcroForm-Felder vor der Konvertierung einbrennen (Default: true)."),
       embedFonts: z.boolean().optional().describe("Nicht eingebettete Standard-14-Fonts (Helvetica/Times/Courier) durch eingebettete Liberation-Fonts ersetzen (metrisch kompatibel, SIL OFL 1.1; Default: true). Symbol/ZapfDingbats werden nie ersetzt."),
+      part: z.union([z.literal(2), z.literal(3)]).optional().describe("PDF/A-Teil: 2 (Default) oder 3 (erlaubt eingebettete Dateien — E-Rechnung)."),
+      attachments: z.array(attachmentIn).optional().describe("Dateien, die eingebettet werden sollen (verlangt part=3)."),
+      facturX: z.object({
+        documentFileName: z.string().describe("Name der eingebetteten XML-Rechnung (muss zu einem Anhang passen)."),
+        documentType: z.string().optional().describe("fx:DocumentType (Default: 'INVOICE')."),
+        version: z.string().optional().describe("fx:Version (Default: '1.0')."),
+        conformanceLevel: z.string().optional().describe("fx:ConformanceLevel, z. B. 'EN 16931', 'BASIC', 'MINIMUM', 'EXTENDED'."),
+      }).optional().describe("ZUGFeRD/Factur-X-Kennzeichnung im XMP (verlangt part=3)."),
+      documentDate: z.string().optional().describe("Dokumentdatum als ISO-8601-Zeitstempel (z. B. \"2026-08-27T00:00:00Z\") für /CreationDate, /ModDate und XMP. Ohne Angabe werden die Daten des Eingabedokuments übernommen — die Systemuhr wird NICHT befragt, damit gleiche Eingabe gleiche Bytes ergibt."),
       ...outOpt,
     },
     annotations: writeAnn,
-  }, guard(async (a: { path?: string; dataBase64?: string; flattenForm?: boolean; embedFonts?: boolean; outputPath?: string }) => {
-    const r = await pdfa.toPdfA(await loadPdf(a), a.flattenForm ?? true, a.embedFonts ?? true);
+  }, guard(async (a: {
+    path?: string; dataBase64?: string; flattenForm?: boolean; embedFonts?: boolean;
+    part?: 2 | 3;
+    attachments?: Array<{ name: string; path?: string; dataBase64?: string; mimeType?: string; description?: string; relationship?: pdfa.AfRelationship }>;
+    facturX?: { documentFileName: string; documentType?: string; version?: string; conformanceLevel?: string };
+    documentDate?: string;
+    outputPath?: string;
+  }) => {
+    const attachments: pdfa.PdfAAttachment[] = [];
+    for (const att of a.attachments ?? []) {
+      if (att.path && att.dataBase64) throw new pdf.ToolError(`Anhang '${att.name}': bitte entweder 'path' ODER 'dataBase64' angeben, nicht beide.`);
+      let bytes: Uint8Array;
+      if (att.dataBase64) bytes = enforceSize(b64ToBytes(att.dataBase64), `Anhang '${att.name}'`);
+      else if (att.path) {
+        try { bytes = enforceSize(new Uint8Array(await readFile(att.path)), `Anhang '${att.name}'`); }
+        catch (e) { throw new pdf.ToolError(`Anhang nicht lesbar: '${att.path}' (${e instanceof Error ? e.message : String(e)}).`, "FILE_READ"); }
+      } else throw new pdf.ToolError(`Anhang '${att.name}': 'path' (lokal) oder 'dataBase64' (remote) angeben.`);
+      attachments.push({
+        name: att.name, bytes, mimeType: att.mimeType,
+        description: att.description, relationship: att.relationship,
+      });
+    }
+
+    let documentDate: Date | undefined;
+    if (a.documentDate) {
+      documentDate = new Date(a.documentDate);
+      if (Number.isNaN(documentDate.getTime())) {
+        throw new pdf.ToolError(`Das Feld documentDate ist kein gültiger ISO-8601-Zeitstempel: ${a.documentDate}`);
+      }
+    }
+    const part = a.part ?? 2;
+    const r = await pdfa.toPdfA(await loadPdf(a), {
+      flattenForm: a.flattenForm ?? true,
+      embedFonts: a.embedFonts ?? true,
+      part,
+      attachments,
+      facturX: a.facturX,
+      documentDate,
+    });
+    const level = `PDF/A-${part}b`;
     const summary = r.warnings.length
-      ? `PDF/A-2b (Best Effort) erzeugt — ${r.warnings.length} Hinweis(e):\n- ${r.warnings.join("\n- ")}`
-      : "PDF/A-2b (Best Effort) erzeugt — keine Hinweise. Konformität extern prüfen (z. B. veraPDF).";
-    return ok({ warnings: r.warnings, ...(await emitPdf(r.bytes, a.outputPath)) }, summary);
+      ? `${level} (Best Effort) erzeugt — ${r.warnings.length} Hinweis(e):\n- ${r.warnings.join("\n- ")}`
+      : `${level} (Best Effort) erzeugt — keine Hinweise. Konformität extern prüfen (z. B. veraPDF).`;
+    return ok({
+      part,
+      attachments: attachments.map((x) => x.name),
+      warnings: r.warnings,
+      ...(await emitPdf(r.bytes, a.outputPath)),
+    }, summary);
   }));
 
   server.registerTool("pdf_ua_prepare", {
@@ -499,8 +600,10 @@ Eingabe: 'path'/'dataBase64', optional 'lang' (BCP-47, Default: "de-DE"). Ausgab
 
   server.registerTool("pdf_sign", {
     title: "PDF signieren (Zertifikat, P12/PFX)",
-    description: `Signiert eine PDF mit einem P12/PFX-Zertifikat: klassische PDF-32000-Signatur 'adbe.pkcs7.detached' mit SHA-256 und CMS/PKCS#7 inkl. signierter Attribute (contentType, messageDigest, signingTime), unsichtbares Signaturfeld auf Seite 1, Zertifikatskette eingebettet — in Adobe/Foxit prüfbar.
-EHRLICHE GRENZEN: kein PAdES-B-T (kein Zeitstempel-Server — offline-first), kein LTV, kein signingCertificateV2-Attribut (von node-forge nicht unterstützt). PDFs mit vorhandener Signatur werden abgelehnt (kein inkrementelles Update in v1).
+    description: `Signiert eine PDF mit einem P12/PFX-Zertifikat: PAdES-B-B (SubFilter 'ETSI.CAdES.detached') mit SHA-256, unsichtbares Signaturfeld auf Seite 1, Zertifikatskette eingebettet.
+Die signierten Attribute (contentType, messageDigest, signingTime, signingCertificateV2) sind in DER-Reihenfolge sortiert (RFC 5652 §5.4); signingCertificateV2 (RFC 5035) trägt certHash und issuerSerial. Damit auch für Prüfer brauchbar, die vor dem Vergleich neu kodieren (BouncyCastle, eIDAS-Validatoren), nicht nur für Adobe.
+ERNEUTES SIGNIEREN: trägt das Dokument bereits eine Signatur, wird die neue als inkrementelles Update angehängt — die Originalbytes bleiben unangetastet, die bestehende Signatur gültig. Voraussetzung ist eine klassische xref-Tabelle; Dokumente mit Cross-Reference-Streams werden mit 'UNSUPPORTED' abgelehnt.
+EHRLICHE GRENZEN: Grundstufe B-B — kein Zeitstempel (RFC 3161), kein LTV, also NICHT B-T oder höher.
 Eingabe: 'path'/'dataBase64' + Zertifikat als 'p12Path' (lokal) oder 'p12Base64' (remote) + 'password'. Optional 'reason'/'location'/'contactInfo'.
 Ausgabe: 'outputPath' oder 'dataBase64'. Returns: { signerSubject, warnings, ... }.`,
     inputSchema: {
@@ -520,7 +623,7 @@ Ausgabe: 'outputPath' oder 'dataBase64'. Returns: { signerSubject, warnings, ...
     if (a.p12Base64) p12Bytes = enforceSize(b64ToBytes(a.p12Base64), "P12/PFX");
     else if (a.p12Path) {
       try { p12Bytes = enforceSize(new Uint8Array(await readFile(a.p12Path)), "P12/PFX"); }
-      catch (e) { throw new pdf.ToolError(`Zertifikat nicht lesbar: '${a.p12Path}' (${e instanceof Error ? e.message : String(e)}).`); }
+      catch (e) { throw new pdf.ToolError(`Zertifikat nicht lesbar: '${a.p12Path}' (${e instanceof Error ? e.message : String(e)}).`, "FILE_READ"); }
     } else throw new pdf.ToolError("Zertifikat fehlt: 'p12Path' (lokal) oder 'p12Base64' (remote) angeben.");
 
     const r = await sign.signPdf(await loadPdf(a), p12Bytes, a.password, {
@@ -544,14 +647,14 @@ Ausgabe: 'outputPath' oder 'dataBase64'. Returns: { signerSubject, warnings, ...
     if (a.json) return a.json;
     if (a.path) {
       try { return await readFile(a.path, "utf8"); }
-      catch (e) { throw new pdf.ToolError(`Datei nicht lesbar: '${a.path}' (${e instanceof Error ? e.message : String(e)}).`); }
+      catch (e) { throw new pdf.ToolError(`Datei nicht lesbar: '${a.path}' (${e instanceof Error ? e.message : String(e)}).`, "FILE_READ"); }
     }
     throw new pdf.ToolError("Eingabe fehlt: 'path' (lokal) oder 'json' (remote) angeben.");
   };
   const emitText = async (text: string, outputPath?: string): Promise<Record<string, unknown>> => {
     if (outputPath) {
       try { await writeFile(outputPath, text, "utf8"); }
-      catch (e) { throw new pdf.ToolError(`Ausgabe nicht schreibbar: '${outputPath}' (${e instanceof Error ? e.message : String(e)}).`); }
+      catch (e) { throw new pdf.ToolError(`Ausgabe nicht schreibbar: '${outputPath}' (${e instanceof Error ? e.message : String(e)}).`, "FILE_WRITE"); }
       return { outputPath, bytes: Buffer.byteLength(text, "utf8") };
     }
     return { text, bytes: Buffer.byteLength(text, "utf8") };
@@ -599,8 +702,59 @@ Eingabe: 'path' oder 'json'. Ausgabe: normalisiertes JSON ('outputPath' oder 'te
     const { doc: normalized, issues } = design.validateDesign(await loadDesignJson(a));
     const json = JSON.stringify(normalized, null, 2);
     return ok(
-      { title: normalized.title, layout: normalized.layout, pageCount: normalized.pages.length, issues, ...(await emitText(json, a.outputPath)) },
+      {
+        title: normalized.title, layout: normalized.layout, pageCount: normalized.pages.length, issues,
+        // Welche {{platzhalter}} die Vorlage erwartet — für Aufrufer, die die Daten dazu bauen.
+        placeholders: designData.collectPlaceholders(normalized),
+        ...(await emitText(json, a.outputPath)),
+      },
       issues.length === 0 ? "Design ist gültig — keine Korrekturen nötig." : `Design normalisiert, ${issues.length} Korrektur(en).`);
+  }));
+
+  // Datenbindung: dieselben zwei Felder für alle Werkzeuge, die eine Vorlage füllen.
+  const dataIn = {
+    data: z.record(z.string(), z.unknown()).optional()
+      .describe("JSON-Objekt, das die {{platzhalter}} der Vorlage füllt. Verschachtelt ({{kunde.anschrift.ort}}) und mit Listen für Wiederholungen (Block-Feld 'repeat'). Ohne 'data' wird nichts ersetzt."),
+    onMissing: z.enum(["error", "report"]).optional()
+      .describe("Verhalten bei Platzhaltern ohne Wert: 'error' (Default) bricht ab und nennt sie, 'report' füllt das Dokument und gibt die Lücken als 'missing' zurück."),
+  };
+
+  /** Vorlage füllen, wenn Daten mitgegeben wurden — sonst unverändert lassen. */
+  const applyData = (
+    doc: design.EditorDocument,
+    a: { data?: Record<string, unknown>; onMissing?: "error" | "report" },
+  ): { doc: design.EditorDocument; missing: designData.MissingValue[]; notes: string[] } => {
+    if (!a.data) return { doc, missing: [], notes: [] };
+    return designData.mergeDesign(doc, a.data, { onMissing: a.onMissing });
+  };
+
+  server.registerTool("design_merge_data", {
+    title: "Vorlage mit Daten füllen",
+    description: `Füllt die {{platzhalter}} eines Design-Dokuments aus einem JSON-Objekt und gibt das gefüllte Design zurück (JSON, direkt weiterverwendbar mit design_render_pdf).
+DREI BAUSTEINE, alle im Designmodell:
+• {{pfad.zum.wert}} — verschachtelte Werte; Listenindex als Zahl ({{positionen.0.menge}}).
+• Block-Feld 'when' / 'unless' — Block nur ausgeben, wenn ein Datenpfad einen Wert hat bzw. keinen. Damit passen sich ausschließende Fälle (Kleinunternehmer § 19 UStG vs. Regelbesteuerung) in EIN Dokument statt in zwei Vorlagen.
+• Block-Feld 'repeat' — Datenpfad einer Liste. Bei Tabellen ist die Zeile nach der Kopfzeile die Schablone (weitere Zeilen sind Fußzeilen und erscheinen einmal), andere Blöcke werden je Eintrag wiederholt. In der Schablone greifen Platzhalter zuerst auf den Eintrag zu, dann auf das Wurzelobjekt; {{index}} ist die laufende Nummer ab 1.
+FEHLENDE WERTE: ein Platzhalter ohne Wert bleibt NICHT still leer — mit 'onMissing': 'error' (Default) bricht der Aufruf ab und nennt jeden fehlenden Platzhalter mit Fundort, mit 'report' wird gefüllt und die Liste steht in 'missing'. Als fehlend gilt auch ein leerer Text; ein Feld, das entfallen darf, gehört in einen 'when'-Block.
+Werte werden beim Einsetzen HTML-maskiert — Auszeichnung gehört in die Vorlage, nicht in die Daten. Fertige Vorlage: design_create mit kind 'invoice-data'.
+Eingabe: 'path'/'json' + 'data'. Ausgabe: 'outputPath' oder 'text' (JSON). Returns: { missing, notes, ... }.`,
+    inputSchema: { ...designSrcIn, ...dataIn, ...outOpt },
+    annotations: readAnn,
+  }, guard(async (a: { path?: string; json?: string; data?: Record<string, unknown>; onMissing?: "error" | "report"; outputPath?: string }) => {
+    if (!a.data) throw new pdf.ToolError("Ohne 'data' gibt es nichts zu füllen — bitte ein JSON-Objekt mitgeben.");
+    const { doc: normalized } = design.validateDesign(await loadDesignJson(a));
+    const merged = applyData(normalized, a);
+    // Nach dem Füllen erneut prüfen: die Daten könnten Unerwünschtes mitbringen.
+    const { doc: clean, issues } = design.validateDesign(JSON.stringify(merged.doc));
+    const json = JSON.stringify(clean, null, 2);
+    const summary = merged.missing.length
+      ? `Vorlage gefüllt — ${merged.missing.length} Platzhalter ohne Wert:\n- ${merged.missing.map((m) => `{{${m.placeholder}}} (${m.where})`).join("\n- ")}`
+      : `Vorlage '${clean.title}' vollständig gefüllt.`;
+    return ok({
+      title: clean.title, pageCount: clean.pages.length,
+      missing: merged.missing, notes: merged.notes, issues,
+      ...(await emitText(json, a.outputPath)),
+    }, summary);
   }));
 
   server.registerTool("design_render_html", {
@@ -616,6 +770,31 @@ Eingabe: 'path' oder 'json'. Ausgabe: 'outputPath' (geschrieben) ODER 'text' (HT
     return ok(
       { title: normalized.title, layout: normalized.layout, pageCount: normalized.pages.length, issues, ...(await emitText(html, a.outputPath)) },
       `HTML für '${normalized.title}' gerendert (${normalized.pages.length} Seite(n)).`);
+  }));
+
+  server.registerTool("design_render_pdf", {
+    title: "Design → PDF (ohne Browser)",
+    description: `Rendert ein Design-Dokument direkt als PDF — serverseitig, OHNE Browser und ohne Print-Dialog. Für Hintergrundprozesse gedacht (Rechnungen, Serienbriefe), die ein fertiges PDF brauchen statt HTML.
+REPRODUZIERBAR: gleiches Design → byte-gleiches PDF (keine Uhrzeit im Ergebnis, Datei-/ID aus dem Design abgeleitet). Schriften sind eingebettet (Liberation, SIL OFL 1.1, subsetted).
+EHRLICHE GRENZEN, jeweils als 'warnings' gemeldet: die Theme-Schriften (Georgia/Newsreader/Hanken/JetBrains Mono) liegen serverseitig nicht vor und werden durch metrisch kompatible Liberation-Schnitte ersetzt; vom Inline-HTML werden b/strong, i/em, u, br, p/div, ul/ol/li und span/font mit Farbe umgesetzt, alles andere wird zu Klartext; abgerundete Bildecken und Schatten fehlen; Bilder nur als data:-URL in PNG oder JPEG. Anders als der Browser bricht der Renderer zu lange Blöcke auf Folgeseiten um — Tabellen mit wiederholter Kopfzeile.
+Die Eingabe wird vor dem Rendern automatisch validiert/normalisiert (wie design_validate).
+Eingabe: 'path' oder 'json'. Ausgabe: 'outputPath' oder 'dataBase64'. Returns: { pageCount, issues, warnings, ... }.`,
+    inputSchema: { ...designSrcIn, ...dataIn, ...outOpt },
+    annotations: writeAnn,
+  }, guard(async (a: { path?: string; json?: string; data?: Record<string, unknown>; onMissing?: "error" | "report"; outputPath?: string }) => {
+    const { doc: parsed, issues } = design.validateDesign(await loadDesignJson(a));
+    const merged = applyData(parsed, a);
+    // Nach dem Füllen erneut normalisieren — die Daten könnten Unerwünschtes mitbringen.
+    const normalized = a.data ? design.validateDesign(JSON.stringify(merged.doc)).doc : parsed;
+    const r = await designPdf.renderPdf(normalized);
+    const summary = r.warnings.length
+      ? `PDF für '${normalized.title}' gerendert (${r.pageCount} Seite(n)) — ${r.warnings.length} Hinweis(e):\n- ${r.warnings.join("\n- ")}`
+      : `PDF für '${normalized.title}' gerendert (${r.pageCount} Seite(n)).`;
+    return ok({
+      title: normalized.title, layout: normalized.layout, pageCount: r.pageCount,
+      issues, warnings: r.warnings, missing: merged.missing, notes: merged.notes,
+      ...(await emitPdf(r.bytes, a.outputPath)),
+    }, summary);
   }));
 
   server.registerTool("design_render_interactive_html", {
@@ -636,7 +815,7 @@ Eingabe: 'path' oder 'json'. Ausgabe: 'outputPath' (geschrieben) ODER 'text' (HT
 }
 
 function buildServer(): McpServer {
-  const server = new McpServer({ name: "pagebound-pdf-mcp-server", version: "1.5.0" });
+  const server = new McpServer({ name: "pagebound-pdf-mcp-server", version: SERVER_VERSION });
   registerTools(server);
   return server;
 }
@@ -654,7 +833,7 @@ async function runHttp() {
   const app = express();
   app.use(express.json({ limit: HTTP_BODY_LIMIT }));
 
-  app.get("/healthz", (_req, res) => res.json({ ok: true, server: "pagebound-pdf-mcp-server" }));
+  app.get("/healthz", (_req, res) => res.json({ ok: true, server: "pagebound-pdf-mcp-server", version: SERVER_VERSION }));
 
   app.post("/mcp", async (req, res) => {
     // Stateless: pro Request ein frischer Server + Transport (keine Sessions).
@@ -670,6 +849,31 @@ async function runHttp() {
     }
   });
 
+  // Zu großer Body: sauber melden statt mit der Express-Standardseite abstürzen.
+  // Dieselbe Kennung wie im Tool-Fehlerpfad, damit Aufrufer nur einen Fall kennen müssen.
+  const onError: ErrorRequestHandler = (err, _req, res, next) => {
+    if (res.headersSent) { next(err); return; }
+    const tooLarge = (err as { type?: string })?.type === "entity.too.large";
+    if (tooLarge) {
+      res.status(413).json({
+        jsonrpc: "2.0",
+        error: {
+          code: -32600,
+          message: `Anfrage überschreitet das Body-Limit dieses Servers (${HTTP_BODY_LIMIT}).`,
+          data: { code: "INPUT_TOO_LARGE", bodyLimit: HTTP_BODY_LIMIT, maxBytesPerFile: MAX_PDF_BYTES },
+        },
+        id: null,
+      });
+      return;
+    }
+    console.error("HTTP-Fehler:", err);
+    res.status(500).json({
+      jsonrpc: "2.0",
+      error: { code: -32603, message: "Internal error", data: { code: "INTERNAL" } },
+      id: null,
+    });
+  };
+  app.use(onError);
   const port = Number(process.env.PORT) || 3000;
   app.listen(port, () => console.error(`pagebound-pdf-mcp-server läuft (http) auf :${port}/mcp`));
 }

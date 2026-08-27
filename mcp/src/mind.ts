@@ -24,8 +24,16 @@ function esc(s: string): string {
   return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-/** Zeichnet einen Mindmap-Baum als horizontalen Baum (Wurzel links) → SVG-String + Maße. */
-export function renderMindmapSvg(root: MindmapNode): { svg: string; w: number; h: number } {
+export interface MindmapLayoutNode { x: number; y: number; w: number; h: number; depth: number; label: string; fill: string }
+export interface MindmapLayoutLink { x1: number; y1: number; x2: number; y2: number }
+export interface MindmapLayout { w: number; h: number; background: string; nodes: MindmapLayoutNode[]; links: MindmapLayoutLink[] }
+
+/**
+ * Rechnet den Baum in Koordinaten um (Wurzel links, Kinder nach rechts).
+ * Getrennt vom SVG, weil der PDF-Renderer (design-pdf.ts) dieselben
+ * Koordinaten braucht — zwei Layouts würden auseinanderlaufen.
+ */
+export function layoutMindmap(root: MindmapNode): MindmapLayout {
   const depthMaxW: number[] = [];
   const measure = (n: MindmapNode, d: number): void => {
     depthMaxW[d] = Math.max(depthMaxW[d] ?? 0, nodeWidth(n.label));
@@ -51,28 +59,42 @@ export function renderMindmapSvg(root: MindmapNode): { svg: string; w: number; h
 
   let maxX = 0, maxY = 0;
   pos.forEach((p) => { maxX = Math.max(maxX, p.x + p.w); maxY = Math.max(maxY, p.y + NODE_H); });
-  const W = Math.ceil(maxX + 12), H = Math.ceil(maxY + 8);
 
-  let links = "", nodes = "";
+  const nodes: MindmapLayoutNode[] = [];
+  const links: MindmapLayoutLink[] = [];
   const walk = (n: MindmapNode): void => {
     const p = pos.get(n)!;
     for (const c of n.children ?? []) {
       const cp = pos.get(c)!;
-      const x1 = p.x + p.w, y1 = p.y, x2 = cp.x, y2 = cp.y, mx = (x1 + x2) / 2;
-      links += `<path d="M${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}" fill="none" stroke="#9aa6a0" stroke-width="2"/>`;
+      links.push({ x1: p.x + p.w, y1: p.y, x2: cp.x, y2: cp.y });
       walk(c);
     }
-    const fill = PALETTE[Math.min(p.d, PALETTE.length - 1)];
-    nodes += `<g><rect x="${p.x}" y="${p.y - NODE_H / 2}" width="${p.w}" height="${NODE_H}" rx="${NODE_H / 2}" fill="${fill}" stroke="#fff" stroke-width="1.5"/>`
-      + `<text x="${p.x + p.w / 2}" y="${p.y}" dominant-baseline="central" text-anchor="middle" font-family="system-ui,Segoe UI,Arial,sans-serif" font-size="${FONT}" font-weight="600" fill="#fff">${esc(n.label)}</text></g>`;
+    nodes.push({
+      x: p.x, y: p.y - NODE_H / 2, w: p.w, h: NODE_H, depth: p.d, label: n.label,
+      fill: PALETTE[Math.min(p.d, PALETTE.length - 1)],
+    });
   };
   walk(root);
 
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`
-    + `<rect width="100%" height="100%" fill="${BG}"/>${links}${nodes}</svg>`;
-  return { svg, w: W, h: H };
+  return { w: Math.ceil(maxX + 12), h: Math.ceil(maxY + 8), background: BG, nodes, links };
 }
 
+/** Zeichnet einen Mindmap-Baum als horizontalen Baum (Wurzel links) → SVG-String + Maße. */
+export function renderMindmapSvg(root: MindmapNode): { svg: string; w: number; h: number } {
+  const { w: W, h: H, background, nodes, links } = layoutMindmap(root);
+  const linkSvg = links.map(({ x1, y1, x2, y2 }) => {
+    const mx = (x1 + x2) / 2;
+    return `<path d="M${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}" fill="none" stroke="#9aa6a0" stroke-width="2"/>`;
+  }).join("");
+  const nodeSvg = nodes.map((n) =>
+    `<g><rect x="${n.x}" y="${n.y}" width="${n.w}" height="${n.h}" rx="${n.h / 2}" fill="${n.fill}" stroke="#fff" stroke-width="1.5"/>`
+    + `<text x="${n.x + n.w / 2}" y="${n.y + n.h / 2}" dominant-baseline="central" text-anchor="middle" font-family="system-ui,Segoe UI,Arial,sans-serif" font-size="${FONT}" font-weight="600" fill="#fff">${esc(n.label)}</text></g>`,
+  ).join("");
+
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`
+    + `<rect width="100%" height="100%" fill="${background}"/>${linkSvg}${nodeSvg}</svg>`;
+  return { svg, w: W, h: H };
+}
 /** Begrenzt einen importierten/erzeugten Mindmap-Baum: Labels als Klartext,
  *  Tiefe ≤ 8, ≤ 100 Kinder je Knoten, gültige Ids. Spiegel von C# SanitizeMindNode. */
 export function sanitizeMindNode(n: unknown, depth: number): MindmapNode {

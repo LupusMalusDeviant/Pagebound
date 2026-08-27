@@ -1,9 +1,13 @@
 // =============================================================================
-// PDF → PDF/A-2b (Best Effort) für den Pagebound MCP-Server.
+// PDF → PDF/A-2b bzw. PDF/A-3b (Best Effort) für den Pagebound MCP-Server.
 //
 // EHRLICHER SCOPE: Diese Nachbearbeitung bringt eine PDF per pdf-lib in die
 // NÄHE von PDF/A-2b — sie ist KEINE Konformitätsgarantie. Was passiert:
-//   1. XMP-Metadaten-Stream (Catalog /Metadata) mit pdfaid:part=2 /
+//   0. Anhänge (nur part=3): EmbeddedFile-Stream + Filespec mit
+//      /AFRelationship, verdrahtet in /Names /EmbeddedFiles UND im /AF-Array
+//      des Katalogs; optional ZUGFeRD/Factur-X-Kennzeichnung im XMP inkl.
+//      pdfaExtension-Schema (E-Rechnung).
+//   1. XMP-Metadaten-Stream (Catalog /Metadata) mit pdfaid:part=2|3 /
 //      pdfaid:conformance=B; dc:title/dc:creator etc. aus dem Info-Dict.
 //   2. OutputIntent (GTS_PDFA1) mit eingebettetem sRGB-ICC-Profil.
 //   3. Aufräumen: /OpenAction, /Names/JavaScript, /AA (Catalog + Seiten)
@@ -35,18 +39,22 @@ import {
   PDFHexString,
   PDFName,
   PDFNumber,
+  PDFObject,
   PDFRef,
   PDFString,
 } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
 import { readFile } from "node:fs/promises";
-import { ToolError } from "./pdf.js";
+import { NO_METADATA_BUMP, ToolError, deterministicFileId } from "./pdf.js";
 
 // sRGB-ICC-Profil (v2, "magic" Minimalvariante, 736 Bytes).
 // Quelle: https://github.com/saucecontrol/Compact-ICC-Profiles
 //         (raw: profiles/sRGB-v2-magic.icc), Lizenz: CC0 1.0 (Public Domain).
 const SRGB_ICC_BASE64 =
   "AAAC4GxjbXMCEAAAbW50clJHQiBYWVogB+IAAwAUAAkADgAdYWNzcE1TRlQAAAAAc2F3c2N0cmwAAAAAAAAAAAAAAAAAAPbWAAEAAAAA0y1oYW5kk7I0qQ6wIoqY/Zqvo2eJmwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAJZGVzYwAAAPAAAABfY3BydAAAAQwAAAAMd3RwdAAAARgAAAAUclhZWgAAASwAAAAUZ1hZWgAAAUAAAAAUYlhZWgAAAVQAAAAUclRSQwAAAWgAAAF4Z1RSQwAAAWgAAAF4YlRSQwAAAWgAAAF4ZGVzYwAAAAAAAAAFc1JHQgAAAAAAAAAAAAAAAHRleHQAAAAAQ0MwAFhZWiAAAAAAAADzVAABAAAAARbJWFlaIAAAAAAAAG+gAAA48gAAA49YWVogAAAAAAAAYpYAALeJAAAY2lhZWiAAAAAAAAAkoAAAD4UAALbEY3VydgAAAAAAAAC2AAAAHAA4AFQAcACMAKgAxADhAQABIgFGAW0BlQHBAfACIAJVAosCxAMBAz8DggPGBA4EWQSnBPkFTAWkBf4GXAa+ByEHigf0CGMI1QlJCcMKPwq/C0ILyQxUDOENdA4JDqIPQA/gEIURLRHaEooTPhP2FLIVcRY2Fv0XyhiZGW4aRhsiHAMc5x3QHr0friCkIZ4inCOfJKUlsSbAJ9Uo7SoKKyssUS18Lqov3jEWMlIzlDTZNiQ3czjGOiA7fDzfPkU/sEEhQpZEEEWPRxJIm0ooS7tNUU7uUI9SNVPgVZBXRVkAWr5chF5MYBth72PHZaZniWlxa19tUW9KcUZzSnVRd155cXuIfaZ/yIHwhB6GUIiJisWNCY9RkZ+T85ZLmKubDp14n+eiW6TWp1ap26xnrvexj7Qqtsy5dLwhvtXBjcRMxxDJ2syrz3/SXNU92CTbEt4E4P7j/OcB6gztHPA081D2c/mb/Mr//w==";
+
+// Namensraum der Factur-X-/ZUGFeRD-2.x-Kennzeichnung im XMP (Factur-X 1.0).
+const FACTURX_NS = "urn:factur-x:pdfa:CrossIndustryDocument:invoice:1p0#";
 
 const STANDARD_14 = new Set([
   "Helvetica", "Helvetica-Bold", "Helvetica-Oblique", "Helvetica-BoldOblique",
@@ -101,7 +109,7 @@ const loadLiberationTtf = async (file: string): Promise<Uint8Array> => {
   try {
     return new Uint8Array(await readFile(url));
   } catch (e) {
-    throw new ToolError(`Ersatzschrift '${file}' nicht gefunden (${url.pathname}) — Installation unvollständig? (${e instanceof Error ? e.message : String(e)})`);
+    throw new ToolError(`Ersatzschrift '${file}' nicht gefunden (${url.pathname}) — Installation unvollständig? (${e instanceof Error ? e.message : String(e)})`, "INTERNAL");
   }
 };
 
@@ -229,6 +237,76 @@ async function embedStandard14Replacements(
   return notes;
 }
 
+// --- Anhänge (PDF/A-3) ---------------------------------------------------------
+// PDF/A-2 erlaubt eingebettete Dateien nur, wenn sie selbst PDF/A sind; erst
+// PDF/A-3 lässt beliebige Dateien zu. Genau darauf beruht die E-Rechnung
+// (ZUGFeRD/Factur-X): ein PDF/A-3, in dem die maschinenlesbare XML-Rechnung als
+// Anhang mit /AFRelationship /Alternative steckt.
+
+/** /AFRelationship — Verhältnis des Anhangs zum Dokument (ISO 32000-2, 14.13). */
+export type AfRelationship = "Source" | "Data" | "Alternative" | "Supplement" | "Unspecified";
+
+export interface PdfAAttachment {
+  /** Dateiname im PDF (/F und /UF), z. B. "factur-x.xml". */
+  name: string;
+  bytes: Uint8Array;
+  /** MIME-Typ für /Subtype des EmbeddedFile-Streams (Default: application/octet-stream). */
+  mimeType?: string;
+  /** Beschreibung (/Desc am Filespec). */
+  description?: string;
+  /** /AFRelationship (Default: "Alternative" — der Fall der E-Rechnung). */
+  relationship?: AfRelationship;
+  /**
+   * /Params /ModDate. OHNE Angabe wird KEIN Datum geschrieben — sonst wäre die
+   * Ausgabe nicht mehr byte-gleich reproduzierbar (siehe D2 im Pack-CRM-ADR).
+   */
+  modDate?: Date;
+}
+
+/**
+ * ZUGFeRD/Factur-X-Kennzeichnung im XMP. Die fx-Eigenschaften liegen außerhalb
+ * der Standard-Schemata, deshalb schreibt buildXmp zusätzlich das von PDF/A
+ * geforderte Erweiterungsschema (pdfaExtension).
+ */
+export interface FacturXInfo {
+  /** fx:DocumentType (Default: "INVOICE"). */
+  documentType?: string;
+  /** fx:DocumentFileName — muss zum Namen des XML-Anhangs passen. */
+  documentFileName: string;
+  /** fx:Version (Default: "1.0"). */
+  version?: string;
+  /** fx:ConformanceLevel, z. B. "EN 16931", "BASIC", "MINIMUM", "EXTENDED". */
+  conformanceLevel?: string;
+}
+
+export interface PdfAOptions {
+  /** AcroForm-Felder einbrennen (Default: true). */
+  flattenForm?: boolean;
+  /** Nicht eingebettete Standard-14-Fonts ersetzen (Default: true). */
+  embedFonts?: boolean;
+  /** PDF/A-Teil: 2 (Default) oder 3 (erlaubt beliebige eingebettete Dateien). */
+  part?: 2 | 3;
+  /** Dateien, die eingebettet werden sollen (verlangt part=3). */
+  attachments?: PdfAAttachment[];
+  /** ZUGFeRD/Factur-X-Kennzeichnung im XMP. */
+  facturX?: FacturXInfo;
+  /**
+   * Dokumentdatum (ISO 8601). Wird als /CreationDate und /ModDate ins
+   * Info-Dict und in das XMP geschrieben. Ohne Angabe werden die Daten des
+   * Eingabedokuments übernommen; hat auch das keine, bleibt das Ergebnis
+   * datumslos — die Systemuhr wird bewusst NICHT befragt, sonst wäre die
+   * Ausgabe nicht mehr byte-gleich reproduzierbar.
+   */
+  documentDate?: Date;
+}
+
+/** PDF-Datum (D:YYYYMMDDhhmmssZ, UTC) für /Params /ModDate. */
+function toPdfDate(d: Date): string {
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `D:${d.getUTCFullYear()}${p(d.getUTCMonth() + 1)}${p(d.getUTCDate())}` +
+    `${p(d.getUTCHours())}${p(d.getUTCMinutes())}${p(d.getUTCSeconds())}Z`;
+}
+
 export interface PdfAResult {
   bytes: Uint8Array;
   warnings: string[];
@@ -237,17 +315,61 @@ export interface PdfAResult {
 const xmlEscape = (s: string): string =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-const isoDate = (d: Date | undefined): string => (d ?? new Date()).toISOString();
+// Kein Rückfall auf die Systemuhr — ein erfundenes Datum machte die Ausgabe
+// unreproduzierbar. Fehlt das Datum, bleibt das XMP an dieser Stelle leer
+// (oder der Aufrufer gibt documentDate mit).
+const isoDate = (d: Date | undefined): string | undefined => d?.toISOString();
 
 /** Entfernt das Subset-Präfix ("ABCDEF+Arial" → "Arial") für lesbare Warnungen. */
 const cleanFontName = (raw: string): string => raw.replace(/^[A-Z]{6}\+/, "");
 
+/**
+ * Erweiterungsschema für die fx-Eigenschaften (ZUGFeRD/Factur-X). PDF/A verlangt,
+ * dass jede XMP-Eigenschaft außerhalb der bekannten Schemata über
+ * pdfaExtension beschrieben wird — ohne diesen Block meldet veraPDF einen
+ * Verstoß, obwohl die Werte selbst korrekt sind.
+ */
+function facturXExtensionSchema(): string {
+  const prop = (name: string, description: string): string =>
+    `      <rdf:li rdf:parseType="Resource">\n` +
+    `       <pdfaProperty:name>${name}</pdfaProperty:name>\n` +
+    `       <pdfaProperty:valueType>Text</pdfaProperty:valueType>\n` +
+    `       <pdfaProperty:category>external</pdfaProperty:category>\n` +
+    `       <pdfaProperty:description>${xmlEscape(description)}</pdfaProperty:description>\n` +
+    `      </rdf:li>`;
+  return (
+    `  <rdf:Description rdf:about=""\n` +
+    `    xmlns:pdfaExtension="http://www.aiim.org/pdfa/ns/extension/"\n` +
+    `    xmlns:pdfaSchema="http://www.aiim.org/pdfa/ns/schema#"\n` +
+    `    xmlns:pdfaProperty="http://www.aiim.org/pdfa/ns/property#">\n` +
+    `   <pdfaExtension:schemas>\n` +
+    `    <rdf:Bag>\n` +
+    `     <rdf:li rdf:parseType="Resource">\n` +
+    `      <pdfaSchema:schema>Factur-X PDFA Extension Schema</pdfaSchema:schema>\n` +
+    `      <pdfaSchema:namespaceURI>${FACTURX_NS}</pdfaSchema:namespaceURI>\n` +
+    `      <pdfaSchema:prefix>fx</pdfaSchema:prefix>\n` +
+    `      <pdfaSchema:property>\n` +
+    `       <rdf:Seq>\n` +
+    prop("DocumentFileName", "name of the embedded XML invoice file") + "\n" +
+    prop("DocumentType", "INVOICE") + "\n" +
+    prop("Version", "The actual version of the standard applying to the embedded XML document") + "\n" +
+    prop("ConformanceLevel", "The conformance level of the embedded XML document") + "\n" +
+    `       </rdf:Seq>\n` +
+    `      </pdfaSchema:property>\n` +
+    `     </rdf:li>\n` +
+    `    </rdf:Bag>\n` +
+    `   </pdfaExtension:schemas>\n` +
+    `  </rdf:Description>`
+  );
+}
+
 function buildXmp(meta: {
   title?: string; author?: string; subject?: string; keywords?: string;
-  creator?: string; producer?: string; createDate: string; modifyDate: string;
+  creator?: string; producer?: string; createDate?: string; modifyDate?: string;
+  part: 2 | 3; facturX?: FacturXInfo;
 }): string {
   const lines: string[] = [];
-  lines.push(`<pdfaid:part>2</pdfaid:part>`);
+  lines.push(`<pdfaid:part>${meta.part}</pdfaid:part>`);
   lines.push(`<pdfaid:conformance>B</pdfaid:conformance>`);
   if (meta.title) {
     lines.push(`<dc:title><rdf:Alt><rdf:li xml:lang="x-default">${xmlEscape(meta.title)}</rdf:li></rdf:Alt></dc:title>`);
@@ -261,9 +383,26 @@ function buildXmp(meta: {
   if (meta.keywords) lines.push(`<pdf:Keywords>${xmlEscape(meta.keywords)}</pdf:Keywords>`);
   if (meta.creator) lines.push(`<xmp:CreatorTool>${xmlEscape(meta.creator)}</xmp:CreatorTool>`);
   if (meta.producer) lines.push(`<pdf:Producer>${xmlEscape(meta.producer)}</pdf:Producer>`);
-  lines.push(`<xmp:CreateDate>${meta.createDate}</xmp:CreateDate>`);
-  lines.push(`<xmp:ModifyDate>${meta.modifyDate}</xmp:ModifyDate>`);
-  lines.push(`<xmp:MetadataDate>${meta.modifyDate}</xmp:MetadataDate>`);
+  if (meta.createDate) lines.push(`<xmp:CreateDate>${meta.createDate}</xmp:CreateDate>`);
+  if (meta.modifyDate) {
+    lines.push(`<xmp:ModifyDate>${meta.modifyDate}</xmp:ModifyDate>`);
+    lines.push(`<xmp:MetadataDate>${meta.modifyDate}</xmp:MetadataDate>`);
+  }
+
+  // Factur-X/ZUGFeRD: eigenes rdf:Description mit dem fx-Namensraum, plus das
+  // von PDF/A geforderte Erweiterungsschema.
+  let facturXBlocks = "";
+  if (meta.facturX) {
+    const fx = meta.facturX;
+    facturXBlocks =
+      "\n" + facturXExtensionSchema() + "\n" +
+      `  <rdf:Description rdf:about="" xmlns:fx="${FACTURX_NS}">\n` +
+      `   <fx:DocumentType>${xmlEscape(fx.documentType ?? "INVOICE")}</fx:DocumentType>\n` +
+      `   <fx:DocumentFileName>${xmlEscape(fx.documentFileName)}</fx:DocumentFileName>\n` +
+      `   <fx:Version>${xmlEscape(fx.version ?? "1.0")}</fx:Version>\n` +
+      (fx.conformanceLevel ? `   <fx:ConformanceLevel>${xmlEscape(fx.conformanceLevel)}</fx:ConformanceLevel>\n` : "") +
+      `  </rdf:Description>`;
+  }
 
   // 2 KB Whitespace-Padding vor dem End-Packet (XMP-Spec-Empfehlung für In-Place-Edits).
   const padding = (" ".repeat(99) + "\n").repeat(20);
@@ -277,13 +416,15 @@ function buildXmp(meta: {
     `    xmlns:xmp="http://ns.adobe.com/xap/1.0/"\n` +
     `    xmlns:pdf="http://ns.adobe.com/pdf/1.3/">\n` +
     lines.map((l) => `   ${l}`).join("\n") + "\n" +
-    `  </rdf:Description>\n` +
+    `  </rdf:Description>` +
+    facturXBlocks + "\n" +
     ` </rdf:RDF>\n` +
     `</x:xmpmeta>\n` +
     padding +
     `<?xpacket end="w"?>`
   );
 }
+
 
 /**
  * Prüft alle Font-Dictionaries auf eingebettete Font-Programme. Standard-14-
@@ -338,21 +479,141 @@ function collectFontWarnings(doc: PDFDocument): string[] {
 }
 
 /**
- * Konvertiert eine PDF Richtung PDF/A-2b (Best Effort). Liefert die neuen
- * Bytes plus ehrliche Warnungen (z. B. nicht eingebettete Schriften).
+ * Bettet Dateien als EmbeddedFile-Streams ein und verdrahtet sie an beiden
+ * Stellen, die PDF/A-3 verlangt: im Namensbaum /Names /EmbeddedFiles (damit
+ * Reader sie in der Anlagenliste zeigen) UND im /AF-Array des Katalogs (damit
+ * sie als zugeordnete Datei mit /AFRelationship gelten). Liefert Hinweise.
+ */
+function embedAttachments(doc: PDFDocument, attachments: PdfAAttachment[]): string[] {
+  const ctx = doc.context;
+  const catalog = doc.catalog;
+  const notes: string[] = [];
+
+  // --- Namensbaum vorbereiten -------------------------------------------------
+  let namesDict = catalog.lookupMaybe(PDFName.of("Names"), PDFDict);
+  if (!namesDict) {
+    namesDict = ctx.obj({}) as PDFDict;
+    catalog.set(PDFName.of("Names"), ctx.register(namesDict));
+  }
+  let efDict = namesDict.lookupMaybe(PDFName.of("EmbeddedFiles"), PDFDict);
+  if (!efDict) {
+    efDict = ctx.obj({}) as PDFDict;
+    namesDict.set(PDFName.of("EmbeddedFiles"), ctx.register(efDict));
+  }
+  if (efDict.has(PDFName.of("Kids"))) {
+    // Verzweigter Namensbaum: ein flaches /Names-Array danebenzusetzen wäre
+    // ungültig. Ehrlich abbrechen statt eine kaputte Datei zu erzeugen.
+    throw new ToolError(
+      "Die PDF enthält bereits einen verzweigten Namensbaum für eingebettete Dateien (/Names /EmbeddedFiles /Kids) — " +
+      "das Anhängen weiterer Dateien wird für diesen Fall nicht unterstützt."
+    , "UNSUPPORTED");
+  }
+
+  // Bestehende Paare (Name, Filespec) unverändert übernehmen — als rohe
+  // Einträge, damit vorhandene Referenzen Referenzen bleiben.
+  const entries: Array<{ key: string; value: PDFObject }> = [];
+  const existing = efDict.lookupMaybe(PDFName.of("Names"), PDFArray);
+  if (existing) {
+    for (let i = 0; i + 1 < existing.size(); i += 2) {
+      const rawKey = existing.lookup(i);
+      const key = rawKey instanceof PDFString || rawKey instanceof PDFHexString ? rawKey.decodeText() : "";
+      entries.push({ key, value: existing.get(i + 1) });
+    }
+  }
+
+  // --- /AF-Array des Katalogs -------------------------------------------------
+  let afArray = catalog.lookupMaybe(PDFName.of("AF"), PDFArray);
+  if (!afArray) {
+    afArray = ctx.obj([]) as PDFArray;
+    catalog.set(PDFName.of("AF"), afArray);
+  }
+
+  for (const att of attachments) {
+    if (!att.name) throw new ToolError("Ein Anhang ohne Dateinamen kann nicht eingebettet werden.");
+    if (entries.some((e) => e.key === att.name)) {
+      throw new ToolError(`Die PDF enthält bereits einen Anhang namens '${att.name}'.`);
+    }
+
+    // EmbeddedFile-Stream (unkomprimiert — wie der ICC-Stream; PDF/A-tauglich
+    // und reproduzierbar, weil keine Kompressionsparameter mitspielen).
+    const params = ctx.obj({});
+    params.set(PDFName.of("Size"), PDFNumber.of(att.bytes.length));
+    if (att.modDate) params.set(PDFName.of("ModDate"), PDFString.of(toPdfDate(att.modDate)));
+    const efStream = ctx.stream(att.bytes, {
+      Type: "EmbeddedFile",
+      Subtype: att.mimeType || "application/octet-stream", // PDFName escapt '/' als #2F
+    });
+    efStream.dict.set(PDFName.of("Params"), params);
+    const efRef = ctx.register(efStream);
+
+    // Filespec: /F (ASCII) und /UF (UTF-16BE) — PDF/A-3 will beide.
+    const filespec = ctx.obj({ Type: "Filespec" });
+    filespec.set(PDFName.of("F"), PDFString.of(att.name));
+    filespec.set(PDFName.of("UF"), PDFHexString.fromText(att.name));
+    if (att.description) filespec.set(PDFName.of("Desc"), PDFHexString.fromText(att.description));
+    filespec.set(PDFName.of("AFRelationship"), PDFName.of(att.relationship ?? "Alternative"));
+    const ef = ctx.obj({});
+    ef.set(PDFName.of("F"), efRef);
+    ef.set(PDFName.of("UF"), efRef);
+    filespec.set(PDFName.of("EF"), ef);
+    const filespecRef = ctx.register(filespec);
+
+    entries.push({ key: att.name, value: filespecRef });
+    afArray.push(filespecRef);
+    notes.push(
+      `Datei "${att.name}" (${att.bytes.length} Bytes, ${att.mimeType || "application/octet-stream"}) ` +
+      `wurde mit /AFRelationship /${att.relationship ?? "Alternative"} eingebettet.`
+    );
+  }
+
+  // Das /Names-Array eines Namensbaums MUSS nach Schlüssel sortiert sein.
+  entries.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+  const flat: PDFObject[] = [];
+  for (const e of entries) {
+    flat.push(PDFString.of(e.key));
+    flat.push(e.value);
+  }
+  efDict.set(PDFName.of("Names"), ctx.obj(flat));
+
+  return notes;
+}
+
+/**
+ * Konvertiert eine PDF Richtung PDF/A-2b oder PDF/A-3b (Best Effort). Liefert
+ * die neuen Bytes plus ehrliche Warnungen (z. B. nicht eingebettete Schriften).
  * Mit embedFonts=true (Default) werden nicht eingebettete Standard-14-Fonts
  * (Helvetica/Times/Courier) durch eingebettete Liberation-Fonts ersetzt.
+ *
+ * PDF/A-3 (part=3) erlaubt zusätzlich beliebige eingebettete Dateien — der Fall
+ * der E-Rechnung: die XML-Rechnung als Anhang mit /AFRelationship /Alternative,
+ * gekennzeichnet über facturX im XMP. Konformität extern prüfen (veraPDF).
  */
-export async function toPdfA(input: Uint8Array, flattenForm = true, embedFonts = true): Promise<PdfAResult> {
+export async function toPdfA(input: Uint8Array, opts: PdfAOptions = {}): Promise<PdfAResult> {
+  const flattenForm = opts.flattenForm ?? true;
+  const embedFonts = opts.embedFonts ?? true;
+  const part = opts.part ?? 2;
+  const attachments = opts.attachments ?? [];
+  if (part !== 2 && part !== 3) {
+    throw new ToolError(`Ungültiger PDF/A-Teil '${part}' — unterstützt werden 2 und 3.`);
+  }
+  if (attachments.length > 0 && part !== 3) {
+    throw new ToolError(
+      "Eingebettete Dateien sind erst ab PDF/A-3 zulässig (PDF/A-2 erlaubt nur eingebettete PDF/A-Dateien) — bitte part=3 setzen."
+    );
+  }
+  if (opts.facturX && part !== 3) {
+    throw new ToolError("Eine ZUGFeRD/Factur-X-Kennzeichnung ergibt nur mit part=3 Sinn — bitte part=3 setzen.");
+  }
+
   let doc: PDFDocument;
   try {
-    doc = await PDFDocument.load(input);
+    doc = await PDFDocument.load(input, NO_METADATA_BUMP);
   } catch (e) {
     const m = e instanceof Error ? e.message : String(e);
     if (/encrypt/i.test(m)) {
-      throw new ToolError(`PDF ist passwortgeschützt/verschlüsselt — PDF/A verbietet Verschlüsselung; bitte zuerst entschlüsseln. (${m})`);
+      throw new ToolError(`PDF ist passwortgeschützt/verschlüsselt — PDF/A verbietet Verschlüsselung; bitte zuerst entschlüsseln. (${m})`, "PDF_ENCRYPTED");
     }
-    throw new ToolError(`Keine gültige PDF oder beschädigt (${m}).`);
+    throw new ToolError(`Keine gültige PDF oder beschädigt (${m}).`, "PDF_CORRUPT");
   }
 
   const warnings: string[] = [];
@@ -414,6 +675,14 @@ export async function toPdfA(input: Uint8Array, flattenForm = true, embedFonts =
   intent.set(PDFName.of("DestOutputProfile"), iccRef);
   catalog.set(PDFName.of("OutputIntents"), ctx.obj([ctx.register(intent)]));
 
+  // --- 3b) Dokumentdatum (falls vorgegeben) ---------------------------------
+  // Info-Dict und XMP müssen übereinstimmen, deshalb wird beides aus derselben
+  // Quelle gespeist: dem übergebenen Datum, sonst dem des Eingabedokuments.
+  if (opts.documentDate) {
+    doc.setCreationDate(opts.documentDate);
+    doc.setModificationDate(opts.documentDate);
+  }
+
   // --- 4) XMP-Metadaten-Stream (unkomprimiert, wie PDF/A es verlangt) --------
   const xmp = buildXmp({
     title: doc.getTitle() || undefined,
@@ -424,17 +693,48 @@ export async function toPdfA(input: Uint8Array, flattenForm = true, embedFonts =
     producer: doc.getProducer() || undefined,
     createDate: isoDate(doc.getCreationDate() ?? undefined),
     modifyDate: isoDate(doc.getModificationDate() ?? undefined),
+    part,
+    facturX: opts.facturX,
   });
+  if (!doc.getCreationDate() && !doc.getModificationDate()) {
+    warnings.push(
+      "Das Dokument trägt kein Erstellungsdatum — das XMP bleibt datumslos (die Systemuhr wird bewusst nicht befragt, " +
+      "sonst wäre die Ausgabe nicht byte-gleich reproduzierbar). Für Archivzwecke documentDate mitgeben."
+    );
+  }
   const xmpStream = ctx.stream(new TextEncoder().encode(xmp), { Type: "Metadata", Subtype: "XML" });
   catalog.set(PDFName.of("Metadata"), ctx.register(xmpStream));
 
   // --- 5) Trailer-ID setzen, falls keine vorhanden ---------------------------
+  // AUS DEM INHALT abgeleitet, nicht aus dem Zufallsgenerator: sonst hätte
+  // dasselbe Dokument bei jedem Lauf eine andere Kennung und damit andere
+  // Bytes. Der Hash läuft über die Eingabe plus die Parameter, die das
+  // Ergebnis verändern.
   if (!ctx.trailerInfo.ID) {
-    const rnd = crypto.getRandomValues(new Uint8Array(16));
-    let hex = "";
-    for (const b of rnd) hex += b.toString(16).padStart(2, "0").toUpperCase();
+    const hex = deterministicFileId(
+      input,
+      `part=${part};flatten=${flattenForm};fonts=${embedFonts}`,
+      ...attachments.map((a) => `${a.name}:${a.bytes.length}`),
+    );
     const id = PDFHexString.of(hex);
     ctx.trailerInfo.ID = ctx.obj([id, id]);
+  }
+
+  // --- 5b) Anhänge einbetten (nur PDF/A-3) ----------------------------------
+  if (attachments.length > 0) {
+    warnings.push(...embedAttachments(doc, attachments));
+  }
+  if (opts.facturX) {
+    const named = opts.facturX.documentFileName;
+    if (!attachments.some((a) => a.name === named)) {
+      warnings.push(
+        `Die Factur-X-Kennzeichnung nennt "${named}", aber kein Anhang heißt so — ` +
+        "Prüfer erwarten unter fx:DocumentFileName den Namen der eingebetteten XML-Rechnung."
+      );
+    }
+  }
+  if (part === 3 && attachments.length === 0) {
+    warnings.push("PDF/A-3 wurde ausgezeichnet, aber keine Datei eingebettet — ohne Anhang wäre PDF/A-2b die passendere Stufe.");
   }
 
   // --- 6) Font-Härtung: Standard-14 → Liberation einbetten (optional) --------
@@ -445,8 +745,10 @@ export async function toPdfA(input: Uint8Array, flattenForm = true, embedFonts =
   // --- 7) Font-Embedding-Prüfung (nur melden, nichts reparieren) -------------
   warnings.push(...collectFontWarnings(doc));
 
-  // Klassische xref-Struktur für maximale Validator-Kompatibilität; pdf-lib
-  // verändert das Info-Dict beim Save nicht → bleibt konsistent zum XMP-Paket.
+  // Klassische xref-Struktur für maximale Validator-Kompatibilität. Das
+  // Info-Dict bleibt konsistent zum XMP-Paket, weil das Dokument mit
+  // NO_METADATA_BUMP geladen wurde — pdf-lib würde sonst schon beim LADEN
+  // /ModDate und /Producer mit der aktuellen Uhrzeit überschreiben.
   const bytes = await doc.save({ useObjectStreams: false });
   return { bytes, warnings };
 }

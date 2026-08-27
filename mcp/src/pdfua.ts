@@ -26,7 +26,7 @@ import {
   PDFName,
   PDFString,
 } from "pdf-lib";
-import { ToolError } from "./pdf.js";
+import { NO_METADATA_BUMP, ToolError } from "./pdf.js";
 
 export interface PdfUaResult {
   bytes: Uint8Array;
@@ -41,7 +41,7 @@ const LANG_RE = /^[a-zA-Z]{2,3}(-[a-zA-Z0-9]{2,8})*$/;
 
 function buildUaXmp(meta: {
   title?: string; author?: string; subject?: string;
-  createDate: string; modifyDate: string;
+  createDate?: string; modifyDate?: string;
 }): string {
   const lines: string[] = [];
   lines.push(`<pdfuaid:part>1</pdfuaid:part>`);
@@ -54,9 +54,11 @@ function buildUaXmp(meta: {
   if (meta.subject) {
     lines.push(`<dc:description><rdf:Alt><rdf:li xml:lang="x-default">${xmlEscape(meta.subject)}</rdf:li></rdf:Alt></dc:description>`);
   }
-  lines.push(`<xmp:CreateDate>${meta.createDate}</xmp:CreateDate>`);
-  lines.push(`<xmp:ModifyDate>${meta.modifyDate}</xmp:ModifyDate>`);
-  lines.push(`<xmp:MetadataDate>${meta.modifyDate}</xmp:MetadataDate>`);
+  if (meta.createDate) lines.push(`<xmp:CreateDate>${meta.createDate}</xmp:CreateDate>`);
+  if (meta.modifyDate) {
+    lines.push(`<xmp:ModifyDate>${meta.modifyDate}</xmp:ModifyDate>`);
+    lines.push(`<xmp:MetadataDate>${meta.modifyDate}</xmp:MetadataDate>`);
+  }
 
   const padding = (" ".repeat(99) + "\n").repeat(20);
   return (
@@ -131,13 +133,13 @@ export async function preparePdfUa(input: Uint8Array, opts: { lang?: string } = 
 
   let doc: PDFDocument;
   try {
-    doc = await PDFDocument.load(input);
+    doc = await PDFDocument.load(input, NO_METADATA_BUMP);
   } catch (e) {
     const m = e instanceof Error ? e.message : String(e);
     if (/encrypt/i.test(m)) {
-      throw new ToolError(`PDF ist passwortgeschützt/verschlüsselt — bitte zuerst entschlüsseln. (${m})`);
+      throw new ToolError(`PDF ist passwortgeschützt/verschlüsselt — bitte zuerst entschlüsseln. (${m})`, "PDF_ENCRYPTED");
     }
-    throw new ToolError(`Keine gültige PDF oder beschädigt (${m}).`);
+    throw new ToolError(`Keine gültige PDF oder beschädigt (${m}).`, "PDF_CORRUPT");
   }
 
   const report: string[] = [];
@@ -155,13 +157,15 @@ export async function preparePdfUa(input: Uint8Array, opts: { lang?: string } = 
   viewerPrefs.set(PDFName.of("DisplayDocTitle"), PDFBool.True);
   catalog.set(PDFName.of("ViewerPreferences"), viewerPrefs);
 
-  const nowIso = new Date().toISOString();
+  // Kein Rückfall auf die Systemuhr: ein erfundenes Datum machte die Ausgabe
+  // unreproduzierbar (gleiche Eingabe → andere Bytes). Fehlt es im Dokument,
+  // bleibt es auch im XMP leer.
   const xmp = buildUaXmp({
     title: doc.getTitle() || undefined,
     author: doc.getAuthor() || undefined,
     subject: doc.getSubject() || undefined,
-    createDate: doc.getCreationDate()?.toISOString() ?? nowIso,
-    modifyDate: doc.getModificationDate()?.toISOString() ?? nowIso,
+    createDate: doc.getCreationDate()?.toISOString(),
+    modifyDate: doc.getModificationDate()?.toISOString(),
   });
   const xmpStream = ctx.stream(new TextEncoder().encode(xmp), { Type: "Metadata", Subtype: "XML" });
   catalog.set(PDFName.of("Metadata"), ctx.register(xmpStream));

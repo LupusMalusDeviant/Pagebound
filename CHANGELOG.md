@@ -4,6 +4,34 @@ Alle nennenswerten Änderungen an Pagebound werden in dieser Datei dokumentiert.
 Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/de/1.1.0/),
 die Versionierung folgt [Semantic Versioning](https://semver.org/lang/de/).
 
+## [Unveröffentlicht]
+
+MCP-Server **2.0.0**. Anlass war ein Anforderungskatalog aus einem
+Kundenmanagementsystem, das Pagebound als Dokumentendienst einbindet:
+E-Rechnungen erzeugen, signieren und in eine Hash-Kette hängen.
+
+**Major**, weil sich bei gleichem Aufruf Verhalten ändert: andere Signaturbytes,
+byte-gleich reproduzierbare Ausgabe, neue Fehlerform, neuer SubFilter.
+
+### Hinzugefügt
+- **`design_render_pdf`** — Design direkt als PDF rendern, **serverseitig und ohne Browser**: eigener pdf-lib-Renderer mit Textumbruch, Blocksatz, Listen, Tabellen (Seitenumbruch **mit wiederholter Kopfzeile**), Bildern, Formen, Mindmaps und gedrehten Overlays. Schriften (Liberation) subsetted eingebettet
+- **`design_merge_data`** — Vorlage mit einem JSON-Objekt füllen: `{{pfad.zum.wert}}`, bedingte Blöcke (`when`/`unless`) und Wiederholungen (`repeat`). Fehlende Werte bleiben **nicht** still leer, sondern brechen ab oder werden mit Fundort gemeldet; Werte werden HTML-maskiert
+- **Rechnungsvorlage `invoice-data`** mit allen Pflichtangaben nach § 14 UStG und **beiden** Umsatzsteuer-Fällen in *einem* Dokument (Kleinunternehmer § 19 vs. Regelbesteuerung, über bedingte Blöcke)
+- **PDF/A-3b mit eingebetteten Dateien** in `pdf_to_pdfa` (`part`, `attachments`, `facturX`): EmbeddedFile-Stream, Filespec mit `/AFRelationship`, Eintrag in `/Names /EmbeddedFiles` **und** im `/AF`-Array, ZUGFeRD/Factur-X-Kennzeichnung im XMP samt Extension-Schema — die Grundlage für E-Rechnungen
+- **`signingCertificateV2`** (RFC 5035) in der Zertifikatssignatur, mit `certHash` und `issuerSerial`; SubFilter jetzt **`ETSI.CAdES.detached`** (PAdES-B-B)
+- **Erneutes Signieren** hängt ein **inkrementelles Update** an, statt abzulehnen — die bestehende Signatur bleibt gültig
+- **Fehlervertrag**: jeder Fehler trägt eine stabile Kennung (`code`) in `structuredContent` und im Text, damit Aufrufer „Nutzer fragen" von „Eingabe korrigieren" von „Betrieb alarmieren" trennen können, ohne deutsche Fehlertexte zu parsen
+- **`tools/cms-verify`** — unabhängige Gegenprobe zur PDF-Signatur mit .NET statt node-forge; prüft jede Signatur einer Datei zweimal: über die empfangenen Bytes und über die **neu nach DER kodierten** Attribute
+
+### Geändert
+- **Reproduzierbare Ausgabe**: derselbe Aufruf mit denselben Daten erzeugt dasselbe PDF, Byte für Byte. pdf-lib schrieb bei **jedem** Laden ungefragt `/ModDate` und `/Producer` mit der Systemuhr ins Info-Dict — das ist abgeschaltet; die Trailer-`/ID` wird aus dem Inhalt abgeleitet statt gewürfelt; kein Datum wird mehr erfunden (`documentDate` als Parameter); der DOCX-Export nutzt eine feste ZIP-Zeit. Bewusste Ausnahmen: `pdf_encrypt` und `pdf_sign`, beide kryptographisch bedingt
+- **Serverversion** kommt aus der `package.json` statt aus einem zweiten Literal im Code (die Zahlen waren auf 1.6.0/1.5.0 auseinandergelaufen); `/healthz` meldet sie mit
+- **HTTP-Body-Limit** wird aus `MCP_MAX_PDF_BYTES` abgeleitet statt separat gepflegt; ein zu großer Body ergibt sauber `413` mit `INPUT_TOO_LARGE` statt einer Express-Standardseite
+
+### Behoben
+- **Signierte CMS-Attribute standen nicht in DER-Reihenfolge.** RFC 5652 §5.4 bildet den Digest über die DER-Kodierung der signierten Attribute, und DER verlangt ein sortiertes `SET`. Adobe prüft über die empfangenen Bytes und merkt nichts davon — Prüfer, die vor dem Vergleich neu kodieren (BouncyCastle, eIDAS-Validatoren), lehnten die Signatur ab. Betraf jede bisher erzeugte Signatur, in der PWA wie im MCP-Server
+- **Overlays im PDF-Renderer** landeten auf der letzten Seite eines umgebrochenen Blockflusses statt auf der ersten
+
 ## [0.12.0-beta] — 2026-07-04
 
 Sammelrelease seit 0.11.0: fünf neue „Killer"-Werkzeuge (ohne Telemetrie, ohne

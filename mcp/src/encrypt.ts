@@ -7,7 +7,7 @@
 // as the web app). The document opens password-protected in any compliant reader.
 // =============================================================================
 import { PDFDocument } from "pdf-lib";
-import { ToolError } from "./pdf.js";
+import { NO_METADATA_BUMP, ToolError } from "./pdf.js";
 
 const subtle = globalThis.crypto.subtle;
 const EMPTY = new Uint8Array(0);
@@ -115,7 +115,7 @@ function parsePdfStructure(pdf: Uint8Array): { header: Uint8Array; objects: PdfO
   const isWs = (c: string) => c === " " || c === "\r" || c === "\n" || c === "\t" || c === "\f" || c === "\0";
 
   const sx = text.lastIndexOf("startxref");
-  if (sx < 0) throw new ToolError("Verschlüsselung fehlgeschlagen: kein startxref (PDF nicht klassisch strukturiert).");
+  if (sx < 0) throw new ToolError("Verschlüsselung fehlgeschlagen: kein startxref (PDF nicht klassisch strukturiert).", "UNSUPPORTED");
   let p = sx + 9;
   while (p < text.length && !isD(text[p])) p++;
   let s = p; while (p < text.length && isD(text[p])) p++;
@@ -124,7 +124,7 @@ function parsePdfStructure(pdf: Uint8Array): { header: Uint8Array; objects: PdfO
   const offsets = new Map<number, number>();
   let xp = xrefOffset;
   while (xp < text.length && isWs(text[xp])) xp++;
-  if (text.slice(xp, xp + 4) !== "xref") throw new ToolError("Verschlüsselung fehlgeschlagen: kein klassisches xref (evtl. xref-Stream).");
+  if (text.slice(xp, xp + 4) !== "xref") throw new ToolError("Verschlüsselung fehlgeschlagen: kein klassisches xref (evtl. xref-Stream).", "UNSUPPORTED");
   xp += 4;
   while (true) {
     while (xp < text.length && isWs(text[xp])) xp++;
@@ -140,12 +140,12 @@ function parsePdfStructure(pdf: Uint8Array): { header: Uint8Array; objects: PdfO
       xp += 20;
     }
   }
-  if (offsets.size === 0) throw new ToolError("Verschlüsselung fehlgeschlagen: xref ohne In-Use-Objekte.");
+  if (offsets.size === 0) throw new ToolError("Verschlüsselung fehlgeschlagen: xref ohne In-Use-Objekte.", "PDF_CORRUPT");
 
   const tp = text.indexOf("trailer", xrefOffset);
   const trailer = tp >= 0 ? text.slice(tp, Math.min(text.length, tp + 4000)) : "";
   const rootM = trailer.match(/\/Root\s+(\d+)\s+(\d+)\s+R/);
-  if (!rootM) throw new ToolError("Verschlüsselung fehlgeschlagen: kein /Root im Trailer.");
+  if (!rootM) throw new ToolError("Verschlüsselung fehlgeschlagen: kein /Root im Trailer.", "PDF_CORRUPT");
   const infoM = trailer.match(/\/Info\s+(\d+)\s+(\d+)\s+R/);
 
   const maxObj = Math.max(...offsets.keys());
@@ -223,12 +223,16 @@ export async function encryptPdf(
   permissions = -1,
   encryptMetadata = true
 ): Promise<Uint8Array> {
-  const normDoc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
+  const normDoc = await PDFDocument.load(pdfBytes, { ...NO_METADATA_BUMP, ignoreEncryption: true });
   const normalized = await normDoc.save({ useObjectStreams: false });
   const struct = parsePdfStructure(normalized);
 
   const user = preparePassword(userPassword);
   const owner = preparePassword(ownerPassword && ownerPassword.length ? ownerPassword : userPassword);
+  // BEWUSSTE AUSNAHME von der Reproduzierbarkeit: Dateischlüssel, IVs und die
+  // Datei-/ID sind Zufall und müssen es sein. Zwei Verschlüsselungen derselben
+  // Eingabe ergeben deshalb verschiedene Bytes — das ist Kryptographie, kein
+  // Schlendrian.
   const fileKey = crypto.getRandomValues(new Uint8Array(32));
   const keys = await deriveR6Keys(owner, user, fileKey, permissions, encryptMetadata);
 
