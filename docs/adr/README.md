@@ -12,6 +12,7 @@ abgeleitet — keine neuen Entscheidungen).
 | [0004](0004-pdf-lib-statt-pdfsharpcore.md) | pdf-lib/PDF.js statt PdfSharpCore | Akzeptiert |
 | [0006](0006-pragmatisches-signatur-schema.md) | Pragmatisches Signatur-Integritäts-Schema (kein PAdES) | Akzeptiert |
 | [0011](0011-indexeddb-primaer-sidecar-export.md) | IndexedDB primär, Sidecar für Export | Akzeptiert |
+| [0012](0012-eigener-pdf-renderer-statt-headless-browser.md) | Eigener pdf-lib-Renderer statt Headless-Browser für Design → PDF | Akzeptiert |
 
 > Die Nummern sind nicht lückenlos — nur die im Code referenzierten Entscheidungen
 > sind hier festgehalten.

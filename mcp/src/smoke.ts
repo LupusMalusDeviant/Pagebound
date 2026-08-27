@@ -797,6 +797,126 @@ async function main() {
   }
 
 
+
+  // --- design_render_pdf: Geometrie ------------------------------------------
+  // Textextraktion beantwortet nur, OB etwas im Dokument steht — nie WO. Ein
+  // Layout-Fehler ist für sie unsichtbar; genau so ist ein gedrehtes Overlay
+  // einmal auf der letzten statt der ersten Seite gelandet. Deshalb wird hier
+  // die Zeichenlage gemessen: pdfjs liefert je Textstück die Transformations-
+  // matrix [a b c d x y] — daraus kommen Position und Drehwinkel.
+  {
+    interface Glyph { page: number; text: string; x: number; y: number; width: number; angle: number }
+
+    const glyphsOf = async (bytes: Uint8Array): Promise<{ glyphs: Glyph[]; pages: Array<{ w: number; h: number }> }> => {
+      const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+      const doc = await pdfjs.getDocument({ data: bytes }).promise;
+      const glyphs: Glyph[] = [];
+      const pages: Array<{ w: number; h: number }> = [];
+      for (let p = 1; p <= doc.numPages; p++) {
+        const page = await doc.getPage(p);
+        const vp = page.getViewport({ scale: 1 });
+        pages.push({ w: vp.width, h: vp.height });
+        const content = await page.getTextContent();
+        for (const item of content.items) {
+          const it = item as { str?: string; width?: number; transform?: number[] };
+          if (!it.str || !it.str.trim() || !it.transform) continue;
+          const [a, b, , , x, y] = it.transform;
+          glyphs.push({
+            page: p, text: it.str, x, y, width: it.width ?? 0,
+            angle: Math.round((Math.atan2(b, a) * 180) / Math.PI),
+          });
+        }
+      }
+      return { glyphs, pages };
+    };
+
+    const near = (actual: number, expected: number, tol = 0.6): boolean => Math.abs(actual - expected) <= tol;
+
+    // A4 hochkant, 20 mm Rand → Satzspiegel 56.69 … 538.58 pt, Mitte 297.64 pt.
+    const MARGIN = 20 * (72 / 25.4);
+    const CONTENT_W = (210 - 40) * (72 / 25.4);
+    const CENTER = MARGIN + CONTENT_W / 2;
+
+    const probe = design.validateDesign(JSON.stringify({
+      title: "Geometrie", layout: "A4Portrait", theme: null,
+      pages: [{
+        blocks: [
+          { type: "Heading", level: 1, text: "Mitte", align: "center" },
+          { type: "Paragraph", text: "Links", align: "left" },
+          { type: "Paragraph", text: "Rechts", align: "right" },
+          { type: "Paragraph", text: "<ul><li>Punkt</li></ul>" },
+          { type: "Table", headerRow: true, rows: [["Kopf"], ["Zelle"]] },
+        ],
+        overlays: [{ type: "Text", xPercent: 50, yPercent: 10, widthPercent: 30, text: "SCHRAEG", fontSizePt: 20, rotationDeg: 20 }],
+      }],
+    })).doc;
+
+    const rendered = await designPdf.renderPdf(probe);
+    const { glyphs, pages } = await glyphsOf(rendered.bytes.slice());
+    const find = (needle: string): Glyph | undefined => glyphs.find((g) => g.text.includes(needle));
+
+    check("geometry: page is exactly A4 portrait",
+      pages.length === 1 && near(pages[0].w, 595.28, 0.1) && near(pages[0].h, 841.89, 0.1),
+      JSON.stringify(pages[0]));
+
+    const left = find("Links");
+    check("geometry: left-aligned text starts at the margin",
+      !!left && near(left.x, MARGIN), `x=${left?.x.toFixed(2)} erwartet ${MARGIN.toFixed(2)}`);
+
+    const heading = find("Mitte");
+    check("geometry: centred heading is centred on the content box",
+      !!heading && near(heading.x + heading.width / 2, CENTER),
+      `Mitte=${heading ? (heading.x + heading.width / 2).toFixed(2) : "?"} erwartet ${CENTER.toFixed(2)}`);
+
+    const right = find("Rechts");
+    check("geometry: right-aligned text ends at the right margin",
+      !!right && near(right.x + right.width, MARGIN + CONTENT_W),
+      `rechts=${right ? (right.x + right.width).toFixed(2) : "?"} erwartet ${(MARGIN + CONTENT_W).toFixed(2)}`);
+
+    // Aufzählungszeichen am Rand, der Text um 18 px = 13.5 pt eingerückt.
+    const bullet = glyphs.find((g) => g.text.trim() === "•");
+    const bulletText = find("Punkt");
+    check("geometry: list bullet sits at the margin, its text is indented",
+      !!bullet && !!bulletText && near(bullet.x, MARGIN) && near(bulletText.x, MARGIN + 18 * 0.75),
+      `Zeichen=${bullet?.x.toFixed(2)} Text=${bulletText?.x.toFixed(2)}`);
+
+    // Tabellenzelle: Rand + Innenabstand (8 px = 6 pt).
+    const cell = find("Zelle");
+    check("geometry: table cell text sits at margin + cell padding",
+      !!cell && near(cell.x, MARGIN + 8 * 0.75),
+      `x=${cell?.x.toFixed(2)} erwartet ${(MARGIN + 8 * 0.75).toFixed(2)}`);
+
+    // CSS dreht im Uhrzeigersinn, PDF dagegen — 20 Grad CSS sind -20 Grad im PDF.
+    const rotated = find("SCHRAEG");
+    check("geometry: overlay rotation matches CSS (clockwise) with inverted sign",
+      !!rotated && rotated.angle === -20, `Winkel=${rotated?.angle}`);
+
+    // Ein anderes Layout muss auch andere Seitenmaße ergeben (DIN lang: 105x210 mm).
+    const dinLong = await designPdf.renderPdf(design.validateDesign(JSON.stringify({
+      title: "Lang", layout: "DinLong", theme: null, pages: [{ blocks: [{ type: "Paragraph", text: "X" }] }],
+    })).doc);
+    const dl = (await glyphsOf(dinLong.bytes.slice())).pages[0];
+    check("geometry: layout drives the page size (DinLong = 105x210 mm)",
+      near(dl.w, 105 * (72 / 25.4), 0.1) && near(dl.h, 210 * (72 / 25.4), 0.1), JSON.stringify(dl));
+
+    // Der eigentliche Regressionsschutz: bricht der Fluss um, bleibt das Overlay
+    // trotzdem auf der ERSTEN Seite dieser Design-Seite.
+    const manyRows: string[][] = [["Pos.", "Text"]];
+    for (let i = 1; i <= 60; i++) manyRows.push([String(i), `Zeile ${i}`]);
+    const broken = await designPdf.renderPdf(design.validateDesign(JSON.stringify({
+      title: "Umbruch", layout: "A4Portrait", theme: null,
+      pages: [{
+        blocks: [{ type: "Table", headerRow: true, rows: manyRows }],
+        overlays: [{ type: "Text", xPercent: 50, yPercent: 5, widthPercent: 30, text: "OBEN", fontSizePt: 18 }],
+      }],
+    })).doc);
+    const brokenGlyphs = (await glyphsOf(broken.bytes.slice())).glyphs;
+    const marker = brokenGlyphs.filter((g) => g.text.includes("OBEN"));
+    check("geometry: overlay stays on page 1 when the flow breaks across pages",
+      broken.pageCount > 1 && marker.length === 1 && marker[0].page === 1,
+      `Seiten=${broken.pageCount} Overlay auf=${marker.map((m) => m.page).join(",")}`);
+  }
+
   // --- Datenbindung: Vorlage + JSON → fertiges Dokument -----------------------
   {
     const tpl = design.createDesign("invoice-data");

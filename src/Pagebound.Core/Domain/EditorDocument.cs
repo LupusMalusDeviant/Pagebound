@@ -166,6 +166,30 @@ public sealed class EditorBlock
     // <see cref="Src"/> (data-URL) — wird bei jeder Änderung neu gezeichnet.
     public MindmapNode? Mind { get; set; }
 
+    // --- Datenbindung (MCP-Paket: design-data.ts) ------------------------------
+    // Der MCP-Server füllt Vorlagen aus einem JSON-Objekt: {{pfad.zum.wert}},
+    // bedingte Blöcke (When/Unless) und Wiederholungen (Repeat). Der Designer
+    // wertet diese Felder NICHT aus — er muss sie aber unversehrt durch den
+    // Lade-/Speicher-Zyklus tragen, sonst verliert das Öffnen einer Vorlage im
+    // Editor still ihre Logik. WhenWritingNull: Designs ohne Datenbindung
+    // bekommen dadurch keine neuen Felder.
+
+    /// <summary>Datenpfad; der Block erscheint nur, wenn dort ein Wert steht.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? When { get; set; }
+
+    /// <summary>Datenpfad; der Block erscheint nur, wenn dort KEIN Wert steht.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Unless { get; set; }
+
+    /// <summary>
+    /// Datenpfad einer Liste. Bei Tabellen wird die Zeile nach der Kopfzeile zur
+    /// Schablone (weitere Zeilen sind Fußzeilen), andere Blöcke werden je Eintrag
+    /// wiederholt.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Repeat { get; set; }
+
     public EditorBlock Clone() => CloneCore(Guid.NewGuid().ToString("N"));
 
     /// <summary>Exakte Kopie inkl. Id — für Undo-Schnappschüsse (kein Duplizieren).</summary>
@@ -195,7 +219,10 @@ public sealed class EditorBlock
         ColumnGapPx = ColumnGapPx,
         Rows = Rows?.Select(r => new List<string>(r)).ToList(),
         HeaderRow = HeaderRow,
-        Mind = Mind?.Clone()
+        Mind = Mind?.Clone(),
+        When = When,
+        Unless = Unless,
+        Repeat = Repeat
     };
 }
 

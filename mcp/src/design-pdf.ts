@@ -1,7 +1,7 @@
 // =============================================================================
 // Design (*.pbdesign.json) → PDF, serverseitig und OHNE Browser.
 //
-// WARUM EIGEN STATT HEADLESS-CHROMIUM: der Aufrufer erzeugt Dokumente im
+// WARUM EIGEN STATT HEADLESS-CHROMIUM (ADR-0012): der Aufrufer erzeugt Dokumente im
 // Hintergrund, in einem Container, und hängt sie in eine Hash-Kette. Ein
 // Chromium im Abbild kostet ~400 MB, dauernde Aktualisierungslast, und
 // byte-gleiche Ausgabe müsste man ihm abringen. Dieser Renderer zeichnet mit
