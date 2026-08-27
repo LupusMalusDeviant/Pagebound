@@ -4,7 +4,7 @@ Alle nennenswerten Änderungen an Pagebound werden in dieser Datei dokumentiert.
 Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/de/1.1.0/),
 die Versionierung folgt [Semantic Versioning](https://semver.org/lang/de/).
 
-## [Unveröffentlicht]
+## [0.13.0-beta] — 2026-08-27
 
 MCP-Server **2.0.0**. Anlass war ein Anforderungskatalog aus einem
 Kundenmanagementsystem, das Pagebound als Dokumentendienst einbindet:
