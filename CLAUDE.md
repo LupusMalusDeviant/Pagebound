@@ -46,3 +46,24 @@ Factory generiert von `/factory-init` — 2026-07-04, Kontext aktualisiert via `
 Artifact-Backend: beans (prefix `PDF-Tool-`). Pipeline: /grill → /plan → /refine → /implement · /review · /test · /doc · /learn · /evolve · /status
 
 **Autonomie:** auto-drive (Stop-Hook) nudged `/learn`+`/refine`, stoppt vor `/implement` (Stufe 1). gate-guard (PreToolUse) blockt destruktives git. Off-Switches: `touch .claude/auto-drive.off` bzw. `.claude/gate-guard.off`.
+
+## Gelernte Regeln (von /evolve)
+
+Aus wiederkehrenden Fehlern verdichtet (je ≥3 Lessons gleicher Ursache). Die
+Quell-Lessons stehen als Pointer in `.claude/lessons-learned.md`.
+
+- **Prüfe mit einem Signal, das den Fehler auch finden könnte.** Bevor du etwas
+  als verifiziert meldest, benenne den Fehler, den die Prüfung aufdecken würde —
+  sieht sie ihn strukturell nicht (Textextraktion für Layout, der eigene Kodierer
+  für Formatkonformität, synthetische statt echter Eingaben, ein zu kurzes
+  Messfenster), ist sie kein Nachweis. Einen neuen Gegenprüfer erst an einem
+  bekannt schlechten Input scheitern lassen.
+- **Erst die Auslieferungskette, dann der Code.** Bei „nach dem Deploy immer noch
+  kaputt" zuerst belegen, dass wirklich der neue Stand läuft (Service-Worker-Cache,
+  nicht neu gestarteter `dotnet run`, altes Image, gepushter vs. deployter Commit).
+  Den Code erst danach verdächtigen.
+- **Code mit Backslashes oder Sonderzeichen nie durch Shell-Argumente reichen.**
+  Skripte und Fragmente mit Regex, Umlauten oder base64 per Write in eine Datei
+  schreiben und über den Pfad ausführen — `node -e`, Heredocs und Browser-eval
+  verändern den Inhalt still. Vor scripted Edits die Zeilenenden der Zieldatei
+  ermitteln, Pfade an native Tools mit Laufwerksbuchstaben übergeben.
