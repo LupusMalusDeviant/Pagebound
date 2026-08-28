@@ -2,7 +2,7 @@
   "app.title": "Pagebound",
   "app.tagline": "A lean, privacy-friendly open-source replacement for Adobe Reader.",
   "app.preAlpha": "Beta",
-  "app.version": "v0.12.0-beta",
+  "app.version": "v0.13.0-beta",
   "app.loading": "Loading …",
   "app.loadingShort": "Loading …",
   "app.error.unhandled": "An unexpected error occurred.",
