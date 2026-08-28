@@ -46,6 +46,15 @@ jobs:
         working-directory: src/Pagebound.Web
         run: npm ci
 
+      # esbuild transpiliert nur — es prüft KEINE Typen. Ohne diesen Schritt geht
+      # ein Typfehler in den ~8k Zeilen Interop-Bridges grün durch die CI und
+      # fällt erst im Browser auf; Pagebound.Web.Tests deckt sie nicht ab.
+      # Läuft VOR dem Bundle-Build, damit es früh und mit klarer Meldung scheitert.
+      # Lokal: npm run typecheck (im Ordner src/Pagebound.Web).
+      - name: Typecheck JS bridges (tsc --noEmit)
+        working-directory: src/Pagebound.Web
+        run: npm run typecheck
+
       - name: Build CSS + JS bridges
         working-directory: src/Pagebound.Web
         run: npm run build
