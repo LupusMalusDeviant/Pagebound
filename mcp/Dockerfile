@@ -20,13 +20,18 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm ci --omit=dev && npm cache clean --force
 
-# tesseract.js-core liefert 12 WASM-Varianten (~44 MB). Mit OEM_LSTM_ONLY, wie
-# ocr.ts es benutzt, kommen NUR die drei "-lstm"-Bauarten je infrage (getCore.js
-# waehlt nach relaxed-SIMD / SIMD / ohne). Die drei Voll-Varianten sind toter
-# Ballast — das spart rund 23 MB im Abbild.
-RUN rm -f node_modules/tesseract.js-core/tesseract-core.wasm* \
-          node_modules/tesseract.js-core/tesseract-core-simd.wasm* \
-          node_modules/tesseract.js-core/tesseract-core-relaxedsimd.wasm*
+# HIER WIRD BEWUSST NICHT AUFGERAEUMT.
+# tesseract.js-core bringt 12 WASM-Varianten mit (~44 MB), von denen zur Laufzeit
+# genau eine geladen wird. Der naheliegende Schluss "mit OEM_LSTM_ONLY brauche
+# ich nur die -lstm-Bauarten" ist FALSCH und hat den Endpunkt schon einmal
+# zerlegt: createWorker.js reicht `lstmOnly` als BOOLEAN an getCore.js weiter,
+# das den Wert wie ein OEM-Enum prueft ([3,1].includes(true) === false) — also
+# faellt die Wahl immer auf die NICHT-lstm-Variante. Ein Patch von tesseract.js
+# kann das jederzeit umdrehen.
+# corePath waere der saubere Ausweg, wird im Node-Adapter aber ignoriert
+# (getCore(oem, _, res) — der zweite Parameter ist ungenutzt).
+# Solange die Auswahl nicht festnagelbar ist, bleiben alle Varianten im Abbild:
+# 24 MB sind billiger als ein Endpunkt, der beim naechsten Update ausfaellt.
 
 COPY --from=build /app/dist ./dist
 # Sprachdaten fuer OCR (deu+eng) und Ersatzschriften fuer PDF/A — beide werden
