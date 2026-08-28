@@ -39,7 +39,8 @@ Eingaben bleiben stets unangetastet (neue Datei/neue Bytes).
 | Tool | Zweck |
 |---|---|
 | `pdf_info` | Seitenzahl, Titel/Autor, Seitengrößen (read-only) |
-| `pdf_extract_text` | Text-Layer extrahieren, optional pro Seitenauswahl (read-only) |
+| `pdf_extract_text` | Text-Layer extrahieren, optional pro Seitenauswahl; meldet mit `charsPerPage`/`pagesWithoutText`, wie ergiebig die Ebene war (read-only) |
+| `pdf_ocr` | **Gescannte** Seiten per OCR lesen (Tesseract, kopflos — kein Browser, kein Canvas, kein Netz). Liefert Text **plus Konfidenz** je Seite, optional Wort-Koordinaten. Mitgeliefert sind `deu` und `eng`. **Kein** automatischer Rückfall aus `pdf_extract_text` — OCR ist um Größenordnungen teurer (read-only) |
 | `pdf_to_docx` | PDF → **Word (DOCX)**: Best-Effort-Textfluss (Absätze rekonstruiert, Schriftgröße abgeleitet, Seitenumbruch je Seite), **keine** 1:1-Layout-Treue, kein OCR |
 | `pdf_diff` | Text zweier PDFs seitenweise vergleichen — Versionsänderungen finden (read-only) |
 | `pdf_merge` | mehrere PDFs zusammenführen (`paths` / `dataBase64List`) |
@@ -289,9 +290,17 @@ Bytes verglichen.
 Was die Web-App per **Browser-Canvas** macht, bleibt ausgelassen, um den Server
 schlank & **nativ-frei** zu halten (keine native Canvas-/Tesseract-Abhängigkeit):
 
-- **Kein OCR** — `pdf_extract_text` liest den vorhandenen Text-Layer (gut für
-  „echte" Text-PDFs, nicht für reine Scans). OCR (Tesseract) bräuchte ein
-  zusätzliches Modell und eine Rasterung.
+- **OCR ist jetzt dabei** (`pdf_ocr`, seit 2.1.0) — und zwar ohne dass die Regel
+  fällt: eine gescannte Seite besteht fast immer aus **einem Bild**, das pdfjs in
+  reinem JS dekodiert (Flate, JPEG, CCITT, JBIG2, JPX). Gerastert wird nichts,
+  also braucht es kein Canvas. Die Sprachdaten liegen unter `mcp/tessdata/` und
+  werden lokal geladen — der Server holt nichts aus dem Netz nach.
+  `pdf_extract_text` bleibt für PDFs **mit** Text-Layer die richtige und um
+  Größenordnungen billigere Wahl; einen automatischen Rückfall gibt es bewusst
+  nicht.
+- **Kein OCR für Handschrift**, und je Seite wird nur das **größte** Bild gelesen —
+  Scans, die in mehrere Bildstreifen zerlegt sind, werden dadurch nur teilweise
+  erfasst (das meldet `warnings`).
 - **Kein Rendern zu PNG/JPG, kein Komprimieren, keine Redaktion** — diese
   Operationen rasterisieren Seiten (in der Web-App via Canvas); das ist hier
   nicht enthalten.

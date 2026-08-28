@@ -1,13 +1,14 @@
 // Smoke test for the PDF operations (run after `npm run build`: `node dist/smoke.js`).
 // Bytes-in/bytes-out — no temp files; exercises every operation end-to-end.
 import { PDFArray, PDFBool, PDFDict, PDFDocument, PDFName, PDFString, StandardFonts, rgb } from "pdf-lib";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { unzipSync, strFromU8 } from "fflate";
 import forge from "node-forge";
 import * as pdf from "./pdf.js";
 import * as design from "./design.js";
 import * as designPdf from "./design-pdf.js";
 import * as designData from "./design-data.js";
+import * as ocr from "./ocr.js";
 import * as pdfa from "./pdfa.js";
 import * as pdfua from "./pdfua.js";
 import * as sign from "./sign.js";
@@ -797,6 +798,126 @@ async function main() {
   }
 
 
+
+
+
+  // --- Verpackung: was der Code von der Platte liest, muss ins Abbild --------
+  // Aufgetreten: mcp/fonts/ wurde vom Dockerfile nie kopiert. Lokal fiel es nie
+  // auf, weil dist/ und fonts/ dort nebeneinander liegen — im Container schlug
+  // design_render_pdf mit "Schrift nicht gefunden" fehl. Kein Test konnte das
+  // sehen, weil keiner das Abbild anschaute. Dieser hier schaut hin.
+  {
+    const srcDir = new URL("../src/", import.meta.url);
+    const dockerfile = await readFile(new URL("../Dockerfile", import.meta.url), "utf8");
+    const pkg = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8")) as { files?: string[] };
+
+    // Jedes ../<verzeichnis>/ das der Produktivcode zur Laufzeit oeffnet.
+    const needed = new Set<string>();
+    for (const file of ["pdf.ts", "pdfa.ts", "pdfua.ts", "sign.ts", "encrypt.ts", "design.ts", "design-pdf.ts", "design-data.ts", "ocr.ts", "index.ts"]) {
+      const src = await readFile(new URL(file, srcDir), "utf8");
+      for (const m of src.matchAll(/new URL\(\s*[`"']\.\.\/([a-zA-Z0-9_-]+)\//g)) needed.add(m[1]);
+    }
+    check("packaging: found the runtime data directories in the source", needed.size >= 2, [...needed].join(", "));
+
+    const missingInImage = [...needed].filter((d) => !new RegExp(`^COPY\\s+${d}\\s`, "m").test(dockerfile));
+    check("packaging: Dockerfile copies every directory the code reads at runtime",
+      missingInImage.length === 0, missingInImage.length ? `fehlt im Abbild: ${missingInImage.join(", ")}` : "");
+
+    const missingInPackage = [...needed].filter((d) => !(pkg.files ?? []).includes(d));
+    check("packaging: package.json ships every one of them too (npm/stdio use)",
+      missingInPackage.length === 0, missingInPackage.length ? `fehlt in files: ${missingInPackage.join(", ")}` : "");
+
+    // Und die Dateien selbst muessen wirklich da sein — nicht nur der Ordner.
+    const fontFiles = await readdir(new URL("../fonts/", import.meta.url));
+    const langFiles = await readdir(new URL("../tessdata/", import.meta.url));
+    check("packaging: Liberation fonts present (PDF/A + Design-Renderer)",
+      fontFiles.filter((f) => f.endsWith(".ttf")).length === 12, String(fontFiles.length));
+    check("packaging: language data present (deu+eng, gzipped as tesseract expects)",
+      langFiles.includes("deu.traineddata.gz") && langFiles.includes("eng.traineddata.gz"), langFiles.join(", "));
+  }
+
+  // --- pdf_ocr: gescannte Seiten lesen ---------------------------------------
+  // Testmaterial: testdata/scan-rechnung.pdf und testdata/scan-leer.pdf,
+  // erzeugt von testdata/make-scan-fixture.mjs (echte Glyphenformen, gerastert).
+  {
+    const scanBytes = new Uint8Array(await readFile(new URL("../testdata/scan-rechnung.pdf", import.meta.url)));
+    const blankBytes = new Uint8Array(await readFile(new URL("../testdata/scan-leer.pdf", import.meta.url)));
+
+    // Der Scan hat KEINE Textebene — sonst prüfte der Test das Falsche.
+    const layer = await pdf.extractText(scanBytes.slice(), "1");
+    check("ocr fixture really has no text layer", (layer.pages[0]?.text ?? "").trim().length < 20,
+      JSON.stringify(layer.pages[0]?.text?.slice(0, 40)));
+
+    // STDOUT-Falle: eine einzige Zeile von tesseract zerlegt das JSON-RPC auf
+    // stdio. Gemessen statt kommentiert.
+    let stdoutDuringOcr = 0;
+    const realWrite = process.stdout.write.bind(process.stdout);
+    process.stdout.write = ((chunk: string | Uint8Array, ...rest: unknown[]) => {
+      stdoutDuringOcr += Buffer.byteLength(chunk as string);
+      return realWrite(chunk as string, ...(rest as []));
+    }) as typeof process.stdout.write;
+    let scan;
+    try {
+      scan = await ocr.ocrPdf(scanBytes.slice(), { words: true });
+    } finally {
+      process.stdout.write = realWrite;
+    }
+    check("pdf_ocr writes nothing to stdout (stdio JSON-RPC stays intact)", stdoutDuringOcr === 0, `${stdoutDuringOcr} Bytes`);
+
+    // Der Container laeuft mit read_only-Rootfs: tesseract darf die entpackten
+    // Sprachdaten NICHT ins Arbeitsverzeichnis legen (Default waere genau das).
+    const strays = (await readdir(new URL("../", import.meta.url))).filter((n) => n.endsWith(".traineddata"));
+    check("pdf_ocr writes no files into the working directory (read-only rootfs)",
+      strays.length === 0, strays.join(", "));
+
+    const page = scan.pages[0];
+    const flat = page.text.replace(/\s+/g, " ");
+    check("pdf_ocr reads the scanned invoice number", flat.includes("LMD-2026-0042"), JSON.stringify(flat));
+    check("pdf_ocr reads the scanned amount", flat.includes("448,29"), JSON.stringify(flat));
+    check("pdf_ocr reports a usable confidence", page.confidence >= 70 && page.confidence <= 100, String(page.confidence));
+    check("pdf_ocr reports the image size it worked on", page.imageWidth > 0 && page.imageHeight > 0,
+      `${page.imageWidth}x${page.imageHeight}`);
+    check("pdf_ocr mean confidence matches the single page", scan.meanConfidence === page.confidence);
+    check("pdf_ocr has no warnings for a clean scan", scan.warnings.length === 0, JSON.stringify(scan.warnings));
+
+    // Wortkoordinaten müssen INNERHALB des Bildes liegen — sonst sind sie wertlos.
+    const words = page.words ?? [];
+    check("pdf_ocr returns word boxes", words.length >= 8, String(words.length));
+    const inside = words.every((w) =>
+      w.x >= 0 && w.y >= 0 && w.width > 0 && w.height > 0 &&
+      w.x + w.width <= page.imageWidth + 1 && w.y + w.height <= page.imageHeight + 1);
+    check("pdf_ocr word boxes lie inside the page image", inside,
+      JSON.stringify(words.find((w) => w.x + w.width > page.imageWidth + 1) ?? words[0]));
+    check("pdf_ocr word boxes are ordered top-down over the lines",
+      (words[0]?.y ?? 0) < (words[words.length - 1]?.y ?? 0));
+
+    // GEGENPROBE: ein weisses Blatt darf NICHTS liefern. Eine Erkennung, die
+    // immer irgendetwas findet, ist schlimmer als keine.
+    const blank = await ocr.ocrPdf(blankBytes.slice(), { words: true });
+    check("pdf_ocr invents no text on a blank page", blank.pages[0].text === "", JSON.stringify(blank.pages[0].text));
+    check("pdf_ocr invents no words on a blank page", (blank.pages[0].words ?? []).length === 0);
+    check("pdf_ocr says the blank page had an image but no text",
+      blank.warnings.some((w) => w.includes("kein Text erkannt")), JSON.stringify(blank.warnings));
+
+    // Seite ohne jedes Bild: leerer Text, klarer Hinweis — kein Erfinden.
+    const textOnly = await ocr.ocrPdf(await makeSample(1, "NurText"));
+    check("pdf_ocr reports a page without any image instead of guessing",
+      textOnly.pages[0].text === "" && textOnly.warnings.some((w) => w.includes("kein Bild")),
+      JSON.stringify(textOnly.warnings));
+
+    // Nur mitgelieferte Sprachen — der Server lädt bewusst nichts nach.
+    let langCode = "(kein Fehler)";
+    try { await ocr.ocrPdf(blankBytes.slice(), { languages: "fra" }); }
+    catch (e) { langCode = e instanceof pdf.ToolError ? e.code : "(kein ToolError)"; }
+    check("pdf_ocr refuses a language that is not shipped", langCode === "UNSUPPORTED", langCode);
+
+    // Der Hinweis in pdf_extract_text, der den Aufrufer erst auf OCR bringt.
+    const scanLayer = await pdf.extractText(scanBytes.slice(), "1");
+    const textLayer = await pdf.extractText(await makeSample(1, "MitText"), "1");
+    check("pdf_extract_text flags a page whose text layer is empty",
+      scanLayer.pages[0].text.trim().length < 20 && textLayer.pages[0].text.trim().length >= 20,
+      `${scanLayer.pages[0].text.length} vs ${textLayer.pages[0].text.length}`);
+  }
 
   // --- design_render_pdf: Geometrie ------------------------------------------
   // Textextraktion beantwortet nur, OB etwas im Dokument steht — nie WO. Ein

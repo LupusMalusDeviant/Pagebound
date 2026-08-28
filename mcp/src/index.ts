@@ -30,6 +30,7 @@ import * as pdf from "./pdf.js";
 import * as design from "./design.js";
 import * as designPdf from "./design-pdf.js";
 import * as designData from "./design-data.js";
+import * as ocr from "./ocr.js";
 import * as pdfa from "./pdfa.js";
 import * as pdfua from "./pdfua.js";
 import * as sign from "./sign.js";
@@ -193,8 +194,9 @@ Returns: { pageCount, title?, author?, pages: [{ page, widthPt, heightPt }] }.`,
   server.registerTool("pdf_extract_text", {
     title: "PDF-Text extrahieren",
     description: `Extrahiert den Text-Layer (kein OCR — für echte Text-PDFs, nicht für reine Scans). Optional pro Seitenauswahl.
+Meldet zusätzlich, WIE VIEL die Textebene hergab: 'charsPerPage' und 'pagesWithoutText' (Seiten mit praktisch keinem Text, unter 20 Zeichen). Damit kann der Aufrufer selbst entscheiden, ob er auf 'pdf_ocr' ausweicht — automatisch geschieht das NICHT, weil OCR um Größenordnungen teurer ist.
 Eingabe: 'path'/'dataBase64', optional 'pages' (z. B. "1-3,5").
-Returns: { pageCount, totalChars, pages: [{ page, text }] }. Text wird bei ~25k Zeichen gekürzt.`,
+Returns: { pageCount, totalChars, charsPerPage, pagesWithoutText, pages: [{ page, text }] }. Text wird bei ~25k Zeichen gekürzt.`,
     inputSchema: { ...srcIn, pages: z.string().optional().describe('Seitenauswahl, z. B. "1-3,5" (Default: alle).') },
     annotations: readAnn,
   }, guard(async (a: { path?: string; dataBase64?: string; pages?: string }) => {
@@ -202,7 +204,53 @@ Returns: { pageCount, totalChars, pages: [{ page, text }] }. Text wird bei ~25k 
     let text = res.pages.map((p) => `--- Seite ${p.page} ---\n${p.text}`).join("\n\n");
     let truncated = false;
     if (text.length > CHARACTER_LIMIT) { text = text.slice(0, CHARACTER_LIMIT) + `\n\n[gekürzt — 'pages' einschränken]`; truncated = true; }
-    return ok({ pageCount: res.pageCount, totalChars: res.totalChars, truncated, pages: res.pages }, text || "(kein extrahierbarer Text — evtl. Scan ohne Text-Layer)");
+    // Ergiebigkeit der Textebene je Seite. Unter 20 Zeichen ist eine Seite
+    // praktisch leer — typisch für einen Scan ohne Textebene.
+    const charsPerPage = res.pages.map((p) => ({ page: p.page, chars: p.text.length }));
+    const pagesWithoutText = charsPerPage.filter((p) => p.chars < 20).map((p) => p.page);
+    const hint = pagesWithoutText.length
+      ? `\n\n[${pagesWithoutText.length} von ${charsPerPage.length} Seite(n) ohne nennenswerten Text: ${pagesWithoutText.join(", ")} — falls es Scans sind, liefert pdf_ocr dort Text.]`
+      : "";
+    return ok(
+      { pageCount: res.pageCount, totalChars: res.totalChars, charsPerPage, pagesWithoutText, truncated, pages: res.pages },
+      (text || "(kein extrahierbarer Text — evtl. Scan ohne Text-Layer)") + hint,
+    );
+  }));
+
+  server.registerTool("pdf_ocr", {
+    title: "Gescannte PDF per OCR lesen",
+    description: `Erkennt Text auf GESCANNTEN Seiten — dort, wo 'pdf_extract_text' nichts findet, weil es keine Textebene gibt. Läuft kopflos: kein Browser, kein Canvas, keine native Abhängigkeit, kein Netzzugriff.
+SO ARBEITET ES: eine gescannte Seite besteht fast immer aus genau einem Bild. Dieses Bild wird dekodiert (pdfjs, reines JS — deckt Flate, JPEG, CCITT, JBIG2 und JPX ab) und an Tesseract gegeben. Gerastert wird NICHT, das Seitenbild wird unverändert genommen.
+KONFIDENZ: jede Seite liefert 'confidence' (0..100), dazu 'meanConfidence' über alle Seiten. Der Wert gehört zum Ergebnis — an ihm entscheidet der Aufrufer, ob er dem Text traut. Unter 70 % meldet 'warnings' das ausdrücklich.
+Mit 'words': true kommen zusätzlich die Wort-Koordinaten (Bounding-Box in Bildpixeln, relativ zu 'imageWidth'/'imageHeight'), um Werte später nach Position zuzuordnen. Wörter unter 60 % Konfidenz werden dabei weggelassen.
+EHRLICHE GRENZEN: mitgeliefert sind nur 'deu' und 'eng' — der Server lädt bewusst nichts nach. Erkannt wird je Seite das GRÖSSTE Bild; Seiten aus mehreren Bildstreifen werden nur teilweise erfasst (wird gemeldet). Seiten ohne Bild liefern leeren Text statt erfundener Wörter. OCR ist um Größenordnungen teurer als 'pdf_extract_text' — es gibt deshalb KEINEN automatischen Rückfall.
+Eingabe: 'path'/'dataBase64', optional 'pages', 'languages' (Default "deu+eng"), 'words'.
+Returns: { pages: [{ page, text, confidence, imageWidth, imageHeight, words? }], meanConfidence, warnings }.`,
+    inputSchema: {
+      ...srcIn,
+      pages: z.string().optional().describe('Seitenauswahl, z. B. "1-3,5" (Default: alle).'),
+      languages: z.string().optional().describe('Tesseract-Sprachen, mitgeliefert sind "deu" und "eng"; kombinierbar als "deu+eng" (Default).'),
+      words: z.boolean().optional().describe("Wort-Koordinaten mitliefern (Bounding-Box in Bildpixeln, Default: false)."),
+    },
+    annotations: readAnn,
+  }, guard(async (a: { path?: string; dataBase64?: string; pages?: string; languages?: string; words?: boolean }) => {
+    const r = await ocr.ocrPdf(await loadPdf(a), { pages: a.pages, languages: a.languages, words: a.words });
+    const body = r.pages
+      .map((p) => `--- Seite ${p.page} (Konfidenz ${p.confidence} %) ---\n${p.text || "(kein Text erkannt)"}`)
+      .join("\n\n");
+    let text = body;
+    let truncated = false;
+    if (text.length > CHARACTER_LIMIT) {
+      text = text.slice(0, CHARACTER_LIMIT) + "\n\n[gekürzt — 'pages' einschränken]";
+      truncated = true;
+    }
+    const summary = r.warnings.length
+      ? `${text}\n\nHinweise:\n- ${r.warnings.join("\n- ")}`
+      : text;
+    return ok(
+      { pages: r.pages, meanConfidence: r.meanConfidence, warnings: r.warnings, truncated },
+      summary || "(keine Seiten verarbeitet)",
+    );
   }));
 
   server.registerTool("pdf_extract_tables", {

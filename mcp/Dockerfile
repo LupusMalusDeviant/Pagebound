@@ -19,7 +19,20 @@ ENV NODE_ENV=production
 WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm ci --omit=dev && npm cache clean --force
+
+# tesseract.js-core liefert 12 WASM-Varianten (~44 MB). Mit OEM_LSTM_ONLY, wie
+# ocr.ts es benutzt, kommen NUR die drei "-lstm"-Bauarten je infrage (getCore.js
+# waehlt nach relaxed-SIMD / SIMD / ohne). Die drei Voll-Varianten sind toter
+# Ballast — das spart rund 23 MB im Abbild.
+RUN rm -f node_modules/tesseract.js-core/tesseract-core.wasm* \
+          node_modules/tesseract.js-core/tesseract-core-simd.wasm* \
+          node_modules/tesseract.js-core/tesseract-core-relaxedsimd.wasm*
+
 COPY --from=build /app/dist ./dist
+# Sprachdaten fuer OCR (deu+eng) und Ersatzschriften fuer PDF/A — beide werden
+# zur Laufzeit von der Platte geladen, nie aus dem Netz.
+COPY tessdata ./tessdata
+COPY fonts ./fonts
 
 # Defaults für den gehosteten Betrieb — in compose überschreibbar.
 ENV MCP_TRANSPORT=http \
