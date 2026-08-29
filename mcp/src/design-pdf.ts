@@ -528,7 +528,20 @@ async function renderTextFlow(ctx: Ctx, html: string, style: TextStyle, backgrou
   }
 }
 
-async function renderTable(ctx: Ctx, block: EditorBlock): Promise<void> {
+interface TableRowLayout { cells: Line[][]; height: number; header: boolean }
+interface TableLayout { widths: number[]; colCount: number; size: number; rows: TableRowLayout[] }
+
+/**
+ * Misst eine Tabelle aus, ohne sie zu zeichnen: Spaltenbreiten und die Hoehe
+ * jeder Zeile.
+ *
+ * Getrennt vom Zeichnen, weil zwei Stellen die Hoehen brauchen - das Zeichnen
+ * selbst, und die Ueberschrift davor, die wissen muss, wie hoch der Anfang der
+ * Tabelle ist, bevor sie sich entscheidet, ob sie noch auf diese Seite gehoert.
+ * Geschaetzt statt gemessen waere hier falsch: eine Kopfzeile ist eine Zeile
+ * hoch, die erste Datenzeile oft vier.
+ */
+async function layoutTable(ctx: Ctx, block: EditorBlock): Promise<TableLayout | undefined> {
   const rows = (block.rows ?? []).filter((r) => Array.isArray(r));
   if (rows.length === 0) return;
   const size = block.fontSizePt ?? TABLE_PT;
@@ -576,6 +589,34 @@ async function renderTable(ctx: Ctx, block: EditorBlock): Promise<void> {
     }
     laidOut.push({ cells, height: maxLines * lineHeightOf(size) + 2 * TABLE_PAD_Y, header });
   }
+  return { widths, colCount, size, rows: laidOut };
+}
+
+/**
+ * Wie hoch der Anfang eines Blocks mindestens ist.
+ *
+ * Fuer die Entscheidung, ob eine Ueberschrift noch auf diese Seite passt: sie
+ * gehoert zu dem, was sie ankuendigt, also braucht sie den Anfang davon mit.
+ * Bei einer Tabelle sind das Kopfzeile und erste Zeile - die beiden, die eine
+ * Tabelle ueberhaupt erst als Tabelle erkennbar machen.
+ */
+async function startHeightOf(ctx: Ctx, block: EditorBlock): Promise<number> {
+  if (block.type === "Table") {
+    const table = await layoutTable(ctx, block);
+    if (!table || table.rows.length === 0) return 0;
+    return table.rows.length > 1
+      ? table.rows[0].height + table.rows[1].height
+      : table.rows[0].height;
+  }
+  if (block.type === "Spacer") return (block.heightPx ?? 24) * PX;
+  return 2 * lineHeightOf(block.fontSizePt ?? BODY_PT);
+}
+
+async function renderTable(ctx: Ctx, block: EditorBlock): Promise<void> {
+  const table = await layoutTable(ctx, block);
+  if (!table) return;
+  const { widths, colCount, size, rows: laidOut } = table;
+  const hasHeader = block.headerRow !== false;
 
   const headerRow = hasHeader ? laidOut[0] : undefined;
   const drawRow = (row: { cells: Line[][]; height: number; header: boolean }): void => {
@@ -600,7 +641,19 @@ async function renderTable(ctx: Ctx, block: EditorBlock): Promise<void> {
 
   for (let r = 0; r < laidOut.length; r++) {
     const row = laidOut[r];
-    if (ctx.y - row.height < contentBottom(ctx) && ctx.y < contentTop(ctx) - 0.01) {
+
+    // Eine Kopfzeile braucht Platz fuer sich UND fuer die erste Zeile
+    // darunter. Passt nur sie selbst noch hin, steht sie allein am
+    // Seitenfuss und die Tabelle faengt auf der naechsten Seite ein
+    // zweites Mal an - der Leser sieht eine Ueberschrift ohne Inhalt und
+    // haelt sie fuer den abgeschnittenen Rest von etwas. Ein Angebot,
+    // dessen Leistungstabelle so bricht, sieht nach einem Fehler beim
+    // Drucken aus.
+    const needed = row.header && r + 1 < laidOut.length
+      ? row.height + laidOut[r + 1].height
+      : row.height;
+
+    if (ctx.y - needed < contentBottom(ctx) && ctx.y < contentTop(ctx) - 0.01) {
       await startPage(ctx);
       // Kopfzeile auf der Folgeseite wiederholen — sonst ist die Tabelle
       // ab Seite 2 nicht mehr lesbar.
@@ -734,13 +787,34 @@ async function renderMindmap(ctx: Ctx, block: EditorBlock): Promise<void> {
   ctx.y -= h;
 }
 
-async function renderBlock(ctx: Ctx, block: EditorBlock): Promise<void> {
+/**
+ * Zeichnet einen Block.
+ *
+ * @param next Der Block danach, sofern es einen gibt. Nur eine Ueberschrift
+ *   braucht ihn: sie muss wissen, wie hoch der Anfang dessen ist, was sie
+ *   ankuendigt, bevor sie sich fuer diese Seite entscheidet.
+ */
+async function renderBlock(ctx: Ctx, block: EditorBlock, next?: EditorBlock): Promise<void> {
   const align = block.align ?? "left";
   switch (block.type) {
     case "Heading": {
       const level = block.level ?? 2;
       const size = block.fontSizePt ?? H_PT[level] ?? H_PT[2];
       const html = block.text ?? "";
+
+      // Eine Ueberschrift bleibt bei dem, was sie ankuendigt. Allein am
+      // Seitenfuss kuendigt sie nichts an: der Leser blaettert um und sucht,
+      // was darunter stand. Verlangt werden ihre eigene Hoehe und der Anfang
+      // dessen, was folgt.
+      //
+      // Gemessen, nicht geschaetzt. Zwei Textzeilen waren die erste Fassung
+      // und zu wenig: der Anfang einer Tabelle ist Kopfzeile plus erste
+      // Zeile, und die erste Zeile ist in einem Angebot oft vier Zeilen hoch.
+      // Die Regel sah damit richtig aus und schlug nie an.
+      await ensure(
+        ctx,
+        lineHeightOf(size) + BLOCK_GAP + (next ? await startHeightOf(ctx, next) : 0),
+      );
       await renderTextFlow(ctx, `<b>${html}</b>`, { family: ctx.headingFamily, size, color: ctx.colHeading, align }, block.background);
       break;
     }
@@ -885,7 +959,8 @@ export async function renderPdf(document: EditorDocument): Promise<DesignPdfResu
     // dieser Design-Seite — so wie der Browser eine absolut positionierte Box
     // beim Umbruch am Ursprung ihres Containers stehen lässt.
     const firstPage = ctx.page;
-    for (const block of source.blocks ?? []) await renderBlock(ctx, block);
+    const blocks = source.blocks ?? [];
+    for (let b = 0; b < blocks.length; b++) await renderBlock(ctx, blocks[b], blocks[b + 1]);
     const flowPage = ctx.page;
     ctx.page = firstPage;
     for (const ov of source.overlays ?? []) await renderOverlay(ctx, ov);

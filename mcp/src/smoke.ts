@@ -743,6 +743,68 @@ async function main() {
     const longText = await pdf.extractText(long.bytes.slice(), `1-${long.pageCount}`);
     const headerOnEveryPage = longText.pages.every((p) => (p.text ?? "").includes("Beschreibung"));
     check("design_render_pdf repeats the table header on every page", headerOnEveryPage);
+    // Eine Kopfzeile darf nie allein am Seitenfuss stehen. Sie wird gezeichnet,
+    // wenn sie selbst noch passt — und wenn dann die erste Zeile nicht mehr
+    // passt, faengt die Tabelle auf der naechsten Seite ein zweites Mal an. Der
+    // Leser sieht eine Ueberschrift ohne Inhalt und haelt sie fuer den
+    // abgeschnittenen Rest von etwas.
+    //
+    // Die 42 Fuellzeilen sind ausgemessen, nicht geschaetzt: bei genau dieser
+    // Zahl passt am Seitenfuss die Kopfzeile noch hin und die erste Zeile
+    // nicht mehr. Ohne die Regel steht die Kopfzeile dort allein — mit 41 oder
+    // 43 nicht, deshalb waere jede andere Zahl eine Pruefung, die immer gruen
+    // ist.
+    const orphan = await designPdf.renderPdf(design.validateDesign(JSON.stringify({
+      title: "Kopfzeile", layout: "A4Portrait", theme: null,
+      pages: [{ blocks: [
+        { type: "Paragraph", text: Array.from({ length: 42 }, (_, i) => `Fuellzeile ${i + 1}.`).join("<br>") },
+        { type: "Table", headerRow: true, rows: [
+          ["Pos.", "Beschreibung", "Betrag"],
+          ["1", "Aufbau, Text und Bilder der Startseite, dazu die Übernahme der Inhalte aus dem alten Auftritt und ein Durchgang über alle Unterseiten, damit die Sprache überall dieselbe ist und nichts doppelt steht.", "300,00 EUR"],
+          ["2", "Zweite Zeile der Tabelle", "200,00 EUR"],
+        ] },
+      ] }],
+    })).doc);
+    const orphanText = await pdf.extractText(orphan.bytes.slice(), `1-${orphan.pageCount}`);
+    const headerPages = orphanText.pages
+      .map((p, i) => ({ i, has: (p.text ?? "").includes("Beschreibung") }))
+      .filter((p) => p.has)
+      .map((p) => p.i);
+    // Auf jeder Seite, die die Kopfzeile traegt, muss auch eine Zeile stehen.
+    check("design_render_pdf never leaves a table header alone at the foot of a page",
+      headerPages.every((i) => (orphanText.pages[i]?.text ?? "").includes("Erste Zeile")
+        || (orphanText.pages[i]?.text ?? "").includes("Zweite Zeile")),
+      JSON.stringify(orphanText.pages.map((p) => (p.text ?? "").slice(-60))));
+
+    // Und dasselbe eine Ebene hoeher: eine Ueberschrift allein am Seitenfuss
+    // kuendigt nichts an. Sie faellt auf, sobald die Kopfzeile darunter richtig
+    // umbricht — vorher stand die Ueberschrift nie allein, weil die Kopfzeile
+    // noch mit auf die Seite gerutscht ist.
+    //
+    // Die erste Tabellenzeile ist absichtlich lang und bricht um, und 39
+    // Fuellzeilen sind gemessen, nicht geraten: bei dieser Zahl faellt die
+    // Pruefung nicht nur ohne die Regel durch, sondern auch mit einer Regel,
+    // die den Platzbedarf des Folgeblocks schaetzt statt ihn zu messen. Genau
+    // das war die erste Fassung - sie reservierte zwei Textzeilen, sah richtig
+    // aus und schlug bei einem echten Angebot nie an. Mit 41 oder 42
+    // Fuellzeilen waere die Schaetzung hier gruen geblieben.
+    const lonely = await designPdf.renderPdf(design.validateDesign(JSON.stringify({
+      title: "Ueberschrift", layout: "A4Portrait", theme: null,
+      pages: [{ blocks: [
+        { type: "Paragraph", text: Array.from({ length: 39 }, (_, i) => `Fuellzeile ${i + 1}.`).join("<br>") },
+        { type: "Heading", level: 3, text: "Leistungen" },
+        { type: "Table", headerRow: true, rows: [
+          ["Pos.", "Beschreibung", "Betrag"],
+          ["1", "Aufbau, Text und Bilder der Startseite, dazu die Übernahme der Inhalte aus dem alten Auftritt und ein Durchgang über alle Unterseiten, damit die Sprache überall dieselbe ist und nichts doppelt steht.", "300,00 EUR"],
+        ] },
+      ] }],
+    })).doc);
+    const lonelyText = await pdf.extractText(lonely.bytes.slice(), `1-${lonely.pageCount}`);
+    const headingPage = lonelyText.pages.findIndex((p) => (p.text ?? "").includes("Leistungen"));
+    check("design_render_pdf never leaves a heading alone at the foot of a page",
+      headingPage >= 0 && (lonelyText.pages[headingPage]?.text ?? "").includes("Beschreibung"),
+      JSON.stringify(lonelyText.pages.map((p) => (p.text ?? "").slice(-50))));
+
     // Overlays hängen an der Seite, nicht am Fluss: sie bleiben auf Seite 1.
     check("design_render_pdf keeps overlays on the first page of a design page",
       (longText.pages[0]?.text ?? "").includes("ENTWURF")
