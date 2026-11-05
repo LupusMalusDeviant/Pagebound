@@ -19,6 +19,16 @@ const base = "/";
 const baseUrl = new URL(base, self.origin);
 const manifestUrlList = self.assetsManifest.assets.map(asset => new URL(asset.url, baseUrl).href);
 
+// "/pdf-unterschreiben" oder "/pdf-unterschreiben/" → URL von ".../index.html",
+// falls es diese Datei im Asset-Manifest gibt (die Wurzel "/" ausgenommen).
+function staticIndexFor(url) {
+    let path = url.pathname;
+    if (path === '/' || path === '') return null;
+    if (!path.endsWith('/')) path += '/';
+    const candidate = new URL(path.slice(1) + 'index.html', baseUrl).href;
+    return manifestUrlList.includes(candidate) ? candidate : null;
+}
+
 async function onInstall(event) {
     console.info('Service worker: Install');
 
@@ -81,6 +91,22 @@ async function onFetch(event) {
             return await fetch(event.request);
         } catch {
             return (await cache.match(event.request)) ?? Response.error();
+        }
+    }
+
+    // Statische Unterseiten mit eigenem index.html (Aufgaben-Landingpages wie
+    // /pdf-unterschreiben/): Navigationen dorthin bekommen IHRE Seite, nicht die
+    // SPA-Shell — sonst zeigt der Router nach dem ersten Besuch „nicht gefunden".
+    const staticPageUrl = event.request.mode === 'navigate' ? staticIndexFor(url) : null;
+    if (staticPageUrl) {
+        const page = await cache.match(staticPageUrl);
+        if (page) return page;
+        try {
+            return await fetch(event.request);
+        } catch (err) {
+            const fallback = await cache.match('index.html');
+            if (fallback) return fallback;
+            throw err;
         }
     }
 

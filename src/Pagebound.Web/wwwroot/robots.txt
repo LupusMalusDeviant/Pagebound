@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://pagebound.app.lupusmalus.dev/sitemap.xml

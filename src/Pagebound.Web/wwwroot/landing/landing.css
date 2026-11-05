@@ -1,0 +1,59 @@
+/* =============================================================================
+   Pagebound — Aufgaben-Landingpages (/pdf-…/). Statisches HTML, sofort lesbar
+   ohne WASM-Boot; führen per Link ins jeweilige Werkzeug. Schriften self-hosted
+   (dieselben woff2 wie die App), keine externen Requests.
+   ============================================================================= */
+@font-face {
+  font-family: "Newsreader"; font-style: normal; font-weight: 200 800; font-display: swap;
+  src: url("/fonts/newsreader-latin-wght-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+2074,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: "Hanken Grotesk"; font-style: normal; font-weight: 100 900; font-display: swap;
+  src: url("/fonts/hanken-grotesk-latin-wght-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+2074,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+
+:root {
+  --bg: #f7f4ee; --surface: #fffdf9; --ink: #1c1a17; --ink-2: #45403a; --ink-3: #6b645b;
+  --line: #e2dcd2; --accent: #0f766e; --accent-ink: #ffffff;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #12110f; --surface: #1a1916; --ink: #f2eee6; --ink-2: #cfc8bc; --ink-3: #a39b8f; --line: #2e2b26; --accent: #2dd4bf; --accent-ink: #04201c; }
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 400 1.0625rem/1.6 "Hanken Grotesk", system-ui, -apple-system, "Segoe UI", sans-serif; }
+a { color: var(--accent); text-underline-offset: 0.15em; }
+a:focus-visible, .cta:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+.wrap { max-width: 46rem; margin: 0 auto; padding: 1.25rem 1rem 3rem; }
+.top { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 0.5rem 0 2rem; }
+.brand { display: inline-flex; align-items: center; gap: 0.5rem; color: var(--ink); font-weight: 600; text-decoration: none; }
+.brand img { width: 28px; height: 28px; }
+.top nav a { font-size: 0.92rem; }
+
+h1, h2 { font-family: "Newsreader", Georgia, serif; font-weight: 500; letter-spacing: -0.015em; line-height: 1.15; }
+h1 { font-size: clamp(2rem, 6vw, 2.8rem); margin: 0 0 0.75rem; }
+h2 { font-size: 1.45rem; margin: 2.25rem 0 0.6rem; }
+.lead { font-size: 1.15rem; color: var(--ink-2); margin: 0 0 1.5rem; }
+
+.cta { display: inline-block; padding: 0.8rem 1.3rem; border-radius: 10px; background: var(--accent); color: var(--accent-ink); font-weight: 600; text-decoration: none; }
+.cta:hover { filter: brightness(1.06); }
+.cta-note { display: block; margin-top: 0.6rem; font-size: 0.88rem; color: var(--ink-3); }
+
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); gap: 0.75rem; margin: 2rem 0 0; padding: 0; list-style: none; }
+.facts li { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 0.85rem 1rem; color: var(--ink-2); font-size: 0.95rem; }
+.facts strong { display: block; color: var(--ink); }
+
+ol.steps { padding-left: 1.25rem; }
+ol.steps li { margin: 0.35rem 0; }
+.note { border-left: 3px solid var(--line); padding: 0.25rem 0 0.25rem 0.9rem; color: var(--ink-2); }
+details { border-bottom: 1px solid var(--line); padding: 0.7rem 0; }
+summary { cursor: pointer; font-weight: 600; }
+details p { margin: 0.5rem 0 0; color: var(--ink-2); }
+
+.more { display: flex; flex-wrap: wrap; gap: 0.5rem 1.25rem; padding: 0; list-style: none; }
+footer { margin-top: 3rem; padding-top: 1.25rem; border-top: 1px solid var(--line); font-size: 0.88rem; color: var(--ink-3); }
