@@ -44,6 +44,8 @@ public sealed class BootScreenTests
             MimeType = "application/pdf",
             Buffer = MinimalPdf(pageCount: 2),
         });
+        // Die Prüfung (MIME + Magic-Bytes) ist asynchron — auf ihr Ergebnis warten.
+        await page.WaitForFunctionAsync("() => pageboundBoot.pendingFileName() === 'boot.pdf'", null, new PageWaitForFunctionOptions { Timeout = 10_000 });
         (await page.Locator("#pb-boot-drop-sub").TextContentAsync()).ShouldContain("boot.pdf");
         (await page.EvaluateAsync<string>("location.pathname")).ShouldBe("/reader");
 
@@ -66,7 +68,8 @@ public sealed class BootScreenTests
             Buffer = Encoding.ASCII.GetBytes("Hallo, ich bin keine PDF."),
         });
 
-        (await page.Locator("#pb-boot-drop-sub").GetAttributeAsync("class")).ShouldContain("is-error");
+        // Die Prüfung (MIME + Magic-Bytes) ist asynchron — auf ihr Ergebnis warten.
+        await page.WaitForFunctionAsync("() => document.getElementById('pb-boot-drop-sub').classList.contains('is-error')", null, new PageWaitForFunctionOptions { Timeout = 10_000 });
         (await page.EvaluateAsync<string>("location.pathname")).ShouldBe("/");
         (await page.EvaluateAsync<string?>("pageboundBoot.pendingFileName()")).ShouldBeNull();
         release.SetResult();
