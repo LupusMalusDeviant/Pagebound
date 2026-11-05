@@ -3,31 +3,133 @@
 @implements IAsyncDisposable
 
 @*
-    Signatur zeichnen: Modal mit <canvas>, freihändig mit Maus/Touch. Die
-    Pointer-Verarbeitung liegt im JS (pageboundShortcuts.*SignaturePad*) —
-    „Übernehmen" liefert die Unterschrift als PNG-Data-URL an den Aufrufer.
+    Signatur erzeugen: Modal mit zwei Wegen.
+    - Zeichnen: <canvas>, freihändig mit Maus/Touch. Die Pointer-Verarbeitung
+      liegt im JS (pageboundShortcuts.*SignaturePad*).
+    - Tippen: Name in einer von drei Schreibschriften (OFL, self-hosted unter
+      wwwroot/fonts/signature/) — JS rendert ihn auf ein Canvas.
+    „Übernehmen" liefert in beiden Fällen eine PNG-Data-URL an den Aufrufer,
+    d. h. dieselbe Strecke wie eine hochgeladene PNG-Signatur.
+    Das Canvas bleibt beim Tab-Wechsel im DOM (nur ausgeblendet), damit eine
+    angefangene Zeichnung nicht verloren geht.
 *@
 <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" @onclick="Cancel">
-    <div class="w-[min(92vw,520px)] rounded-lg pb-glass-strong p-4" @onclick:stopPropagation>
+    <div class="w-[min(92vw,520px)] rounded-lg pb-glass-strong p-4" role="dialog" aria-modal="true" aria-labelledby="pb-sigpad-title" @onclick:stopPropagation>
         <div class="mb-2 flex items-center justify-between">
-            <span class="text-sm font-medium">@L.T("reader.sig.draw.title")</span>
+            <span id="pb-sigpad-title" class="text-sm font-medium">@L.T("reader.sig.pad.title")</span>
             <button type="button" class="text-pb-fg-muted hover:text-pb-fg" @onclick="Cancel" aria-label="@L.T("common.close")">✕</button>
         </div>
-        <canvas id="pb-sigpad" class="w-full touch-none rounded border border-pb-border bg-white" style="height:180px"></canvas>
-        <p class="mt-1 text-xs text-pb-fg-muted">@L.T("reader.sig.draw.hint")</p>
+
+        <div class="mb-2 flex gap-1" role="tablist">
+            <button type="button" role="tab" id="pb-sigpad-tab-draw" aria-selected="@(_mode == Mode.Draw ? "true" : "false")"
+                    class="@($"btn-side {(_mode == Mode.Draw ? "is-primary" : "")}")" @onclick="@(() => SetMode(Mode.Draw))">✍ @L.T("reader.sig.pad.tabDraw")</button>
+            <button type="button" role="tab" id="pb-sigpad-tab-type" aria-selected="@(_mode == Mode.Type ? "true" : "false")"
+                    class="@($"btn-side {(_mode == Mode.Type ? "is-primary" : "")}")" @onclick="@(() => SetMode(Mode.Type))">Aa @L.T("reader.sig.pad.tabType")</button>
+        </div>
+
+        <div class="@(_mode == Mode.Draw ? "" : "hidden")" role="tabpanel" aria-labelledby="pb-sigpad-tab-draw">
+            <canvas id="pb-sigpad" class="w-full touch-none rounded border border-pb-border bg-white" style="height:180px"></canvas>
+            <p class="mt-1 text-xs text-pb-fg-muted">@L.T("reader.sig.draw.hint")</p>
+        </div>
+
+        @if (_mode == Mode.Type)
+        {
+            <div role="tabpanel" aria-labelledby="pb-sigpad-tab-type">
+                <label class="block text-xs text-pb-fg-muted" for="pb-sigpad-name">@L.T("reader.sig.type.name")</label>
+                <input id="pb-sigpad-name" type="text" maxlength="@MaxTypedLength" autocomplete="name"
+                       class="mt-1 w-full rounded border border-pb-border bg-transparent px-2 py-1 text-sm"
+                       @bind="_typedName" @bind:event="oninput" />
+                <div class="mt-2 flex flex-wrap gap-2 text-xs">
+                    <label class="flex items-center gap-1">
+                        @L.T("reader.sig.type.font")
+                        <select id="pb-sigpad-font" class="rounded border border-pb-border bg-transparent px-1 py-0.5" @bind="_fontKey">
+                            @foreach (var f in Fonts)
+                            {
+                                <option value="@f.Key">@f.Label</option>
+                            }
+                        </select>
+                    </label>
+                    <label class="flex items-center gap-1">
+                        @L.T("reader.sig.type.color")
+                        <select id="pb-sigpad-color" class="rounded border border-pb-border bg-transparent px-1 py-0.5" @bind="_colorKey">
+                            @foreach (var c in Colors)
+                            {
+                                <option value="@c.Key">@L.T(c.LabelKey)</option>
+                            }
+                        </select>
+                    </label>
+                </div>
+                <div class="pb-sigpad-preview mt-2 flex h-[110px] items-center justify-center overflow-hidden rounded border border-pb-border bg-white px-3"
+                     style="@PreviewStyle" aria-live="polite">
+                    @(string.IsNullOrWhiteSpace(_typedName) ? L.T("reader.sig.type.placeholder") : _typedName.Trim())
+                </div>
+                <p class="mt-1 text-xs text-pb-fg-muted">@L.T("reader.sig.type.hint")</p>
+            </div>
+        }
+
+        @if (_error is not null)
+        {
+            <p class="mt-2 text-xs text-red-600" role="alert">@_error</p>
+        }
+
         <div class="mt-3 flex flex-wrap justify-end gap-2">
-            <button type="button" class="btn-side" @onclick="Clear">@L.T("reader.sig.draw.clear")</button>
+            @if (_mode == Mode.Draw)
+            {
+                <button type="button" class="btn-side" @onclick="Clear">@L.T("reader.sig.draw.clear")</button>
+            }
             <button type="button" class="btn-side" @onclick="Cancel">@L.T("common.cancel")</button>
-            <button type="button" class="btn-side is-primary" @onclick="Accept">@L.T("reader.sig.draw.accept")</button>
+            <button type="button" class="btn-side is-primary" disabled="@(_mode == Mode.Type && string.IsNullOrWhiteSpace(_typedName))" @onclick="Accept">@L.T("reader.sig.draw.accept")</button>
         </div>
     </div>
 </div>
 
 @code {
     private const string Selector = "#pb-sigpad";
+    public const int MaxTypedLength = 60;
 
-    [Parameter] public EventCallback<string> OnAccept { get; set; }
+    public enum Mode { Draw, Type }
+
+    /// <summary>Ergebnis: PNG-Data-URL und ob sie getippt (statt gezeichnet) wurde.</summary>
+    public sealed record SignatureResult(string DataUrl, bool Typed);
+
+    public sealed record FontOption(string Key, string Family, string Label);
+    public sealed record ColorOption(string Key, string Css, string LabelKey);
+
+    // Familiennamen = @font-face in app.src.css (eigene Namen, nie eine lokal
+    // installierte Schrift). Whitelist: JS bekommt nur diese Werte.
+    public static readonly IReadOnlyList<FontOption> Fonts = new[]
+    {
+        new FontOption("caveat", "Pb Sig Caveat", "Caveat"),
+        new FontOption("dancing", "Pb Sig Dancing Script", "Dancing Script"),
+        new FontOption("vibes", "Pb Sig Great Vibes", "Great Vibes"),
+    };
+
+    public static readonly IReadOnlyList<ColorOption> Colors = new[]
+    {
+        new ColorOption("black", "#111827", "reader.sig.type.colorBlack"),
+        new ColorOption("blue", "#1e3a8a", "reader.sig.type.colorBlue"),
+    };
+
+    [Parameter] public EventCallback<SignatureResult> OnAccept { get; set; }
     [Parameter] public EventCallback OnCancel { get; set; }
+    /// <summary>Vorbelegung für den Tipp-Tab (z. B. der hinterlegte Unterzeichner).</summary>
+    [Parameter] public string? InitialName { get; set; }
+
+    private Mode _mode = Mode.Draw;
+    private string _typedName = "";
+    private string _fontKey = Fonts[0].Key;
+    private string _colorKey = Colors[0].Key;
+    private string? _error;
+
+    private FontOption SelectedFont => Fonts.FirstOrDefault(f => f.Key == _fontKey) ?? Fonts[0];
+    private ColorOption SelectedColor => Colors.FirstOrDefault(c => c.Key == _colorKey) ?? Colors[0];
+    private string PreviewStyle => $"font-family:'{SelectedFont.Family}',cursive;color:{SelectedColor.Css};font-size:44px;line-height:1.2;white-space:nowrap";
+
+    protected override void OnInitialized()
+    {
+        _typedName = (InitialName ?? "").Trim();
+        if (_typedName.Length > MaxTypedLength) _typedName = _typedName[..MaxTypedLength];
+    }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -37,13 +139,37 @@
         }
     }
 
+    private void SetMode(Mode mode)
+    {
+        _mode = mode;
+        _error = null;
+    }
+
     private async Task Clear() => await JS.InvokeVoidAsync("pageboundShortcuts.clearSignaturePad", Selector);
 
     private async Task Accept()
     {
-        var dataUrl = await JS.InvokeAsync<string?>("pageboundShortcuts.getSignatureDataUrl", Selector);
-        if (string.IsNullOrEmpty(dataUrl)) return; // nichts gezeichnet
-        await OnAccept.InvokeAsync(dataUrl);
+        _error = null;
+        if (_mode == Mode.Draw)
+        {
+            var dataUrl = await JS.InvokeAsync<string?>("pageboundShortcuts.getSignatureDataUrl", Selector);
+            if (string.IsNullOrEmpty(dataUrl)) return; // nichts gezeichnet
+            await OnAccept.InvokeAsync(new SignatureResult(dataUrl, Typed: false));
+            return;
+        }
+
+        var name = _typedName.Trim();
+        if (name.Length == 0) return;
+        if (name.Length > MaxTypedLength) name = name[..MaxTypedLength];
+        var png = await JS.InvokeAsync<string?>("pageboundShortcuts.renderTypedSignature", name, SelectedFont.Family, SelectedColor.Css);
+        if (string.IsNullOrEmpty(png))
+        {
+            // Schrift nicht ladbar (z. B. offline ohne Cache) — lieber ehrlich
+            // abbrechen als still eine Fallback-Schrift ins PNG zu brennen.
+            _error = L.T("reader.sig.type.fontError");
+            return;
+        }
+        await OnAccept.InvokeAsync(new SignatureResult(png, Typed: true));
     }
 
     private Task Cancel() => OnCancel.InvokeAsync();

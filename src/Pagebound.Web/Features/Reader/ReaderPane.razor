@@ -431,7 +431,7 @@
 
         @if (_signaturePadOpen)
         {
-            <SignaturePad OnAccept="OnSignatureDrawnAsync" OnCancel="@(() => _signaturePadOpen = false)" />
+            <SignaturePad OnAccept="OnSignatureDrawnAsync" OnCancel="@(() => _signaturePadOpen = false)" InitialName="@_signer.Name" />
         }
 
         @if (_sidecarStatus is not null)
@@ -1753,13 +1753,13 @@
     // bleibt das Menü offen und muss aktiv geschlossen werden).
     private ToolbarMenu? _signatureMenu;
 
-    // Signatur zeichnen (Canvas → PNG-Data-URL, wie ein hochgeladenes PNG).
+    // Signatur zeichnen oder tippen (Canvas → PNG-Data-URL, wie ein hochgeladenes PNG).
     private bool _signaturePadOpen;
 
-    private async Task OnSignatureDrawnAsync(string dataUrl)
+    private async Task OnSignatureDrawnAsync(SignaturePad.SignatureResult result)
     {
-        _activeSignatureImage = dataUrl;
-        _activeSignatureFilename = L.T("reader.sig.draw.name");
+        _activeSignatureImage = result.DataUrl;
+        _activeSignatureFilename = L.T(result.Typed ? "reader.sig.type.resultName" : "reader.sig.draw.name");
         _signaturePadOpen = false;
         await SetAnnotationMode(AnnotationMode.Signature);
     }

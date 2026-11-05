@@ -866,6 +866,54 @@ export function getSignatureDataUrl(selector: string): string | null {
   return pad.canvas.toDataURL("image/png");
 }
 
+/**
+ * „Unterschrift tippen": Text in einer self-hosted Schreibschrift auf ein Canvas
+ * rendern und als PNG-Data-URL liefern (eng auf die Glyphen zugeschnitten,
+ * transparenter Hintergrund). Gibt null zurück, wenn die Schrift nicht geladen
+ * werden konnte — sonst würde still eine Fallback-Schrift im PNG landen.
+ */
+export async function renderTypedSignature(text: string, fontFamily: string, color: string): Promise<string | null> {
+  const t = (text ?? "").trim().slice(0, 60);
+  if (!t) return null;
+  const size = 96; // groß rendern: das PNG wird beim Platzieren meist verkleinert
+  const family = fontFamily.replace(/["\\]/g, "");
+  const font = `${size}px "${family}"`;
+  let loaded: FontFace[];
+  try {
+    loaded = await document.fonts.load(font, t);
+  } catch {
+    return null;
+  }
+  // NICHT document.fonts.check(): das meldet auch für eine Familie ohne jede
+  // @font-face „true" (nichts zu laden) — dann würde still eine Fallback-Schrift
+  // ins PNG gebrannt. Verlangt wird eine tatsächlich geladene Schrift DIESER Familie.
+  const isOurs = (f: FontFace) => f.family.replace(/["']/g, "") === family && f.status === "loaded";
+  if (!loaded.some(isOurs)) return null;
+
+  const measureCtx = document.createElement("canvas").getContext("2d");
+  if (!measureCtx) return null;
+  measureCtx.font = font;
+  const m = measureCtx.measureText(t);
+  // Schreibschriften haben weit ausladende Ober-/Unterlängen und Schwünge —
+  // die tatsächliche Glyphen-Box statt der nominellen Breite verwenden.
+  const left = Math.max(0, m.actualBoundingBoxLeft || 0);
+  const right = Math.max(m.width, m.actualBoundingBoxRight || 0);
+  const ascent = m.actualBoundingBoxAscent || size * 0.8;
+  const descent = m.actualBoundingBoxDescent || size * 0.25;
+  const pad = Math.round(size * 0.12);
+
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.ceil(left + right + pad * 2);
+  canvas.height = Math.ceil(ascent + descent + pad * 2);
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  ctx.font = font;
+  ctx.fillStyle = /^#[0-9a-fA-F]{6}$/.test(color) ? color : "#111827";
+  ctx.textBaseline = "alphabetic";
+  ctx.fillText(t, pad + left, pad + ascent);
+  return canvas.toDataURL("image/png");
+}
+
 export function disposeSignaturePad(selector: string): void {
   const pad = signaturePads.get(selector);
   if (!pad) return;

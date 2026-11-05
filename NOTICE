@@ -69,6 +69,20 @@ non-embedded PDF standard-14 fonts (Helvetica/Times/Courier) during PDF/A
 conversion — loaded locally at runtime, no CDN requests.
 
 --------------------------------------------------------------------------------
+Caveat, Dancing Script, Great Vibes (signature script fonts)
+Copyright 2014 The Caveat Project Authors (https://github.com/googlefonts/caveat)
+Copyright 2016 The Dancing Script Project Authors
+    (https://github.com/googlefonts/DancingScript), with Reserved Font Name
+    'Dancing Script'.
+Copyright 2010 The Great Vibes Pro Project Authors
+    (https://github.com/googlefonts/great-vibes)
+Licensed under the SIL Open Font License, Version 1.1
+Bundled self-hosted as WOFF2 (latin + latin-ext subsets, taken unmodified from
+the @fontsource packages 5.3.0) under src/Pagebound.Web/wwwroot/fonts/signature/
+(full license texts alongside). Used to render typed signatures locally in the
+browser — no CDN or font-service requests.
+
+--------------------------------------------------------------------------------
 Markdig
 --------------------------------------------------------------------------------
 Copyright Alexandre Mutel
