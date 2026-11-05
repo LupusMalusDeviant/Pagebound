@@ -4,6 +4,36 @@ Alle nennenswerten Änderungen an Pagebound werden in dieser Datei dokumentiert.
 Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/de/1.1.0/),
 die Versionierung folgt [Semantic Versioning](https://semver.org/lang/de/).
 
+## [0.14.0-beta] — 2026-11-05
+
+Anlass war ein ehrlicher Vergleich mit einem kleinen reinen JS-Werkzeug
+(Seiten löschen, Bild-Unterschrift): Es ist sofort bedienbar, wird über Suchen
+gefunden und kann Unterschriften tippen — und hatte denselben Positionsfehler
+auf gedrehten Seiten wie Pagebound. Daraus vier Arbeitspakete. Dazu kommen die
+seit 0.13.0 aufgelaufenen Änderungen am MCP-Server (**2.1.0**).
+
+### Hinzugefügt
+- **Unterschrift tippen**: Das Signatur-Modal hat neben „Zeichnen" einen Tab „Tippen" — Name in einer von drei Schreibschriften (Caveat, Dancing Script, Great Vibes; OFL 1.1, self-hosted), Farbe Schwarz/Blau, vorbelegt mit dem hinterlegten Unterzeichner. Ergebnis ist ein PNG, das wie eine gezeichnete Signatur platziert wird. Lädt die Schrift nicht, gibt es eine Fehlermeldung statt still eine Ersatzschrift im PNG
+- **Boot-Bildschirm mit Drop-Zone**: Bis die WASM-Laufzeit geladen ist, zeigt der Start echten Ladefortschritt und nimmt schon eine PDF entgegen (Ablegen oder Auswählen, geprüft per MIME + `%PDF-`-Signatur). Sie öffnet sich im Reader, sobald er bereit ist. Bedienbar nach ~0,2 s statt 5–12 s (gemessen, siehe `docs/findings/MESSUNG-2026-11-05-kaltstart.md`)
+- **Aufgaben-Landingpages** ohne WASM-Boot lesbar: `/pdf-seiten-loeschen/`, `/pdf-unterschreiben/`, `/pdf-schwaerzen/`, `/pdf-zusammenfuegen/` — mit Anleitung, FAQ, strukturierten Daten und Link ins Werkzeug; dazu `sitemap.xml` und `robots.txt`. Erzeugt von `tools/gen-landing.py`
+- **MCP `pdf_ocr`**: gescannte PDFs kopflos lesen (Tesseract im Node-Prozess, ohne Canvas); fehlende Schriften im Container-Abbild ergänzt
+- **Tests für die UI-Schicht**: erste bUnit-Tests in `Pagebound.Web.Tests` (Signatur-Modal), Node-Tests für die JS-Bridges (`npm test`, jetzt in der CI), E2E-Tests für den Boot-Bildschirm. `WebAppFixture` akzeptiert `PAGEBOUND_CHROMIUM` (vorhandener Browser statt Download)
+- **CI**: Typecheck der JS-Bridges (`tsc --noEmit`) vor dem Bundle-Build
+
+### Geändert
+- **Designer-Renderer (MCP)**: kein Seitenumbruch direkt nach einem Tabellenkopf oder einer Überschrift mehr; Geometrie-Tests prüfen Positionen statt nur Text; Datenbindung im C#-Modell
+- Ausführlichere Beschreibung und Open-Graph-Angaben in `index.html`
+- nginx: `absolute_redirect off` (relative Umleitung `/pfad` → `/pfad/` hinter Caddy)
+
+### Behoben
+- **Einbrennen auf gedrehten oder beschnittenen Seiten**: Signaturen, Highlights, Notizen, Stift, Formen, Freitext, „Text bearbeiten", Stempel/Seitenzahlen und Formularfelder aus dem Formular-Builder landeten auf Seiten mit `/Rotate` 90/180/270 oder versetzter CropBox an der falschen Stelle und standen quer. Gezeichnet wird jetzt im angezeigten Raum (CropBox ∩ MediaBox, gedreht wie im Reader); 44 Tests messen die Position mit PDF.js nach
+- **Service Worker** lieferte für Unterseiten mit eigenem `index.html` die App-Hülle aus („404 — Nicht gefunden" nach dem ersten Besuch); jetzt die Seite selbst, auch offline
+- **MCP**: WASM-Pruning für tesseract.js zurückgenommen — es hatte `pdf_ocr` im Container zerlegt
+- Versionsanzeige stand nach dem 0.13-Release noch auf 0.12
+
+### Sicherheit
+- **pdfjs-dist 6.2.108** (GHSA-hq66-cqwq-w95j, „Arbitrary JavaScript execution upon opening a malicious PDF") — betraf den tokenlosen MCP-Endpunkt und die PWA
+
 ## [0.13.0-beta] — 2026-08-27
 
 MCP-Server **2.0.0**. Anlass war ein Anforderungskatalog aus einem
