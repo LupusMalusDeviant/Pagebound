@@ -12,7 +12,8 @@
     "build:js": "node esbuild.mjs",
     "watch:css": "tailwindcss -i ./wwwroot/css/app.src.css -o ./wwwroot/css/app.css --watch",
     "watch:js": "node esbuild.mjs --watch",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node --test \"tests-js/**/*.test.mjs\""
   },
   "devDependencies": {
     "@tailwindcss/cli": "^4.0.0",

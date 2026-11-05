@@ -59,6 +59,12 @@ jobs:
         working-directory: src/Pagebound.Web
         run: npm run build
 
+      # Bridge-Tests in Node: echte pdf-lib-Bridge-Funktionen, nachgemessen mit
+      # PDF.js (gleicher Viewport wie der Reader) — u. a. gedrehte Seiten/CropBox.
+      - name: JS bridge tests (node --test)
+        working-directory: src/Pagebound.Web
+        run: npm test
+
       - name: Build solution
         run: dotnet build --configuration Release --no-restore
 

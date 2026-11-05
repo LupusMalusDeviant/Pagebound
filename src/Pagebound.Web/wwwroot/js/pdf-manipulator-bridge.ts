@@ -32,6 +32,7 @@ import {
   LineCapStyle
 } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
+import { beginDisplaySpace, endDisplaySpace, widgetPlacement } from "./page-geometry";
 import * as pdfjsLib from "pdfjs-dist";
 
 // Eigene Worker-Konfig — diese Bridge ist ein separater IIFE-Bundle, der
@@ -75,7 +76,10 @@ export async function embedSignatures(
 
     const page = pages[pageIdx];
     const img = await doc.embedPng(sig.imageBytes);
-    const { width: pw, height: ph } = page.getSize();
+    // Koordinaten beziehen sich auf die ANGEZEIGTE Seite (CropBox, /Rotate) —
+    // im Anzeigeraum zeichnen, sonst landet die Signatur auf gedrehten oder
+    // beschnittenen Seiten daneben (siehe page-geometry.ts).
+    const { width: pw, height: ph } = beginDisplaySpace(page);
 
     // pdf-lib-Origin ist unten-links — wir bekommen oben-links und rechnen um.
     page.drawImage(img, {
@@ -84,6 +88,7 @@ export async function embedSignatures(
       width: sig.width * pw,
       height: sig.height * ph
     });
+    endDisplaySpace(page);
   }
 
   // Metadaten ins Info-Dictionary: Primärer Unterzeichner als /Author,
@@ -665,13 +670,11 @@ export async function createFormFields(pdfBytes: Uint8Array, fields: NewFormFiel
   for (const f of fields ?? []) {
     const page = pages[f.pageNumber - 1];
     if (!page || !f.name) continue;
-    const pw = page.getWidth();
-    const ph = page.getHeight();
-    const w = f.width * pw;
-    const h = f.height * ph;
-    const x = f.x * pw;
-    const y = ph - f.y * ph - h; // oben-links-Fraction → unten-links-Punkte
-    const rect = { x, y, width: w, height: h };
+    // Platziert wurde auf der ANGEZEIGTEN Seite (CropBox, /Rotate) — Rechteck in
+    // den Userspace umrechnen und das Erscheinungsbild mitdrehen (sonst stehen
+    // Felder auf gedrehten Seiten quer und an der falschen Stelle).
+    const u = widgetPlacement(page, { x: f.x, y: f.y, width: f.width, height: f.height });
+    const rect = { x: u.x, y: u.y, width: u.width, height: u.height, rotate: degrees(u.rotation) };
     try {
       if (f.fieldType === "checkbox") {
         form.createCheckBox(f.name).addToPage(page, rect);
@@ -1297,7 +1300,8 @@ export async function stampPdf(pdfBytes: Uint8Array, opts: StampOptions): Promis
   const margin = 24;
 
   pages.forEach((page, i) => {
-    const { width, height } = page.getSize();
+    // Seitenzahl „unten" heißt unten auf der ANGEZEIGTEN Seite (CropBox, /Rotate).
+    const { width, height } = beginDisplaySpace(page);
     if (wmText) {
       const tw = font.widthOfTextAtSize(wmText, wmSize);
       const angle = Math.PI / 4; // 45° — die rotierte Baseline mittig durch die Seite legen
@@ -1319,6 +1323,7 @@ export async function stampPdf(pdfBytes: Uint8Array, opts: StampOptions): Promis
       else if (pnPos === "bottom-left") x = margin;
       page.drawText(label, { x, y: margin, size: pnSize, font, color: rgb(0.3, 0.3, 0.3) });
     }
+    endDisplaySpace(page);
   });
 
   return await doc.save({ useObjectStreams: false });
@@ -1406,7 +1411,8 @@ export async function flattenAnnotations(
   for (const it of items) {
     const page = pages[it.pageNumber - 1];
     if (!page) continue;
-    const { width: pw, height: ph } = page.getSize();
+    // Anzeigeraum (CropBox + /Rotate wie im Reader), geschlossen am Schleifenende.
+    const { width: pw, height: ph } = beginDisplaySpace(page);
     const flipY = (yTop: number) => ph - yTop * ph; // 0..1 oben → Punkte unten
     const color = hexToRgbColor(it.color);
     const thickness = Math.max(0.5, (it.strokeWidth ?? 0.004) * pw);
@@ -1532,6 +1538,7 @@ export async function flattenAnnotations(
         console.warn("[pagebound] flatten: Signatur-Bild nicht einbettbar:", e);
       }
     }
+    endDisplaySpace(page);
   }
 
   doc.setProducer("Pagebound Flatten");
@@ -1579,7 +1586,7 @@ export async function applyTextEdits(pdfBytes: Uint8Array, edits: TextEditDto[])
   for (const ed of edits) {
     const page = pages[ed.pageNumber - 1];
     if (!page) continue;
-    const { width: pw, height: ph } = page.getSize();
+    const { width: pw, height: ph } = beginDisplaySpace(page);
     const bg = hexToRgbColor(ed.bgColor, rgb(1, 1, 1)); // Default: weiß
     const fg = hexToRgbColor(ed.color, rgb(0.07, 0.07, 0.07)); // Default: fast-schwarz
 
@@ -1622,6 +1629,7 @@ export async function applyTextEdits(pdfBytes: Uint8Array, edits: TextEditDto[])
         }
       }
     });
+    endDisplaySpace(page);
   }
 
   doc.setProducer("Pagebound Edit");
