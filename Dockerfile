@@ -3,7 +3,7 @@
 # ----------------------------------------------------------------------------
 # Stage 1: Build CSS (Tailwind) + JS-Interop bridges (esbuild) with Node 24
 # Stage 2: dotnet publish Blazor WASM with .NET 10 SDK
-# Stage 3: Static hosting via nginx:alpine
+# Stage 3: Static hosting via nginx (Alpine-Paket, mit Brotli-Modul)
 # =============================================================================
 
 # -----------------------------------------------------------------------------
@@ -54,17 +54,27 @@ RUN dotnet publish Pagebound.Web.csproj \
 # -----------------------------------------------------------------------------
 # Stage 3: nginx — serve the static publish output
 # -----------------------------------------------------------------------------
-FROM nginx:alpine AS runtime
+# Alpines eigenes nginx statt nginx:alpine von nginx.org: nur dort gibt es das
+# Brotli-Modul passend zur nginx-Version als Paket (nginx-mod-http-brotli, aus
+# google/ngx_brotli). Damit liefert nginx die .br-Dateien aus dem Publish direkt
+# aus (brotli_static, siehe nginx.conf) — Bean PDF-Tool-br01.
+# Fakten aus aports 3.22-stable: das Modul lädt sich selbst über
+# /etc/nginx/modules/10_http_brotli.conf; Sites kommen aus /etc/nginx/http.d/*.conf
+# (leer ausgeliefert); /run/nginx (PID-Datei) legt das Paket NICHT an.
+# Geprüft wird das Image im CI-Job „Docker image smoke" (ci.yml).
+FROM alpine:3.22 AS runtime
 
-# Drop nginx's default config
-RUN rm /etc/nginx/conf.d/default.conf
+RUN apk add --no-cache nginx nginx-mod-http-brotli \
+    && mkdir -p /run/nginx \
+    && ln -sf /dev/stdout /var/log/nginx/access.log \
+    && ln -sf /dev/stderr /var/log/nginx/error.log
 
-# Copy our nginx config for SPA + WASM + PWA
-COPY infra/docker/nginx.conf /etc/nginx/conf.d/default.conf
+# Our nginx config for SPA + WASM + PWA (server block inside http {})
+COPY infra/docker/nginx.conf /etc/nginx/http.d/pagebound.conf
 
-# Copy the published static site
+# Copy the published static site (inkl. der .br/.gz-Geschwister jeder Datei)
 COPY --from=dotnetbuild /publish/wwwroot/ /usr/share/nginx/html/
 
 EXPOSE 80
-
-# nginx:alpine already has a default CMD; we keep it.
+STOPSIGNAL SIGQUIT
+CMD ["nginx", "-g", "daemon off;"]

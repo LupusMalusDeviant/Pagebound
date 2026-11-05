@@ -204,3 +204,33 @@ jobs:
           npm ci
           npm run build
           npm run smoke
+
+  docker-image:
+    name: Docker image smoke (nginx + Brotli)
+    runs-on: ubuntu-latest
+    # Baut das echte Auslieferungs-Image und prüft, was ein Browser bekommt:
+    # .br/.gz aus dem Publish (auch mit Via-Header wie hinter Caddy), Typen, CSP,
+    # Landingpages, SPA-Fallback. Läuft auch auf PRs — publish-image.yml baut
+    # erst auf main/Tags, ein kaputtes Image fiele sonst erst nach dem Push auf.
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t pagebound:ci .
+
+      - name: Start container
+        run: |
+          docker run -d --name pb -p 8088:80 pagebound:ci
+          for i in $(seq 1 30); do
+            curl -sf -o /dev/null http://localhost:8088/ && break
+            sleep 1
+          done
+
+      - name: Smoke (Kompression, Header, Routen)
+        run: bash infra/docker/smoke.sh http://localhost:8088
+
+      - name: Container logs
+        if: always()
+        run: docker logs pb

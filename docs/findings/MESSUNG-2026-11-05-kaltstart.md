@@ -56,12 +56,7 @@ gefühlten Wartezeit, nicht der Ladezeit.
 
 ## Hebel für echte Einsparungen (nicht umgesetzt, je eigener Bean)
 
-1. **Brotli statt gzip ausliefern.** Der Publish erzeugt schon `.br`-Dateien.
-   Für genau die 210 `_framework`-Dateien des Kaltstarts: **10,82 MB gzip
-   (gemessen) gegenüber 8,21 MB als `.br` (Dateigrößen) = −24 %**, bei 4G grob
-   −2,3 s. nginx:alpine hat kein `brotli_static`; Alternativen: Brotli-Modul
-   ins Image, oder Caddy (davor) komprimieren lassen (`encode zstd gzip`) und
-   nginx' gzip abschalten.
+1. ~~**Brotli statt gzip ausliefern.**~~ Umgesetzt, siehe Nachtrag unten.
 2. **Nicht benötigte Assemblies nicht laden.** `System.Private.Xml`,
    `System.Data.Common`, `System.Text.Encoding.CodePages`,
    `DataContractSerialization` landen ohne Trimming im Startpaket (~2,3 MB gzip).
@@ -73,3 +68,55 @@ gefühlten Wartezeit, nicht der Ladezeit.
 4. **Bridges bei Bedarf laden.** Alle 14 Bridges (~1,5 MB gzip) werden vor dem
    Blazor-Skript synchron geladen, auch wenn z. B. Designer/OCR/Signatur nie
    gebraucht werden.
+
+## Nachtrag: Brotli (Bean `PDF-Tool-br01`)
+
+### Was Produktion tatsächlich ausliefert (an der Live-Seite gemessen)
+
+Die Messung oben bildete nginx mit gzip nach. Die Live-Seite zeigt etwas
+anderes: **nginx hat hinter Caddy gar nicht komprimiert.** Caddy setzt `Via`
+zum Upstream, und nginx' Standard `gzip_proxied off` schaltet dann gzip ab;
+Caddy (`encode zstd gzip`) packt jede Antwort selbst neu.
+
+| 210 Framework-Dateien des Kaltstarts | übertragen |
+|---|---|
+| roh | 27,39 MB |
+| Produktion, Chrome/Firefox (zstd von Caddy) | 11,09 MB |
+| Produktion, Safari (gzip von Caddy) | 11,22 MB |
+| `.br` aus dem Publish | **8,21 MB (−26 %)** |
+
+Ausreißer: `icudt_EFIGS.dat` kam unkomprimiert (0,55 MB) — als `.br` 0,14 MB.
+
+### Umsetzung
+
+- `nginx.conf`: `brotli_static on` + `gzip_static on` liefern die vom Publish
+  erzeugten `.br`/`.gz` direkt aus (keine CPU pro Abruf); `gzip_proxied any`
+  damit auch hinter Caddy; `font/woff(2)` aus `gzip_types` (gzip machte sie größer).
+- `Dockerfile`: Laufzeit-Stufe auf `alpine:3.22` + `nginx nginx-mod-http-brotli`
+  (das offizielle `nginx:alpine` hat kein Brotli-Modul). Alpine-Fakten aus
+  aports 3.22-stable: Modul lädt sich über `/etc/nginx/modules/10_http_brotli.conf`,
+  Sites aus `/etc/nginx/http.d/`, `/run/nginx` legt das Paket nicht an.
+- `infra/docker/smoke.sh` + CI-Job „Docker image smoke": baut das Image und
+  prüft Kompression (mit und ohne `Via`), Typen, CSP, Landingpages, SPA-Fallback.
+
+### Nachmessung (lokale Kette: Chrome → Caddy/TLS → nginx 1.24 + ngx_brotli → Publish)
+
+| Netz | Blazor bereit vorher* | nachher | übertragen nachher |
+|---|---|---|---|
+| 4G (9 Mbit/s, 60 ms) | 12,2 s | **9,7 s** | 9,45 MB (Framework 8,22 MB, alle 210 als br) |
+| DSL (25 Mbit/s, 20 ms) | 5,0 s | **4,3 s** | 9,45 MB |
+
+\* „vorher" ist die gzip-Messung von oben (Framework 10,82 MB) — nahe an
+Produktion (11,09 MB). Die lokale Kette mit der alten Konfiguration taugt nicht
+als Vergleich: Ubuntus Caddy 2.6.2 komprimiert wasm gar nicht (27 MB).
+
+Service Worker: installiert vollständig (244/244 cachebare Assets); jede Datei
+besteht die Integritätsprüfung, br ist für ihn transparent.
+
+### Grenzen
+
+- Das Alpine-Image selbst konnte hier nicht gebaut werden (kein Docker-Daemon);
+  das prüft erst der neue CI-Job.
+- Dass die Produktions-Caddy-Version vorhandenes `Content-Encoding: br`
+  unverändert durchreicht, ist mit Caddy 2.6.2 belegt, mit der Live-Version erst
+  nach dem Deploy (`bash infra/docker/smoke.sh https://pagebound.app.lupusmalus.dev`).

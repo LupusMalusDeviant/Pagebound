@@ -4,6 +4,16 @@ Alle nennenswerten Änderungen an Pagebound werden in dieser Datei dokumentiert.
 Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/de/1.1.0/),
 die Versionierung folgt [Semantic Versioning](https://semver.org/lang/de/).
 
+## [Unreleased]
+
+### Geändert
+- **Brotli-Auslieferung**: nginx liefert die vom Publish vorkomprimierten `.br`/`.gz` direkt aus (`brotli_static`/`gzip_static`). Beim Kaltstart kommen statt 11,09 MB (zstd, bisher von Caddy on-the-fly) 8,21 MB Framework an (−26 %), Blazor ist bei 4G nach 9,7 s statt ~12 s bereit. Laufzeit-Image dafür auf `alpine:3.22` mit `nginx-mod-http-brotli` umgestellt
+- **CI**: neuer Job „Docker image smoke" baut das echte Image und prüft Kompression, Header und Routen (`infra/docker/smoke.sh`)
+
+### Behoben
+- nginx hat hinter Caddy **nie** komprimiert (`gzip_proxied off` + `Via`-Header); Caddy musste jede Antwort selbst packen, `icudt_EFIGS.dat` kam sogar unkomprimiert. Jetzt `gzip_proxied any`
+- woff/woff2 nicht mehr on-the-fly ge-gzipt (wurden dadurch größer)
+
 ## [0.14.0-beta] — 2026-11-05
 
 Anlass war ein ehrlicher Vergleich mit einem kleinen reinen JS-Werkzeug
