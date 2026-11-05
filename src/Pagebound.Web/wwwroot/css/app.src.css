@@ -875,7 +875,18 @@ body.pb-app-bg { background: var(--bg-base); }
 .pb-splash-logo { font-family: var(--font-display); font-size: 1.6rem; font-weight: 500; color: var(--ink); letter-spacing: -0.02em; }
 .pb-splash-img { width: 132px; height: auto; }
 .pb-splash-spinner { width: 2.5rem; height: 2.5rem; color: var(--accent); animation: pb-spin 1.2s linear infinite; }
-.pb-splash-text { font-size: 0.875rem; }
+.pb-splash-text { font-size: 0.875rem; font-variant-numeric: tabular-nums; }
+/* Boot-Bildschirm (js/boot.js): echter Fortschritt statt Spinner + Drop-Zone. */
+.pb-boot-progress { width: min(280px, 70vw); height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; }
+.pb-boot-bar { height: 100%; width: var(--blazor-load-percentage, 0%); background: var(--accent); transition: width 0.2s ease-out; }
+.pb-boot-drop { display: flex; flex-direction: column; align-items: center; gap: 0.35rem; margin-top: 1.25rem; width: min(420px, 88vw); padding: 1.4rem 1rem; border: 1.5px dashed var(--line); border-radius: 10px; color: var(--ink-2); text-align: center; cursor: pointer; transition: border-color var(--speed, 0.15s), background-color var(--speed, 0.15s); }
+.pb-boot-drop[hidden] { display: none; }
+.pb-boot-drop:hover, .pb-boot-drop.is-over, .pb-boot-drop:focus-within { border-color: var(--accent); background: color-mix(in oklab, var(--accent) 8%, transparent); }
+.pb-boot-drop.is-queued { border-style: solid; border-color: var(--accent); }
+.pb-boot-file { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; }
+.pb-boot-drop-title { font-weight: 600; color: var(--ink); }
+.pb-boot-drop-sub { font-size: 0.8rem; color: var(--ink-3); }
+.pb-boot-drop-sub.is-error { color: #dc2626; }
 @keyframes pb-spin { to { transform: rotate(360deg); } }
 
 /* =============================================================================

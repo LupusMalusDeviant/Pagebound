@@ -10,7 +10,8 @@ namespace Pagebound.E2ETests;
 ///   <item>Ziel-URL kommt aus <c>PAGEBOUND_URL</c> (Default <c>http://localhost:5099</c>,
 ///         der lokale Dev-/Preview-Port). Die App muss laufen — lokal z. B.
 ///         <c>dotnet run --project src/Pagebound.Web</c>, in CI als eigener Schritt.</item>
-///   <item>Der Playwright-Chromium wird einmalig per <c>playwright install</c> sichergestellt.</item>
+///   <item>Der Playwright-Chromium wird einmalig per <c>playwright install</c> sichergestellt —
+///         oder per <c>PAGEBOUND_CHROMIUM</c> (Pfad zu einem vorhandenen Chromium) ersetzt.</item>
 ///   <item>Fehlt der Server oder der Browser, wird <see cref="Available"/> = false gesetzt
 ///         und die Tests <b>überspringen</b> sich (SkippableFact) statt zu scheitern.</item>
 /// </list>
@@ -37,6 +38,29 @@ public sealed class WebAppFixture : IAsyncLifetime
             SkipReason =
                 $"App unter {BaseUrl} nicht erreichbar. App starten " +
                 "(z. B. `dotnet run --project src/Pagebound.Web`) und ggf. PAGEBOUND_URL setzen.";
+            return;
+        }
+
+        // Optional: vorhandenen Chromium nutzen statt herunterzuladen (Umgebungen ohne
+        // Zugriff auf das Playwright-CDN, z. B. Sandboxes mit vorinstalliertem Browser).
+        var chromium = Environment.GetEnvironmentVariable("PAGEBOUND_CHROMIUM");
+        if (!string.IsNullOrWhiteSpace(chromium))
+        {
+            try
+            {
+                _playwright = await Playwright.CreateAsync();
+                Browser = await _playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
+                {
+                    Headless = true,
+                    ExecutablePath = chromium,
+                    Args = new[] { "--no-sandbox" },
+                });
+                Available = true;
+            }
+            catch (Exception ex)
+            {
+                SkipReason = $"Chromium unter PAGEBOUND_CHROMIUM ({chromium}) startet nicht: " + ex.Message;
+            }
             return;
         }
 

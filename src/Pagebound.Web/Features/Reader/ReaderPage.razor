@@ -133,6 +133,32 @@
         {
             _selfRef = DotNetObjectReference.Create(this);
             await JS.InvokeVoidAsync("pageboundShortcuts.registerDownloadObserver", _selfRef);
+            await OpenBootDroppedFileAsync();
+        }
+    }
+
+    /// <summary>
+    /// Eine PDF, die schon auf dem Boot-Bildschirm abgelegt wurde (js/boot.js,
+    /// MIME + Magic-Bytes dort geprüft), jetzt öffnen. Die Bytes kommen als
+    /// Uint8Array → byte[] (binär, kein base64-Umweg). Fehlt die Boot-Bridge
+    /// (z. B. Tests), passiert schlicht nichts.
+    /// </summary>
+    private async Task OpenBootDroppedFileAsync()
+    {
+        if (_pane is null) return;
+        try
+        {
+            var name = await JS.InvokeAsync<string?>("pageboundBoot.pendingFileName");
+            if (string.IsNullOrEmpty(name)) return;
+            var bytes = await JS.InvokeAsync<byte[]?>("pageboundBoot.takePendingFile");
+            if (bytes is not { Length: > 0 }) return;
+            ShowDocumentTab();
+            await _pane.OpenBytesAsync(bytes, name);
+            StateHasChanged();
+        }
+        catch (JSException)
+        {
+            // Boot-Bridge nicht vorhanden — kein vorab abgelegtes Dokument.
         }
     }
 
