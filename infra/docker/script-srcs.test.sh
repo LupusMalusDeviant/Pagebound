@@ -40,6 +40,31 @@ $expected
 $got"
 echo "ok  7 Schreibweisen von <script src> erkannt, inline/importmap/data-src ignoriert"
 
+# Codex-Befunde zur Regex-Fassung: Text in einem anderen Attribut ist kein src,
+# ein „>" in einem Attributwert beendet das Tag nicht. Dazu: Inhalt eines
+# <script> und HTML-Kommentare sind keine Tags, das erste src gewinnt.
+html='<script src="js/fehlt.js" data-note=" src=js/da.js"></script>
+<script data-note=">" src="js/nach-gt.js"></script>
+<script>var s = "<script src=js/im-string.js>";</script>
+<!-- <script src="js/auskommentiert.js"></script> -->
+<script src="js/erstes.js" src="js/zweites.js"></script>'
+expected='js/fehlt.js
+js/nach-gt.js
+js/erstes.js'
+got=$(script_srcs <<<"$html") || fail "script_srcs brach bei gültigem HTML ab (Attribut-Fälle)"
+[ "$got" = "$expected" ] || fail "falsche Liste bei Attribut-Fällen:
+--- erwartet
+$expected
+--- bekommen
+$got"
+echo "ok  src im Text eines anderen Attributs, > im Wert, Script-Inhalt, Kommentar, doppeltes src"
+
+# Ein Tag ohne schließendes > darf nicht still verschwinden.
+if script_srcs <<<'<script src="js/a.js"></script><script src="js/b.js"' >/dev/null 2>&1; then
+  fail "Tag ohne > wurde still übergangen"
+fi
+echo "ok  Tag ohne > führt zum Abbruch"
+
 # Ein src-Attribut ohne lesbaren Wert darf die Liste nicht still verkürzen.
 if script_srcs <<<'<script src="js/a.js"></script><script src=""></script>' >/dev/null 2>&1; then
   fail "leeres src wurde still übergangen"

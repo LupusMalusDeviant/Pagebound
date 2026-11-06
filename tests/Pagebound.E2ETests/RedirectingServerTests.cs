@@ -57,17 +57,20 @@ public sealed class RedirectingServerTests
             (await page.EvaluateAsync<bool>("async () => (await caches.match('/index.html')).redirected"))
                 .ShouldBeFalse("index.html liegt als umgeleitete Antwort im SW-Cache");
 
-            // Jetzt beantwortet der SW Navigationen aus diesem Eintrag. Vorher scheiterte
-            // genau hier jede Navigation mit net::ERR_FAILED.
+            // Jetzt muss der SW Navigationen aus diesem Eintrag beantworten. Vorher
+            // scheiterte genau hier jede Navigation mit net::ERR_FAILED.
+            // OFFLINE, sonst beweist der Schritt nichts: online liefert nginx die
+            // Seite auch dann, wenn der SW den Cache gar nicht nutzt (so an einer
+            // Mutante belegt, deren SW nie aus dem Cache antwortet — online grün).
             await page.ReloadAsync();
             await page.WaitForFunctionAsync("() => !!navigator.serviceWorker.controller", null, new PageWaitForFunctionOptions { Timeout = 60_000 });
+            await context.SetOfflineAsync(true);
             await page.GotoAsync(baseUrl + "/reader");
             await page.Locator("main h1").First.WaitForAsync(new LocatorWaitForOptions { Timeout = 60_000 });
-            (await page.EvaluateAsync<bool>("() => !!navigator.serviceWorker.controller"))
-                .ShouldBeTrue("/reader wurde nicht vom Service Worker ausgeliefert — der Test hätte nichts geprüft");
         }
         finally
         {
+            await context.SetOfflineAsync(false);
             await context.CloseAsync();
         }
     }
