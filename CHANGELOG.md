@@ -13,6 +13,7 @@ die Versionierung folgt [Semantic Versioning](https://semver.org/lang/de/).
 ### Behoben
 - nginx hat hinter Caddy **nie** komprimiert (`gzip_proxied off` + `Via`-Header); Caddy musste jede Antwort selbst packen, `icudt_EFIGS.dat` kam sogar unkomprimiert. Jetzt `gzip_proxied any`
 - woff/woff2 nicht mehr on-the-fly ge-gzipt (wurden dadurch größer)
+- **Offline-Start**: Die App zeigte offline rohe Lokalisierungsschlüssel statt Text und lud keine Schriften — der Service Worker cachte weder `resources/*.json` (der vorgesehene Offline-Rückfall wurde nie befüllt) noch `.woff2`. Jetzt beides; Sprachdateien bleiben online „Netz zuerst"
 
 ## [0.14.0-beta] — 2026-11-05
 
