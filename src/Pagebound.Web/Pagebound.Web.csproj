@@ -22,6 +22,16 @@
     -->
     <PublishTrimmed>true</PublishTrimmed>
     <TrimMode>partial</TrimMode>
+    <!--
+      Ohne ICU (Bean PDF-Tool-icu1): spart die icudt-Datei beim Start (144 KB br
+      bei DE/EN, bis 249 KB bei anderen Browsersprachen). Kulturabhängig war nur:
+      Library-Sortierung → Core/Text/TitleComparer (DIN 5007, Umlaute wie
+      Grundbuchstaben) und Dateigrößen → Core/Text/ByteSizeFormatter (nach
+      App-Sprache). Nebenwirkung erwünscht: Zahlen landen nie mehr mit Dezimal-
+      komma in CSS/SVG (so geschehen in ReaderPane, Highlight-Toolbar).
+      HybridGlobalization ist in .NET 10 wirkungslos (geprüft: ICU bleibt).
+    -->
+    <InvariantGlobalization>true</InvariantGlobalization>
   </PropertyGroup>
 
   <ItemGroup>

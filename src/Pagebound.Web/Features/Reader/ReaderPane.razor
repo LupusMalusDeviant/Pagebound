@@ -1053,7 +1053,7 @@
                             var editTop = (firstRect.Y * 100).ToString("F2", CultureInfo.InvariantCulture);
                             // Highlight oben → Toolbar unter dem Rechteck.
                             var hlTranslateY = firstRect.Y < 0.08
-                                ? $"calc({firstRect.Height * 100:F2}% + 6px)"
+                                ? $"calc({(firstRect.Height * 100).ToString("F2", CultureInfo.InvariantCulture)}% + 6px)"
                                 : "calc(-100% - 6px)";
                             <div class="absolute z-20 flex items-center gap-1 rounded-md pb-glass-strong px-2 py-1"
                                  style="@($"left:{editLeft}%; top:{editTop}%; transform: translate(0, {hlTranslateY})")"

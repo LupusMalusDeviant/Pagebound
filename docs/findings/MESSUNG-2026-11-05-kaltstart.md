@@ -58,8 +58,7 @@ gefühlten Wartezeit, nicht der Ladezeit.
 
 1. ~~**Brotli statt gzip ausliefern.**~~ Umgesetzt, siehe Nachtrag unten.
 2. ~~**Nicht benötigte Assemblies nicht laden.**~~ Umgesetzt (Trimming `partial`), siehe Nachtrag unten.
-3. **ICU.** `InvariantGlobalization` würde `icudt_*.dat` sparen, ändert aber
-   Sortierung/Formatierung (DE/EN) — nur mit Tests der Formatierungen.
+3. ~~**ICU.**~~ Umgesetzt (`InvariantGlobalization`), siehe Nachtrag unten.
 4. ~~**Bridges bei Bedarf laden.**~~ Umgesetzt für die drei großen, siehe Nachtrag unten.
 
 ## Nachtrag: Brotli (Bean `PDF-Tool-br01`)
@@ -167,3 +166,33 @@ Browser gemessen — Gegenprobe: sofortiges Vorladen wird mit „1161 ms VOR dem
 App-Start" erkannt), Einbrennen über die nachgeladene Manipulator-Bridge.
 
 **Stand der ganzen Reihe (4G, kalter Cache):** 12,2 s / 12,4 MB → 3,9 s / 3,4 MB.
+
+## Nachtrag: ohne ICU (Bean `PDF-Tool-icu1`)
+
+Welche ICU-Datei geladen wird, hängt von der **Browsersprache** ab:
+`icudt_EFIGS` (en/fr/it/de/es) 144 KB br, `icudt_no_CJK` (z. B. pl/tr/ru) 222 KB,
+`icudt_CJK` 249 KB. `HybridGlobalization` ist in .NET 10 wirkungslos (geprüft:
+alle drei Dateien bleiben). `InvariantGlobalization=true` streicht sie ganz.
+
+Kulturabhängig war nur zweierlei — beides jetzt ausdrücklich gelöst:
+- Library-Sortierung (`CurrentCultureIgnoreCase`): im invarianten Modus rein
+  ordinal, gemessen „Birne, Ufer, Zebra, Äpfel, Über". Jetzt
+  `Core/Text/TitleComparer` (DIN 5007-1: Umlaute/Akzente beim Grundbuchstaben,
+  ß = ss), ohne jede Kultur-API.
+- Dateigrößen: jetzt `Core/Text/ByteSizeFormatter` nach **App-Sprache** (DE
+  „1,5 MB"), ersetzt drei abweichende Kopien.
+
+Nebenbei gefunden: `ReaderPane` schrieb eine CSS-Länge mit der Browserkultur
+(`calc(1,23% + 6px)` bei deutschem Browser → ungültig, Highlight-Toolbar falsch
+positioniert). Behoben; im invarianten Modus kann diese Fehlerklasse nicht mehr
+auftreten.
+
+| `/reader`, 4G | mit ICU | ohne ICU |
+|---|---|---|
+| bis „bereit" übertragen | 3,42 MB | **3,25 MB** |
+| Blazor bereit | 4,24 s | 3,91 s (im Rauschen) |
+
+Abgesichert: Core-Tests laufen in der CI zusätzlich mit
+`DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1`; E2E `LibrarySortTests` (deutscher
+Browser) — Gegenprobe mit altem Vergleich im invarianten Build: „Birne, Zebra,
+Äpfel, Über" → rot. Sieben Funktionsabläufe identisch.

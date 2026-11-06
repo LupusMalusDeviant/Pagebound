@@ -73,6 +73,13 @@ jobs:
         # hier ausschließen, sonst würden sie mangels Server nur (grün) übersprungen.
         run: dotnet test --configuration Release --no-build --filter "FullyQualifiedName!~E2ETests" --settings coverlet.runsettings --collect:"XPlat Code Coverage" --logger "trx;LogFileName=test-results.trx"
 
+      # Die App läuft im Browser ohne ICU (InvariantGlobalization) — Core-Logik
+      # (Sortierung, Formate) hier zusätzlich genau so prüfen.
+      - name: Core tests in invariant globalization mode (wie im Browser)
+        env:
+          DOTNET_SYSTEM_GLOBALIZATION_INVARIANT: '1'
+        run: dotnet test tests/Pagebound.Core.Tests --configuration Release --no-build
+
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4

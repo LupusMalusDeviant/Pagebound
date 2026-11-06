@@ -1,5 +1,6 @@
 using Pagebound.Core.Abstractions;
 using Pagebound.Core.Domain;
+using Pagebound.Core.Text;
 
 namespace Pagebound.Infrastructure.Library;
 
@@ -177,8 +178,8 @@ public sealed class LibraryService : ILibraryService
             {
                 LibrarySort.LastOpenedDesc => filtered.OrderByDescending(e => e.LastOpenedAt ?? DateTimeOffset.MinValue),
                 LibrarySort.AddedDesc => filtered.OrderByDescending(e => e.AddedAt),
-                LibrarySort.TitleAsc => filtered.OrderBy(e => e.Title, StringComparer.CurrentCultureIgnoreCase),
-                LibrarySort.TitleDesc => filtered.OrderByDescending(e => e.Title, StringComparer.CurrentCultureIgnoreCase),
+                LibrarySort.TitleAsc => filtered.OrderBy(e => e.Title, TitleComparer.Instance),
+                LibrarySort.TitleDesc => filtered.OrderByDescending(e => e.Title, TitleComparer.Instance),
                 _ => filtered
             };
 
@@ -204,7 +205,7 @@ public sealed class LibraryService : ILibraryService
                 .SelectMany(e => e.Tags ?? Array.Empty<string>())
                 .Where(t => !string.IsNullOrWhiteSpace(t))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
-                .OrderBy(t => t, StringComparer.CurrentCultureIgnoreCase)
+                .OrderBy(t => t, TitleComparer.Instance)
                 .ToList();
         }
         finally

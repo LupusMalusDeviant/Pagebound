@@ -301,6 +301,5 @@
         }
     }
 
-    private static string FormatSize(long bytes) =>
-        bytes < 1024L * 1024 ? $"{bytes / 1024.0:F0} KB" : $"{bytes / (1024.0 * 1024):F1} MB";
+    private string FormatSize(long bytes) => Pagebound.Core.Text.ByteSizeFormatter.Format(bytes, L.CurrentLanguage);
 }

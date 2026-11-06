@@ -10,11 +10,13 @@ die Versionierung folgt [Semantic Versioning](https://semver.org/lang/de/).
 - **Brotli-Auslieferung**: nginx liefert die vom Publish vorkomprimierten `.br`/`.gz` direkt aus (`brotli_static`/`gzip_static`). Beim Kaltstart kommen statt 11,09 MB (zstd, bisher von Caddy on-the-fly) 8,21 MB Framework an (−26 %), Blazor ist bei 4G nach 9,7 s statt ~12 s bereit. Laufzeit-Image dafür auf `alpine:3.22` mit `nginx-mod-http-brotli` umgestellt
 - **Trimming (`partial`)**: statt 205 werden 49 Framework-Assemblies ausgeliefert — u. a. `System.Private.Xml` und `System.Data.Common`, die nichts in Pagebound benutzt. Kaltstart 9,45 → 4,19 MB, Blazor bereit bei 4G 10,2 → 5,0 s. Eigene Assemblies bleiben ungekürzt; neue E2E-Tests sichern die JSON-Pfade (Sprachdateien, Sidecar, IndexedDB, Designer) gegen den veröffentlichten Build ab
 - **Große JS-Bridges bei Bedarf**: `pdf-manipulator`, `sign` und `pdfjs` (≈ 890 KB br, 94 % der Bridge-Bytes) lädt `js/lazy-bridges.js` erst beim ersten Aufruf und nach dem Start im Leerlauf vor — C#-Aufrufe unverändert. Blazor bei 4G nach 3,9 statt 4,9 s bereit
+- **Ohne ICU** (`InvariantGlobalization`): 144–249 KB weniger beim Start, je nach Browsersprache. Library-Sortierung und Dateigrößen hängen dafür nicht mehr an der Browserkultur: Umlaute sortieren beim Grundbuchstaben (DIN 5007), Größen folgen der App-Sprache („1,5 MB“)
 - **CI**: neuer Job „Docker image smoke" baut das echte Image und prüft Kompression, Header und Routen (`infra/docker/smoke.sh`)
 
 ### Behoben
 - nginx hat hinter Caddy **nie** komprimiert (`gzip_proxied off` + `Via`-Header); Caddy musste jede Antwort selbst packen, `icudt_EFIGS.dat` kam sogar unkomprimiert. Jetzt `gzip_proxied any`
 - woff/woff2 nicht mehr on-the-fly ge-gzipt (wurden dadurch größer)
+- Werkzeugleiste über einer Markierung im oberen Seitenbereich saß bei deutsch eingestelltem Browser falsch (CSS-Wert mit Dezimalkomma)
 - **Offline-Start**: Die App zeigte offline rohe Lokalisierungsschlüssel statt Text und lud keine Schriften — der Service Worker cachte weder `resources/*.json` (der vorgesehene Offline-Rückfall wurde nie befüllt) noch `.woff2`. Jetzt beides; Sprachdateien bleiben online „Netz zuerst"
 
 ## [0.14.0-beta] — 2026-11-05
