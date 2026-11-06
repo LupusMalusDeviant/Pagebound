@@ -8,10 +8,13 @@ self.addEventListener('fetch', event => event.respondWith(onFetch(event)));
 
 const cacheNamePrefix = 'offline-cache-';
 const cacheName = `${cacheNamePrefix}${self.assetsManifest.version}`;
-// JSON bewusst ausgeklammert: die i18n-Bundles in /resources/*.json wechseln
-// zur Laufzeit (FA-101) — wenn sie im offline-Cache liegen, liefert der SW
-// nach Sprachwechsel wieder das alte Bundle. Stattdessen immer vom Netz holen.
-const offlineAssetsInclude = [ /\.dll$/, /\.pdb$/, /\.wasm/, /\.html/, /\.js$/, /\.css$/, /\.woff$/, /\.png$/, /\.jpe?g$/, /\.gif$/, /\.ico$/, /\.blat$/, /\.dat$/, /\.webmanifest$/ ];
+// i18n-Bundles (resources/{lang}.json): werden bei der Installation MIT gecacht,
+// aber zur Laufzeit IMMER zuerst vom Netz geholt (siehe onFetch) — der Cache ist
+// nur der Offline-Rückfall. Vorher waren sie ganz ausgeklammert, aber nie per
+// cache.put nachgetragen: offline zeigte die App rohe Schlüssel (Bean PDF-Tool-off1).
+// Sonstiges JSON bleibt draußen.
+// woff2: /\.woff$/ allein erfasst .woff2 nicht — offline fehlten alle Schriften.
+const offlineAssetsInclude = [ /\.dll$/, /\.pdb$/, /\.wasm/, /\.html/, /\.js$/, /\.css$/, /\.woff2?$/, /\.png$/, /\.jpe?g$/, /\.gif$/, /\.ico$/, /\.blat$/, /\.dat$/, /\.webmanifest$/, /^resources\/[a-z]{2}\.json$/ ];
 const offlineAssetsExclude = [ /^service-worker\.js$/ ];
 
 // Replace with your base path if you are hosting on a subfolder. Ensure there is a trailing '/'.
@@ -86,11 +89,20 @@ async function onFetch(event) {
     // i18n-Bundles immer frisch vom Netz holen (s.o.), damit der nächste Boot nach
     // einem Sprachwechsel garantiert das richtige Bundle bekommt — aber mit
     // Cache-Fallback, falls offline, statt hart zu scheitern.
+    // Die App lädt resources/{lang}.json?v=<Zeitstempel> (Cache-Bust) und fällt
+    // offline auf die URL OHNE Query zurück (LocalizationService). Deshalb jede
+    // frische Antwort unter der Query-freien URL ablegen — so steht offline immer
+    // der zuletzt online gesehene Stand bereit.
     if (url.pathname.startsWith('/resources/') && url.pathname.endsWith('.json')) {
+        const cacheKey = new URL(url.pathname, url.origin).href;
         try {
-            return await fetch(event.request);
+            const response = await fetch(event.request);
+            if (response.ok) {
+                try { await cache.put(cacheKey, response.clone()); } catch { /* Cache voll o. ä. — Antwort trotzdem liefern */ }
+            }
+            return response;
         } catch {
-            return (await cache.match(event.request)) ?? Response.error();
+            return (await cache.match(cacheKey)) ?? Response.error();
         }
     }
 
