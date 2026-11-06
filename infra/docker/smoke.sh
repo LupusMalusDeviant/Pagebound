@@ -16,10 +16,11 @@ ok() { echo "ok  $*"; }
 
 # Fingerprint-Namen aus dem Asset-Manifest des Service Workers holen.
 assets=$("${CURL[@]}" "$BASE/service-worker-assets.js") || fail "service-worker-assets.js nicht abrufbar"
-WASM=/$(grep -oE '_framework/dotnet\.native\.[a-z0-9]+\.wasm"' <<<"$assets" | head -1 | tr -d '"')
-ICU=/$(grep -oE '_framework/icudt_EFIGS\.[a-z0-9]+\.dat"' <<<"$assets" | head -1 | tr -d '"')
+# (|| true: ohne Treffer soll die eigene Meldung kommen, nicht ein stiller pipefail-Abbruch)
+WASM=/$( (grep -oE '_framework/dotnet\.native\.[a-z0-9]+\.wasm"' <<<"$assets" || true) | head -1 | tr -d '"')
+RUNTIME=/$( (grep -oE '_framework/dotnet\.runtime\.[a-z0-9]+\.js"' <<<"$assets" || true) | head -1 | tr -d '"')
 [ "$WASM" != "/" ] || fail "dotnet.native.*.wasm nicht im Manifest"
-[ "$ICU" != "/" ] || fail "icudt_EFIGS.*.dat nicht im Manifest"
+[ "$RUNTIME" != "/" ] || fail "dotnet.runtime.*.js nicht im Manifest"
 
 # probe <pfad> <accept-encoding|-> <via|-> → "<status>|<bytes>|<encoding>|<type>"
 probe() {
@@ -42,7 +43,7 @@ expect() { # <pfad> <ae> <via> <erwartetes encoding|identity> <typ-präfix>
 for via in - "1.1 Caddy"; do
   expect "$WASM" "gzip, deflate, br, zstd" "$via" br application/wasm
   expect "$WASM" "gzip, deflate"           "$via" gzip application/wasm
-  expect "$ICU"  "gzip, deflate, br"       "$via" br application/octet-stream
+  expect "$RUNTIME" "gzip, deflate, br"    "$via" br application/javascript
   expect "/"     "gzip, deflate, br"       "$via" br text/html
 done
 expect "$WASM" - - identity application/wasm
