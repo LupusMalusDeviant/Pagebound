@@ -57,12 +57,7 @@ gefühlten Wartezeit, nicht der Ladezeit.
 ## Hebel für echte Einsparungen (nicht umgesetzt, je eigener Bean)
 
 1. ~~**Brotli statt gzip ausliefern.**~~ Umgesetzt, siehe Nachtrag unten.
-2. **Nicht benötigte Assemblies nicht laden.** `System.Private.Xml`,
-   `System.Data.Common`, `System.Text.Encoding.CodePages`,
-   `DataContractSerialization` landen ohne Trimming im Startpaket (~2,3 MB gzip).
-   Entweder gezieltes Trimming mit gepflegten TrimmerRoots (siehe Kommentar in
-   `Pagebound.Web.csproj`, warum es aus ist) oder Lazy-Loading
-   (`BlazorWebAssemblyLazyLoad`) für die Features, die sie brauchen.
+2. ~~**Nicht benötigte Assemblies nicht laden.**~~ Umgesetzt (Trimming `partial`), siehe Nachtrag unten.
 3. **ICU.** `InvariantGlobalization` würde `icudt_*.dat` sparen, ändert aber
    Sortierung/Formatierung (DE/EN) — nur mit Tests der Formatierungen.
 4. **Bridges bei Bedarf laden.** Alle 14 Bridges (~1,5 MB gzip) werden vor dem
@@ -120,3 +115,33 @@ besteht die Integritätsprüfung, br ist für ihn transparent.
 - Dass die Produktions-Caddy-Version vorhandenes `Content-Encoding: br`
   unverändert durchreicht, ist mit Caddy 2.6.2 belegt, mit der Live-Version erst
   nach dem Deploy (`bash infra/docker/smoke.sh https://pagebound.app.lupusmalus.dev`).
+
+## Nachtrag: Trimming (Bean `PDF-Tool-asm1`)
+
+`System.Private.Xml`, `System.Data.Common`, `System.Text.Encoding.CodePages`,
+`DataContractSerialization` werden von **nichts** in Pagebound benutzt (kein
+Code, kein Paket). Sie kamen nur mit, weil ohne Trimming 205 Framework-
+Assemblies ausgeliefert und beim Start alle geladen wurden. Statt Lazy-Loading
+daher `PublishTrimmed=true` mit `TrimMode=partial`: gekürzt werden nur
+Framework-Assemblies; unsere eigenen (mit allen per System.Text.Json
+serialisierten Typen) bleiben vollständig.
+
+| Kaltstart, Kette mit Brotli | ungekürzt | gekürzt (`partial`) |
+|---|---|---|
+| wasm-Dateien | 205 | **49** |
+| `_framework` gesamt (.br) | 8,68 MB | **3,43 MB** |
+| übertragen | 9,45 MB | **4,19 MB** |
+| Blazor bereit, 4G | 10,2 s | **5,0 s** |
+| Blazor bereit, DSL | 4,4 s | **2,4 s** |
+
+Gegenüber dem Ausgangspunkt dieser Messreihe (12,4 MB, 12,2 s bei 4G) ist der
+Kaltstart damit etwa halb so schnell **und** ein Drittel so schwer.
+
+**Funktionsnachweis:** sieben Abläufe über alle reflexionsbasierten JSON-Pfade
+(Routen, Sprachwechsel, Stift + getippte Signatur mit Integritäts-Hash, Sidecar-
+Export, IndexedDB-Round-Trip über die Library, Sidecar-Import, Designer-JSON),
+gegen beide Builds: Ergebnisse **identisch**, keine Konsolenfehler. Gegenprobe
+mit `TrimMode=full`: App stürzt beim ersten Render ab (`CtorNotLocated`).
+Dauerhaft abgesichert durch die E2E-Tests `JsonRoundTripTests` (Gegenprobe:
+gezielt kaputtes Sidecar-Parsen bzw. IndexedDB-Lesen → genau die betroffenen
+Tests scheitern).

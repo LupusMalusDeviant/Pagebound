@@ -7,12 +7,21 @@
     <OverrideHtmlAssetPlaceholders>true</OverrideHtmlAssetPlaceholders>
     <ServiceWorkerAssetsManifest>service-worker-assets.js</ServiceWorkerAssetsManifest>
     <!--
-      Trimming aus: Blazor WASM nutzt reflexionsbasierte System.Text.Json-
-      Serialisierung (IndexedDB-Storage, Sidecar) ohne Source-Generator plus
-      JS-Interop-Marshalling. Ohne gepflegte TrimmerRoots würde Publish-Trimming
-      diese Pfade wegoptimieren. (PdfSharpCore — der ursprüngliche Grund — ist raus.)
+      Trimming AN, Modus "partial" (Bean PDF-Tool-asm1): gekürzt werden nur
+      Framework-Assemblies, die sich dafür markieren. Unsere eigenen Assemblies
+      (Core/Infrastructure/Web) bleiben vollständig — dort liegen alle Typen, die
+      per reflexionsbasiertem System.Text.Json serialisiert werden (IndexedDB,
+      Sidecar, Designer-JSON, Integritäts-Hash). Ohne Trimming wurden 205 statt 49
+      Framework-Assemblies ausgeliefert und beim Start geladen (u. a.
+      System.Private.Xml, System.Data.Common — von nichts hier benutzt).
+      Gemessen (docs/findings/MESSUNG-2026-11-05-kaltstart.md): Kaltstart
+      9,45 → 4,19 MB, 4G 10,2 → 5,0 s.
+      NICHT "full": das kürzt auch unsere Assemblies und bricht Router und JSON
+      (ausprobiert: CtorNotLocated beim ersten Render).
+      Abgesichert durch E2E JsonRoundTripTests (laufen gegen den Publish).
     -->
-    <PublishTrimmed>false</PublishTrimmed>
+    <PublishTrimmed>true</PublishTrimmed>
+    <TrimMode>partial</TrimMode>
   </PropertyGroup>
 
   <ItemGroup>
