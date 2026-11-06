@@ -9,7 +9,7 @@
 # -----------------------------------------------------------------------------
 # Stage 1: Node — build CSS and JS bridges
 # -----------------------------------------------------------------------------
-FROM node:24-alpine AS jsbuild
+FROM node:25-alpine AS jsbuild
 WORKDIR /web
 
 # Copy lockfile first for layer caching
