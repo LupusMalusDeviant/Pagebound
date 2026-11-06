@@ -60,9 +60,7 @@ gefühlten Wartezeit, nicht der Ladezeit.
 2. ~~**Nicht benötigte Assemblies nicht laden.**~~ Umgesetzt (Trimming `partial`), siehe Nachtrag unten.
 3. **ICU.** `InvariantGlobalization` würde `icudt_*.dat` sparen, ändert aber
    Sortierung/Formatierung (DE/EN) — nur mit Tests der Formatierungen.
-4. **Bridges bei Bedarf laden.** Alle 14 Bridges (~1,5 MB gzip) werden vor dem
-   Blazor-Skript synchron geladen, auch wenn z. B. Designer/OCR/Signatur nie
-   gebraucht werden.
+4. ~~**Bridges bei Bedarf laden.**~~ Umgesetzt für die drei großen, siehe Nachtrag unten.
 
 ## Nachtrag: Brotli (Bean `PDF-Tool-br01`)
 
@@ -145,3 +143,27 @@ mit `TrimMode=full`: App stürzt beim ersten Render ab (`CtorNotLocated`).
 Dauerhaft abgesichert durch die E2E-Tests `JsonRoundTripTests` (Gegenprobe:
 gezielt kaputtes Sidecar-Parsen bzw. IndexedDB-Lesen → genau die betroffenen
 Tests scheitern).
+
+## Nachtrag: Bridges bei Bedarf (Bean `PDF-Tool-brg1`)
+
+Von 14 Bridges (944 KB br) machen drei 94 % aus: `pdf-manipulator` (543 KB),
+`sign` (230 KB), `pdfjs` (119 KB). Sie lädt jetzt `wwwroot/js/lazy-bridges.js`
+erst beim ersten Aufruf (Platzhalter mit demselben globalen Namen; die C#-Aufrufe
+bleiben unverändert) und nach dem App-Start im Leerlauf vorab.
+`mind` und `wysiwyg` bleiben bewusst sofort geladen: `wysiwyg-editor` ruft
+`pageboundMind.renderMindmapDataUrl` **synchron** auf — ein Platzhalter lieferte
+dort ein Promise statt eines Strings.
+
+| `/reader`, Kette mit Brotli + Trimming | alles sofort | bei Bedarf |
+|---|---|---|
+| Blazor bereit, 4G | 4,9 s | **3,9 s** |
+| Blazor bereit, DSL | 2,37 s | **1,98 s** |
+| bis „bereit" übertragen (4G) | 4,19 MB | **3,42 MB** |
+
+Sieben Funktionsabläufe (wie beim Trimming) identisch, keine Konsolenfehler.
+E2E `LazyBridgeTests`: Lade-Mechanik mit gefälschten, verzögerten Bridges
+(inkl. Ladefehler + erneuter Versuch), „nicht vor dem App-Start" (Zeitpunkte im
+Browser gemessen — Gegenprobe: sofortiges Vorladen wird mit „1161 ms VOR dem
+App-Start" erkannt), Einbrennen über die nachgeladene Manipulator-Bridge.
+
+**Stand der ganzen Reihe (4G, kalter Cache):** 12,2 s / 12,4 MB → 3,9 s / 3,4 MB.
