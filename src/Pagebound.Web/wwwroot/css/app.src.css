@@ -887,6 +887,9 @@ body.pb-app-bg { background: var(--bg-base); }
 .pb-boot-drop-title { font-weight: 600; color: var(--ink); }
 .pb-boot-drop-sub { font-size: 0.8rem; color: var(--ink-3); }
 .pb-boot-drop-sub.is-error { color: #dc2626; }
+.pb-boot-tools { margin-top: 1.5rem; max-width: min(520px, 90vw); display: flex; flex-wrap: wrap; justify-content: center; gap: 0.35rem 1rem; font-size: 0.85rem; }
+.pb-boot-about { width: 100%; text-align: center; margin: 0 0 0.25rem; color: var(--ink-3); }
+.pb-boot-tools a { color: var(--accent); text-underline-offset: 0.15em; }
 @keyframes pb-spin { to { transform: rotate(360deg); } }
 
 /* =============================================================================

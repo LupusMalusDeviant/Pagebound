@@ -37,6 +37,8 @@ const ALLOWED_HOSTS = new Set([
   'www.color.org',       // ICC-Profil-RegistryName (PDF/A)
   'schemas.openxmlformats.org', // OOXML-Namespaces (DOCX/XLSX/PPTX xmlns) — reine Bezeichner
   'github.com',          // Projekt-Repo-Link + Quellen-Kommentare
+  'pagebound.app.lupusmalus.dev', // eigene Produktions-Origin: canonical/og:url/og:image in
+                                  // index.html (SEO) — kein Fremd-Request. Vom Nutzer freigegeben 2026-11-07.
 ]);
 
 // Baseline der ERLAUBTEN Laufzeit-Dependencies. Wird eine neue hinzugefügt,

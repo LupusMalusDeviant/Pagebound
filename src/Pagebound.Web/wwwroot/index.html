@@ -6,11 +6,27 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#0f172a" />
     <meta name="description" content="Pagebound — schlanker, datenschutzfreundlicher Open-Source-Adobe-Reader-Ersatz. PDFs lesen, annotieren, unterschreiben, schwärzen und bearbeiten, komplett im Browser, ohne Upload." />
+    <!-- SEO: alle SPA-Routen liefern diese Datei aus — canonical zeigt bewusst auf die Startseite. -->
+    <link rel="canonical" href="https://pagebound.app.lupusmalus.dev/" />
+    <link rel="alternate" hreflang="de" href="https://pagebound.app.lupusmalus.dev/" />
+    <link rel="alternate" hreflang="en" href="https://pagebound.app.lupusmalus.dev/?lang=en" />
+    <link rel="alternate" hreflang="x-default" href="https://pagebound.app.lupusmalus.dev/" />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="Pagebound" />
+    <meta property="og:locale" content="de_DE" />
+    <meta property="og:locale:alternate" content="en_US" />
+    <meta property="og:url" content="https://pagebound.app.lupusmalus.dev/" />
     <meta property="og:title" content="Pagebound — PDF-Werkzeug ohne Upload" />
     <meta property="og:description" content="PDFs lesen, annotieren, unterschreiben, schwärzen und bearbeiten, komplett im Browser. Open Source, ohne Konto, ohne Tracking." />
-    <title>Pagebound</title>
+    <meta property="og:image" content="https://pagebound.app.lupusmalus.dev/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Pagebound — PDFs lesen, unterschreiben, schwärzen und bearbeiten, komplett im Browser" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Pagebound — PDF-Werkzeug ohne Upload" />
+    <meta name="twitter:description" content="PDFs lesen, annotieren, unterschreiben, schwärzen und bearbeiten, komplett im Browser. Open Source, ohne Konto, ohne Tracking." />
+    <meta name="twitter:image" content="https://pagebound.app.lupusmalus.dev/og-image.png" />
+    <title>Pagebound — PDF lesen, unterschreiben, schwärzen · ohne Upload</title>
     <base href="/" />
     <link rel="preload" id="webassembly" />
     <link rel="stylesheet" href="css/app.css" />
@@ -27,6 +43,10 @@
         // mit den richtigen CSS-Variablen läuft (kein Flash of Unstyled Content).
         (function () {
             try {
+                // ?lang=de|en (z. B. von den englischen Landingpages) setzt die
+                // App-Sprache dauerhaft — sonst startet die App auf Deutsch.
+                var qlang = (new URLSearchParams(location.search).get("lang") || "").toLowerCase();
+                if (qlang === "de" || qlang === "en") window.localStorage.setItem("pb.lang", qlang);
                 var lang = window.localStorage.getItem("pb.lang");
                 if (lang) document.documentElement.setAttribute("lang", lang);
 
@@ -66,6 +86,16 @@
                 <span class="pb-boot-drop-title" id="pb-boot-drop-title"></span>
                 <span class="pb-boot-drop-sub" id="pb-boot-drop-sub" aria-live="polite"></span>
             </label>
+            <!-- Sichtbar während des Ladens, für Suchmaschinen immer: worum es geht + Werkzeug-Seiten.
+                 boot.js tauscht bei englischer App-Sprache Texte/Links (data-en-*). -->
+            <nav class="pb-boot-tools" aria-label="Werkzeuge" data-en-aria-label="Tools">
+                <p class="pb-boot-about" data-en-text="Open-source PDF tool that runs entirely in your browser — no upload, no account, no tracking.">Open-Source-PDF-Werkzeug, das komplett im Browser läuft — ohne Upload, ohne Konto, ohne Tracking.</p>
+                <a href="/pdf-seiten-loeschen/" data-en-href="/en/delete-pdf-pages/" data-en-text="Delete PDF pages">PDF-Seiten löschen</a>
+                <a href="/pdf-unterschreiben/" data-en-href="/en/sign-pdf/" data-en-text="Sign a PDF">PDF unterschreiben</a>
+                <a href="/pdf-schwaerzen/" data-en-href="/en/redact-pdf/" data-en-text="Redact a PDF">PDF schwärzen</a>
+                <a href="/pdf-zusammenfuegen/" data-en-href="/en/merge-pdf/" data-en-text="Merge PDFs">PDFs zusammenfügen</a>
+                <a href="https://github.com/LupusMalusDeviant/Pagebound">GitHub</a>
+            </nav>
         </div>
     </div>
 

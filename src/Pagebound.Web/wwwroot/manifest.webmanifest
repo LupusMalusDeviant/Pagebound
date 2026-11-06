@@ -1,6 +1,9 @@
 {
-  "name": "Pagebound.Web",
-  "short_name": "Pagebound.Web",
+  "name": "Pagebound – PDF ohne Upload",
+  "short_name": "Pagebound",
+  "description": "PDFs lesen, annotieren, unterschreiben, schwärzen und bearbeiten – komplett im Browser, ohne Upload, ohne Konto, ohne Tracking.",
+  "lang": "de",
+  "categories": ["productivity", "utilities", "business"],
   "id": "./",
   "start_url": "./",
   "display": "standalone",

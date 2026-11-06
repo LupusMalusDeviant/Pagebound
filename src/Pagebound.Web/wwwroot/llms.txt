@@ -1,0 +1,16 @@
+# Pagebound
+
+> Open-source PDF reader and editor that runs entirely in the browser (Blazor WebAssembly PWA). Files are never uploaded; no account, no telemetry, works offline. Apache 2.0. German and English UI.
+
+Pagebound replaces a desktop PDF reader for everyday tasks: read and search, highlight and annotate, sign (draw, type or image), redact (content is really removed), fill and create forms, merge/split/reorder/rotate pages, compress, encrypt (AES-256), OCR for scanned PDFs, convert to images/text/HTML/DOCX, PDF/A, and a WYSIWYG designer for flyers, letters and invoices. It also ships an MCP server so AI agents can use the same PDF operations.
+
+## Tools
+- [Delete PDF pages](https://pagebound.app.lupusmalus.dev/en/delete-pdf-pages/): Remove, reorder or rotate pages of a PDF right in your browser – no upload, no account. Open source.
+- [Sign a PDF](https://pagebound.app.lupusmalus.dev/en/sign-pdf/): Sign a PDF in your browser: draw your signature, type it in a script font or load an image, and place it anywhere. No upload, no account.
+- [Redact a PDF](https://pagebound.app.lupusmalus.dev/en/redact-pdf/): Permanently redact areas of a PDF: the content underneath is removed, not just covered. In your browser, no upload, with an optional audit report.
+- [Merge PDFs](https://pagebound.app.lupusmalus.dev/en/merge-pdf/): Combine several PDFs into one file or split a PDF into parts – right in your browser, no upload, no account. Open source.
+
+## Project
+- [App](https://pagebound.app.lupusmalus.dev/): the web app itself (installable PWA)
+- [Source code](https://github.com/LupusMalusDeviant/Pagebound): GitHub repository, README and changelog
+- [MCP server](https://github.com/LupusMalusDeviant/Pagebound/tree/main/mcp): tokenless MCP server, stdio or Streamable HTTP (hosted at https://pagebound.app.lupusmalus.dev/mcp)

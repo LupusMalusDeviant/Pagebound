@@ -97,7 +97,20 @@
 
   function booting() { return !!el("pb-boot"); }
 
+  // Werkzeug-Links auf dem Boot-Bildschirm: bei englischer App-Sprache die EN-Fassung.
+  function localizeTools() {
+    if (de) return;
+    var nodes = document.querySelectorAll("#pb-boot [data-en-text], #pb-boot [data-en-href], #pb-boot [data-en-aria-label]");
+    for (var i = 0; i < nodes.length; i++) {
+      var n = nodes[i];
+      if (n.getAttribute("data-en-text")) n.textContent = n.getAttribute("data-en-text");
+      if (n.getAttribute("data-en-href")) n.setAttribute("href", n.getAttribute("data-en-href"));
+      if (n.getAttribute("data-en-aria-label")) n.setAttribute("aria-label", n.getAttribute("data-en-aria-label"));
+    }
+  }
+
   function wire() {
+    localizeTools();
     var zone = el("pb-boot-drop");
     var input = el("pb-boot-file");
     if (!zone || !input) return;
