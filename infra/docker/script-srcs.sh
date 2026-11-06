@@ -24,6 +24,19 @@
 # (offener Kommentar, offenes Attribut, Tag ohne „>", Rohtext ohne End-Tag),
 # ist hier ein Fehler mit Rückgabewert 1: lieber rot als eine stillschweigend
 # kürzere Liste. Ebenso jedes <script>-Tag mit src ohne lesbaren Wert.
+#
+# STRIKTE TEILMENGE (Entscheidung nach dem dritten Codex-Review): Ein
+# vollständiger HTML5-Parser in awk ist nicht das Ziel — jedes Review fand die
+# nächste Sonderregel (SVG-<title/>, Attribut „=…"). Was dieser Parser nicht
+# sicher so liest wie der Browser, lehnt er ab, statt zu raten:
+#   - Fremdinhalt <svg>, <math> (eigene Regeln für Rohtext und „/>");
+#   - Attributnamen, die leer sind oder " ' < enthalten (Fehlerkorrektur des
+#     Browsers);
+#   - <!…> außer <!-- --> und <!DOCTYPE>, <?…>, </ ohne Buchstaben
+#     („bogus comments");
+#   - <base> mit einem href außer "/" (smoke.sh fragt Pfade ab "/" ab).
+# Braucht index.html eines davon, wird der Smoke rot — dann hier bewusst
+# erweitern, mit Selbsttest.
 # Zeilenumbrüche, Tabs und Seitenvorschübe werden vorher zu Leerzeichen.
 # Läuft unter gawk und mawk (ubuntu-latest).
 # =============================================================================
@@ -42,9 +55,10 @@ script_srcs() {
       return s
     }
 
-    # Attribute ab i bis einschließlich ">". Setzt hassrc/src (erstes src).
+    # Attribute ab i bis einschließlich ">". Setzt hassrc/src und
+    # hashref/href (jeweils das erste Vorkommen).
     function attrs(what,   c, name, val, q, j) {
-      hassrc = 0; src = ""
+      hassrc = 0; src = ""; hashref = 0; href = ""
       while (i <= n) {
         c = substr(html, i, 1)
         if (c == " " || c == "/") { i++; continue }
@@ -55,6 +69,9 @@ script_srcs() {
           if (c == " " || c == "=" || c == ">" || c == "/") break
           name = name c; i++
         }
+        if (name == "") fail(what ": Attribut ohne Namen (nicht unterstützt)")
+        if (index(name, "\"") || index(name, sq) || index(name, "<"))
+          fail(what ": Attributname " name " enthält \" '"'"' oder < (nicht unterstützt)")
         while (substr(html, i, 1) == " ") i++
         val = ""
         if (substr(html, i, 1) == "=") {
@@ -74,6 +91,7 @@ script_srcs() {
           }
         }
         if (tolower(name) == "src" && !hassrc) { hassrc = 1; src = val }
+        if (tolower(name) == "href" && !hashref) { hashref = 1; href = val }
       }
       fail(what ": Tag ohne schließendes >")
     }
@@ -103,13 +121,26 @@ script_srcs() {
           continue
         }
         c = substr(low, i + 1, 1)
-        if (c == "/" && substr(low, i + 2, 1) ~ /[a-z]/) {
+        if (c == "!") {
+          if (substr(low, i, 9) != "<!doctype") fail("<!…> außer Kommentar und DOCTYPE (nicht unterstützt)")
+          j = index(substr(html, i), ">")
+          if (j == 0) fail("<!DOCTYPE ohne >")
+          i = i + j
+          continue
+        }
+        if (c == "?") fail("<?…> (nicht unterstützt)")
+        if (c == "/") {
+          if (substr(low, i + 2, 1) !~ /[a-z]/) fail("</ ohne Tag-Namen (nicht unterstützt)")
           i += 2; name = tagname(); attrs("</" name)
           continue
         }
         if (c !~ /[a-z]/) { i++; continue }
 
-        i++; name = tagname(); attrs("<" name)
+        i++; name = tagname()
+        if (name == "svg" || name == "math") fail("<" name "> (Fremdinhalt, nicht unterstützt)")
+        attrs("<" name)
+        if (name == "base" && hashref && href != "/")
+          fail("<base href=\"" href "\"> — smoke.sh fragt Pfade ab / ab (nicht unterstützt)")
         if (name == "script" && hassrc) {
           withsrc++
           sub(/^\.\//, "", src)

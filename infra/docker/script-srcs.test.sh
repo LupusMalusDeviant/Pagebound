@@ -94,6 +94,29 @@ for bad in '<script src="js/a.js"></script><!-- offen' \
 done
 echo "ok  offener Kommentar, offenes Attribut, Script ohne Ende führen zum Abbruch"
 
+# Strikte Teilmenge (drittes Codex-Review): Was der Parser nicht sicher wie der
+# Browser liest, lehnt er ab, statt zu raten. Jeder dieser Fälle lieferte vorher
+# eine kürzere Liste mit Exit 0.
+for bad in '<svg><title/></svg><script src="js/b.js"></script><svg><title>x</title></svg><script src="js/a.js"></script>' \
+           '<math><mi>x</mi></math><script src="js/a.js"></script>' \
+           '<div ="><script src=js/b.js></script>"><script src="js/a.js"></script>' \
+           '<div a"b="c"></div><script src="js/a.js"></script>' \
+           '<!x <script src="js/b.js">><script src="js/a.js"></script>' \
+           '<?x <script src="js/b.js">?><script src="js/a.js"></script>' \
+           '</ x><script src="js/a.js"></script>' \
+           '<base href="/app/"><script src="js/a.js"></script>'; do
+  if script_srcs <<<"$bad" >/dev/null 2>&1; then
+    fail "nicht unterstütztes HTML wurde akzeptiert: $bad"
+  fi
+done
+echo "ok  svg, math, leerer/kaputter Attributname, <!…>, <?…>, </ …>, fremdes <base> führen zum Abbruch"
+
+# Was erlaubt bleibt: DOCTYPE und <base href="/"> wie in der echten index.html.
+got=$(script_srcs <<<'<!DOCTYPE html><html><head><base href="/" /><script src="js/a.js"></script>') \
+  || fail "DOCTYPE oder <base href=\"/\"> wurde abgelehnt"
+[ "$got" = js/a.js ] || fail "DOCTYPE/base: falsche Liste: $got"
+echo "ok  DOCTYPE und <base href=\"/\"> bleiben erlaubt"
+
 # Ein Tag ohne schließendes > darf nicht still verschwinden.
 if script_srcs <<<'<script src="js/a.js"></script><script src="js/b.js"' >/dev/null 2>&1; then
   fail "Tag ohne > wurde still übergangen"
