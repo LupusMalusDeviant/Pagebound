@@ -59,6 +59,41 @@ $expected
 $got"
 echo "ok  src im Text eines anderen Attributs, > im Wert, Script-Inhalt, Kommentar, doppeltes src"
 
+# Zweites Codex-Review: „<!--" im Attribut eines anderen Tags ist kein
+# Kommentar, „</scriptlet>" beendet kein Script, und Rohtext in <style> ist
+# kein Markup. Jeder dieser Fälle verschluckte vorher den Rest der Seite.
+html='<script src="js/gut.js"></script>
+<div title="<!--"></div>
+<script src="js/nach-div.js"></script>
+<script>const s = "</scriptlet><!--";</script>
+<script src="js/nach-scriptlet.js"></script>
+<style>a[title="<!--"] { color: red }</style>
+<script src="js/nach-style.js"></script>
+<SCRIPT SRC="js/ende-gross.js"></SCRIPT >'
+expected='js/gut.js
+js/nach-div.js
+js/nach-scriptlet.js
+js/nach-style.js
+js/ende-gross.js'
+got=$(script_srcs <<<"$html") || fail "script_srcs brach bei gültigem HTML ab (Kommentar-/End-Tag-Fälle)"
+[ "$got" = "$expected" ] || fail "falsche Liste bei Kommentar-/End-Tag-Fällen:
+--- erwartet
+$expected
+--- bekommen
+$got"
+echo "ok  <!-- im Attribut, </scriptlet>, <style>-Rohtext, End-Tag mit Leerraum"
+
+# Was der Browser als Rest-der-Seite-verschluckt behandeln würde, ist für den
+# Smoke ein Fehler: lieber rot als eine stillschweigend kürzere Liste.
+for bad in '<script src="js/a.js"></script><!-- offen' \
+           '<script src="js/a.js"></script><div title="offen></div>' \
+           '<script src="js/a.js"></script><script>kein Ende'; do
+  if script_srcs <<<"$bad" >/dev/null 2>&1; then
+    fail "unvollständiges HTML wurde still akzeptiert: $bad"
+  fi
+done
+echo "ok  offener Kommentar, offenes Attribut, Script ohne Ende führen zum Abbruch"
+
 # Ein Tag ohne schließendes > darf nicht still verschwinden.
 if script_srcs <<<'<script src="js/a.js"></script><script src="js/b.js"' >/dev/null 2>&1; then
   fail "Tag ohne > wurde still übergangen"
