@@ -104,12 +104,18 @@ for bad in '<svg><title/></svg><script src="js/b.js"></script><svg><title>x</tit
            '<!x <script src="js/b.js">><script src="js/a.js"></script>' \
            '<?x <script src="js/b.js">?><script src="js/a.js"></script>' \
            '</ x><script src="js/a.js"></script>' \
-           '<base href="/app/"><script src="js/a.js"></script>'; do
+           '<base href="/app/"><script src="js/a.js"></script>' \
+           '<!--><script src="js/b.js"></script><!-- --><script src="js/a.js"></script>' \
+           '<!---><script src="js/b.js"></script><!-- --><script src="js/a.js"></script>' \
+           '<!-- x --!><script src="js/b.js"></script><!-- --><script src="js/a.js"></script>' \
+           '<script src="js/a.js"></script><plaintext><script src="js/b.js"></script>' \
+           '<script src="js/&#98;.js"></script><script src="js/a.js"></script>'; do
   if script_srcs <<<"$bad" >/dev/null 2>&1; then
     fail "nicht unterstütztes HTML wurde akzeptiert: $bad"
   fi
 done
-echo "ok  svg, math, leerer/kaputter Attributname, <!…>, <?…>, </ …>, fremdes <base> führen zum Abbruch"
+echo "ok  svg, math, leerer/kaputter Attributname, <!…>, <?…>, </ …>, fremdes <base>,"
+echo "    <!-->, <!--->, --!>, <plaintext>, & in src führen zum Abbruch"
 
 # Was erlaubt bleibt: DOCTYPE und <base href="/"> wie in der echten index.html.
 got=$(script_srcs <<<'<!DOCTYPE html><html><head><base href="/" /><script src="js/a.js"></script>') \

@@ -33,7 +33,10 @@
 #   - Attributnamen, die leer sind oder " ' < enthalten (Fehlerkorrektur des
 #     Browsers);
 #   - <!…> außer <!-- --> und <!DOCTYPE>, <?…>, </ ohne Buchstaben
-#     („bogus comments");
+#     („bogus comments"); Kommentare mit Sonderende <!-->, <!---> oder --!>;
+#   - <plaintext> (danach ist der Rest der Seite Text);
+#   - „&" in einem script-src oder base-href (Zeichenreferenzen wie &#109;
+#     dekodiert der Browser, dieser Parser nicht);
 #   - <base> mit einem href außer "/" (smoke.sh fragt Pfade ab "/" ab).
 # Braucht index.html eines davon, wird der Smoke rot — dann hier bewusst
 # erweitern, mit Selbsttest.
@@ -117,6 +120,9 @@ script_srcs() {
         if (substr(html, i, 4) == "<!--") {
           j = index(substr(html, i + 4), "-->")
           if (j == 0) fail("Kommentar ohne -->")
+          body = substr(html, i + 4, j - 1)
+          if (substr(body, 1, 1) == ">" || substr(body, 1, 2) == "->" || index(body, "--!>"))
+            fail("Kommentar mit Sonderende <!-->, <!---> oder --!> (nicht unterstützt)")
           i = i + 4 + j + 2
           continue
         }
@@ -138,7 +144,10 @@ script_srcs() {
 
         i++; name = tagname()
         if (name == "svg" || name == "math") fail("<" name "> (Fremdinhalt, nicht unterstützt)")
+        if (name == "plaintext") fail("<plaintext> (Rest der Seite wäre Text, nicht unterstützt)")
         attrs("<" name)
+        if ((name == "script" && index(src, "&")) || (name == "base" && index(href, "&")))
+          fail("<" name ">: & im Pfad (Zeichenreferenzen werden nicht dekodiert, nicht unterstützt)")
         if (name == "base" && hashref && href != "/")
           fail("<base href=\"" href "\"> — smoke.sh fragt Pfade ab / ab (nicht unterstützt)")
         if (name == "script" && hassrc) {
