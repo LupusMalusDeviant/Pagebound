@@ -4,7 +4,12 @@ Alle nennenswerten Änderungen an Pagebound werden in dieser Datei dokumentiert.
 Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/de/1.1.0/),
 die Versionierung folgt [Semantic Versioning](https://semver.org/lang/de/).
 
-## [Unreleased]
+## [0.15.0-beta] — 2026-11-07
+
+Ladezeit-Release: Vom ersten Aufruf bis zur bedienbaren App braucht Pagebound
+bei 4G und kaltem Cache jetzt ~3,9 s und ~3,3 MB statt 12,2 s und 12,4 MB
+(Messreihe: `docs/findings/MESSUNG-2026-11-05-kaltstart.md`). Dazu ein echter
+Offline-Start.
 
 ### Geändert
 - **Brotli-Auslieferung**: nginx liefert die vom Publish vorkomprimierten `.br`/`.gz` direkt aus (`brotli_static`/`gzip_static`). Beim Kaltstart kommen statt 11,09 MB (zstd, bisher von Caddy on-the-fly) 8,21 MB Framework an (−26 %), Blazor ist bei 4G nach 9,7 s statt ~12 s bereit. Laufzeit-Image dafür auf `alpine:3.22` mit `nginx-mod-http-brotli` umgestellt
