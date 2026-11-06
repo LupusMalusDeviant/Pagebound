@@ -39,6 +39,24 @@ jobs:
       - name: Privacy guard (no external requests / telemetry)
         run: node tools/privacy-check.mjs
 
+      # Die Landingpages, sitemap.xml, robots.txt und llms.txt sind eingecheckte
+      # Ausgabe von tools/gen-landing.mjs. Wer die Texte im Skript ändert und das
+      # Neu-Erzeugen vergisst (oder das HTML von Hand ändert), wird hier rot.
+      # Läuft vor jedem Build-Schritt, der wwwroot anfasst.
+      - name: Landing pages up to date (gen-landing.mjs)
+        run: |
+          node tools/gen-landing.mjs src/Pagebound.Web/wwwroot
+          # Inhalt vergleichen (git diff normalisiert Zeilenenden) und neue,
+          # nicht eingecheckte Dateien eigens suchen — git diff sieht sie nicht.
+          new=$(git ls-files --others --exclude-standard -- src/Pagebound.Web/wwwroot)
+          if ! git diff --quiet -- src/Pagebound.Web/wwwroot || [ -n "$new" ]; then
+            echo "Eingecheckte Landingpages weichen von tools/gen-landing.mjs ab:"
+            git diff --stat -- src/Pagebound.Web/wwwroot
+            [ -z "$new" ] || echo "Neu, nicht eingecheckt: $new"
+            git diff -- src/Pagebound.Web/wwwroot | head -50
+            exit 1
+          fi
+
       - name: Restore .NET packages
         run: dotnet restore
 

@@ -1,6 +1,6 @@
 // =============================================================================
 // Aufgaben-Landingpages (wwwroot/<slug>/index.html, erzeugt von
-// tools/gen-landing.py). Sie liegen außerhalb dessen, was tools/privacy-check.mjs
+// tools/gen-landing.mjs). Sie liegen außerhalb dessen, was tools/privacy-check.mjs
 // scannt (index.html, *.razor, *.ts) — deshalb prüft dieser Test für sie das
 // Kernversprechen selbst: keine Ressource von einer fremden Origin.
 // =============================================================================
@@ -16,7 +16,7 @@ const webRoot = resolve(here, "..");
 const wwwroot = join(webRoot, "wwwroot");
 const ORIGIN = "https://pagebound.app.lupusmalus.dev";
 
-// DE unter /pdf-…/, EN unter /en/…/ (tools/gen-landing.py). slug = Pfad ohne Schrägstriche.
+// DE unter /pdf-…/, EN unter /en/…/ (tools/gen-landing.mjs). slug = Pfad ohne Schrägstriche.
 const enDir = join(wwwroot, "en");
 const pages = [
   ...readdirSync(wwwroot).filter((d) => d.startsWith("pdf-") && statSync(join(wwwroot, d)).isDirectory()),
