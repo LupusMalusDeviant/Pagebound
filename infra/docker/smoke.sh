@@ -74,14 +74,18 @@ ok "Landingpage /pdf-schwaerzen/"
 # text/html zurück, nicht als 404. Genau so sind boot.js und lazy-bridges.js
 # aus dem Image gefallen (pauschaler .dockerignore-Ausschluss), und weder die
 # Kompressions- noch die CSP- noch die Routen-Prüfung oben hat das gesehen:
-# die App lief live ohne Boot-Bildschirm und ohne Lazy-Loader weiter.
+# eine App aus diesem Image wäre ohne Boot-Bildschirm und Lazy-Loader gestartet.
 # Diese Prüfung fängt die ganze Klasse — jede im Image fehlende Script-Datei.
 # ---------------------------------------------------------------------------
+# Der Parser (script-srcs.sh) liest jede Schreibweise und zählt gegen: ein
+# <script>-Tag mit src, dessen Wert er nicht lesen kann, bricht hier ab statt
+# still aus der Liste zu fallen.
+. "$(dirname "$0")/script-srcs.sh"
 index=$("${CURL[@]}" "$BASE/") || fail "index.html nicht abrufbar"
-scripts=$( (grep -oE '<script[^>]+src="[^"]+"' <<<"$index" || true) | grep -oE 'src="[^"]+"' | cut -d'"' -f2 )
+scripts=$(script_srcs <<<"$index") || fail "<script src> in index.html nicht vollständig lesbar (siehe oben)"
 [ -n "$scripts" ] || fail "keine <script src> in index.html gefunden — Parser oder Seite kaputt"
 count=0
-for s in $scripts; do
+while IFS= read -r s; do
   case "$s" in http*|//*) fail "externes Script in index.html: $s (Datenschutzzusage: alles self-hosted)" ;; esac
   out=$(probe "/${s#/}" - -)
   IFS='|' read -r status bytes _enc type <<<"$out"
@@ -91,6 +95,6 @@ for s in $scripts; do
     *) fail "/${s#/} (aus index.html): Content-Type '$type' statt JavaScript — Datei fehlt im Image, der SPA-Fallback liefert index.html" ;;
   esac
   count=$((count + 1))
-done
+done <<<"$scripts"
 ok "$count <script src> aus index.html werden als JavaScript ausgeliefert"
 echo "SMOKE OK"

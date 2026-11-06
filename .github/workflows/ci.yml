@@ -143,6 +143,23 @@ jobs:
           curl -sf -o /dev/null http://localhost:5000/ \
             || { echo "Container antwortet nicht auf /"; docker logs pb-e2e; exit 1; }
 
+      - name: Start redirecting adversary
+        # Dasselbe Image mit einem zweiten server-Block, der jedes .../index.html
+        # per 301 umleitet (tests/Pagebound.E2ETests/redirect-adversary.nginx.conf).
+        # Gegen ihn läuft RedirectingServerTests — der Regressionstest für die
+        # Redirect-Härtung im Service Worker.
+        run: |
+          docker run -d --name pb-redirect -p 5001:81 \
+            -v "$PWD/tests/Pagebound.E2ETests/redirect-adversary.nginx.conf:/etc/nginx/http.d/zz-redirect-adversary.conf:ro" \
+            pagebound:e2e
+          for i in $(seq 1 60); do
+            curl -sf -o /dev/null http://localhost:5001/ && break
+            sleep 1
+          done
+          code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:5001/index.html)
+          [ "$code" = 301 ] \
+            || { echo "Gegenspieler leitet /index.html nicht um (HTTP $code)"; docker logs pb-redirect; exit 1; }
+
       - name: Smoke the container
         # Belegt VOR den Browser-Tests, dass das Image vollständig ist — u. a.,
         # dass jedes <script src> aus index.html als JavaScript ankommt. Ohne
@@ -153,6 +170,7 @@ jobs:
       - name: Run E2E tests
         env:
           PAGEBOUND_URL: http://localhost:5000
+          PAGEBOUND_REDIRECT_URL: http://localhost:5001
           # Kein stilles Wegskippen: fällt Server oder Browser aus, wird der Job
           # rot statt grün (Leitplanke in CLAUDE.md).
           PAGEBOUND_REQUIRE_SERVER: "1"
@@ -160,7 +178,10 @@ jobs:
 
       - name: Container logs
         if: always()
-        run: docker logs pb-e2e
+        run: |
+          docker logs pb-e2e
+          echo "--- pb-redirect"
+          docker logs pb-redirect || true
 
       - name: Upload Playwright report
         if: failure()
@@ -250,6 +271,9 @@ jobs:
             curl -sf -o /dev/null http://localhost:8088/ && break
             sleep 1
           done
+
+      - name: Selbsttest Script-Parser
+        run: bash infra/docker/script-srcs.test.sh
 
       - name: Smoke (Kompression, Header, Routen)
         run: bash infra/docker/smoke.sh http://localhost:8088

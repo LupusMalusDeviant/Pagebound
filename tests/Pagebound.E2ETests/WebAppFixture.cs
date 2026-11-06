@@ -35,8 +35,22 @@ public sealed class WebAppFixture : IAsyncLifetime
     /// weg-skippen" (CLAUDE.md). Lokal bleibt das Skip-Verhalten, damit
     /// <c>dotnet test</c> ohne laufende App nicht rot wird.
     /// </summary>
-    private static bool ServerRequired =>
+    public static bool ServerRequired =>
         Environment.GetEnvironmentVariable("PAGEBOUND_REQUIRE_SERVER") is "1" or "true";
+
+    /// <summary>
+    /// Für Bedingungen IM Test, unter denen er nichts aussagen kann (kein Service
+    /// Worker, Dev-Build, fehlender Gegenspieler-Server): lokal überspringen, mit
+    /// <c>PAGEBOUND_REQUIRE_SERVER=1</c> scheitern. Ein <c>Skip.If</c> an dieser
+    /// Stelle wäre sonst ein zweiter stiller Ausgang an der Fixture vorbei.
+    /// </summary>
+    public static void RequireOrSkip(bool condition, string reason)
+    {
+        if (condition) return;
+        if (ServerRequired)
+            throw new InvalidOperationException("PAGEBOUND_REQUIRE_SERVER ist gesetzt, der Test kann aber nicht laufen: " + reason);
+        Skip.If(true, reason);
+    }
 
     public async Task InitializeAsync()
     {
