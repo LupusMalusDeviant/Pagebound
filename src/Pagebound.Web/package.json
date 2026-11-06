@@ -39,7 +39,7 @@
     "d3-transition": "^3.0.1",
     "d3-zoom": "^3.0.0",
     "fflate": "^0.8.3",
-    "node-forge": "^1.4.0",
+    "node-forge": "^1.4.2",
     "pdf-lib": "^1.17.1",
     "qrcode": "^1.5.4",
     "tesseract.js": "^7.0.0"
