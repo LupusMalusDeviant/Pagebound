@@ -35,6 +35,8 @@
 #   - <!…> außer <!-- --> und <!DOCTYPE>, <?…>, </ ohne Buchstaben
 #     („bogus comments"); Kommentare mit Sonderende <!-->, <!---> oder --!>;
 #   - <plaintext> (danach ist der Rest der Seite Text);
+#   - „<!--" im Inhalt eines <script> (Escape-Zustände: dann beendet nicht
+#     jedes </script das Element);
 #   - „&" in einem script-src oder base-href (Zeichenreferenzen wie &#109;
 #     dekodiert der Browser, dieser Parser nicht);
 #   - <base> mit einem href außer "/" (smoke.sh fragt Pfade ab "/" ab).
@@ -100,14 +102,20 @@ script_srcs() {
     }
 
     # Rohtext bis zum passenden End-Tag überspringen und dieses mitlesen.
-    function skipraw(name,   j, c) {
+    # Bei <script> schaltet „<!--" im Inhalt die Escape-Zustände des Browsers
+    # ein (dann beendet nicht jedes </script das Element) — nicht unterstützt.
+    function skipraw(name,   j, c, start) {
+      start = i
       while (1) {
         j = index(substr(low, i), "</" name)
         if (j == 0) fail("<" name "> ohne </" name ">")
         i = i + j - 1 + 2 + length(name)
         c = substr(low, i, 1)
-        if (c == " " || c == "/" || c == ">") { attrs("</" name); return }
+        if (c == " " || c == "/" || c == ">") break
       }
+      if (name == "script" && index(substr(html, start, i - start), "<!--"))
+        fail("<!-- im Inhalt eines <script> (Escape-Zustände, nicht unterstützt)")
+      attrs("</" name)
     }
 
     { html = html $0 }

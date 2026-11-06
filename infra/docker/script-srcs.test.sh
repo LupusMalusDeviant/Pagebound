@@ -65,7 +65,7 @@ echo "ok  src im Text eines anderen Attributs, > im Wert, Script-Inhalt, Komment
 html='<script src="js/gut.js"></script>
 <div title="<!--"></div>
 <script src="js/nach-div.js"></script>
-<script>const s = "</scriptlet><!--";</script>
+<script>const s = "</scriptlet> <style>";</script>
 <script src="js/nach-scriptlet.js"></script>
 <style>a[title="<!--"] { color: red }</style>
 <script src="js/nach-style.js"></script>
@@ -109,13 +109,15 @@ for bad in '<svg><title/></svg><script src="js/b.js"></script><svg><title>x</tit
            '<!---><script src="js/b.js"></script><!-- --><script src="js/a.js"></script>' \
            '<!-- x --!><script src="js/b.js"></script><!-- --><script src="js/a.js"></script>' \
            '<script src="js/a.js"></script><plaintext><script src="js/b.js"></script>' \
-           '<script src="js/&#98;.js"></script><script src="js/a.js"></script>'; do
+           '<script src="js/&#98;.js"></script><script src="js/a.js"></script>' \
+           '<script><!--<script></script><!--</script><script src="js/b.js"></script><!-- --><script src="js/a.js"></script>' \
+           '<script>const s = "</scriptlet><!--";</script><script src="js/a.js"></script>'; do
   if script_srcs <<<"$bad" >/dev/null 2>&1; then
     fail "nicht unterstütztes HTML wurde akzeptiert: $bad"
   fi
 done
 echo "ok  svg, math, leerer/kaputter Attributname, <!…>, <?…>, </ …>, fremdes <base>,"
-echo "    <!-->, <!--->, --!>, <plaintext>, & in src führen zum Abbruch"
+echo "    <!-->, <!--->, --!>, <plaintext>, & in src, <!-- im Script-Inhalt führen zum Abbruch"
 
 # Was erlaubt bleibt: DOCTYPE und <base href="/"> wie in der echten index.html.
 got=$(script_srcs <<<'<!DOCTYPE html><html><head><base href="/" /><script src="js/a.js"></script>') \
