@@ -57,8 +57,12 @@ ok "br $br B vs. roh $raw B"
 hdr=$("${CURL[@]}" -D - -o /dev/null "$BASE/reader")
 grep -qi '^content-security-policy:.*connect-src .self.' <<<"$hdr" || fail "CSP fehlt am Dokument"
 ok "CSP am Dokument"
-"${CURL[@]}" "$BASE/reader" | grep -q 'id="pb-boot"' || fail "/reader liefert nicht die App-Hülle"
+# Body erst einlesen, dann prüfen: "curl | grep -q" bricht mit pipefail sporadisch
+# (grep beendet früh → curl bekommt SIGPIPE → Exit 23), so in der CI geschehen.
+reader=$("${CURL[@]}" "$BASE/reader")
+grep -q 'id="pb-boot"' <<<"$reader" || fail "/reader liefert nicht die App-Hülle"
 ok "SPA-Fallback /reader"
-"${CURL[@]}" "$BASE/pdf-schwaerzen/" | grep -q '<h1>PDF schwärzen</h1>' || fail "Landingpage /pdf-schwaerzen/ fehlt"
+landing=$("${CURL[@]}" "$BASE/pdf-schwaerzen/")
+grep -q '<h1>PDF schwärzen</h1>' <<<"$landing" || fail "Landingpage /pdf-schwaerzen/ fehlt"
 ok "Landingpage /pdf-schwaerzen/"
 echo "SMOKE OK"
