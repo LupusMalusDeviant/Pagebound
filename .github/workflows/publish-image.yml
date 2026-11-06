@@ -73,13 +73,19 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: MCP version from package.json
+        id: mcpver
+        run: echo "version=$(node -p "require('./mcp/package.json').version")" >> "$GITHUB_OUTPUT"
+
       - name: Docker metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/lupusmalusdeviant/pagebound-mcp
+          # Versions-Tag aus mcp/package.json — server.json (MCP-Registry) zeigt darauf.
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=${{ steps.mcpver.outputs.version }},enable={{is_default_branch}}
             type=ref,event=tag
             type=sha,format=short
 

@@ -1,0 +1,38 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.LupusMalusDeviant/pagebound",
+  "title": "Pagebound PDF — tokenless MCP server",
+  "description": "PDF tools for agents: pages, merge/split, forms, AES-256, PDF/A, ZUGFeRD, signing, OCR, designs.",
+  "version": "2.1.0",
+  "websiteUrl": "https://pagebound.app.lupusmalus.dev",
+  "repository": {
+    "url": "https://github.com/LupusMalusDeviant/Pagebound",
+    "source": "github",
+    "subfolder": "mcp"
+  },
+  "icons": [
+    {
+      "src": "https://raw.githubusercontent.com/LupusMalusDeviant/Pagebound/main/src/Pagebound.Web/wwwroot/icon-512.png",
+      "mimeType": "image/png",
+      "sizes": ["512x512"]
+    }
+  ],
+  "packages": [
+    {
+      "registryType": "oci",
+      "identifier": "ghcr.io/lupusmalusdeviant/pagebound-mcp:2.1.0",
+      "runtimeHint": "docker",
+      "runtimeArguments": [
+        { "type": "named", "name": "-i", "description": "Keep stdin open for the stdio transport." },
+        { "type": "named", "name": "-e", "value": "MCP_TRANSPORT=stdio", "description": "The image defaults to HTTP; stdio is what local MCP clients expect." }
+      ],
+      "transport": { "type": "stdio" }
+    }
+  ],
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://pagebound.app.lupusmalus.dev/mcp"
+    }
+  ]
+}

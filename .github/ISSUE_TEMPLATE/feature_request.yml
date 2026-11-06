@@ -1,0 +1,38 @@
+name: Feature request
+description: Suggest an idea or improvement
+labels: ["enhancement", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Pagebound's core promise is **100 % local**: no uploads, no external requests, no telemetry.
+        Features that would need a server or a third-party service are out of scope — but tell us about the
+        problem anyway, there may be a local way to solve it.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem do you want to solve?
+      placeholder: "I often need to … but currently I have to …"
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: How could Pagebound help?
+      description: Your idea for a solution — rough is fine.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Reader / annotations
+        - Signing
+        - Redaction
+        - Forms
+        - Page tools (merge, split, …)
+        - Convert / export
+        - OCR
+        - Library
+        - Designer
+        - MCP server
+        - Other

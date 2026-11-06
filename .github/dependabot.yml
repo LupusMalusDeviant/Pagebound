@@ -1,0 +1,40 @@
+version: 2
+# Every dependency input of the build: .NET packages, the two npm workspaces (web bridges, MCP server),
+# the Docker base images and the GitHub Actions. A Dependabot PR is only mergeable after CI passed
+# (includes the privacy guard: a new runtime npm dependency fails it until it was reviewed).
+updates:
+  - package-ecosystem: "nuget"
+    directories:
+      - "/src/Pagebound.Core"
+      - "/src/Pagebound.Infrastructure"
+      - "/src/Pagebound.Web"
+      - "/tests/Pagebound.Core.Tests"
+      - "/tests/Pagebound.Web.Tests"
+      - "/tests/Pagebound.E2ETests"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels: ["dependencies"]
+
+  - package-ecosystem: "npm"
+    directories:
+      - "/src/Pagebound.Web"
+      - "/mcp"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels: ["dependencies", "javascript"]
+
+  - package-ecosystem: "docker"
+    directories:
+      - "/"
+      - "/mcp"
+    schedule:
+      interval: "weekly"
+    labels: ["dependencies", "docker"]
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels: ["dependencies", "ci"]

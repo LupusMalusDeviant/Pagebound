@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/LupusMalusDeviant/Pagebound/security/advisories/new
+    about: Please report security issues privately via a GitHub security advisory (see SECURITY.md) — not as a public issue.
+  - name: Try Pagebound
+    url: https://pagebound.app.lupusmalus.dev/?lang=en
+    about: The hosted app — runs entirely in your browser, nothing is uploaded.

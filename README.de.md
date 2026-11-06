@@ -1,4 +1,6 @@
-﻿# Pagebound
+# Pagebound
+
+**Deutsch** · [English](README.md)
 
 > **Schlanker, datenschutzfreundlicher Adobe-Acrobat-Reader-Ersatz als Open-Source-PWA.**
 > Blazor WebAssembly · .NET 10 · Apache License 2.0
@@ -66,7 +68,7 @@ npm run build
 dotnet run
 ```
 
-Erfordert .NET 10 SDK und Node 20+.
+Erfordert .NET 10 SDK und Node 22+.
 
 ## Status
 

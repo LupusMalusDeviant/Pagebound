@@ -1,0 +1,48 @@
+name: Bug report
+description: Something is broken or behaves unexpectedly
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! Please search existing issues first.
+        **Never attach confidential PDFs.** Pagebound never uploads your files — please don't put them in an issue either. A minimal sample PDF that reproduces the problem is ideal.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, what happened instead?
+      placeholder: Steps to reproduce, expected vs. actual behavior.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Pagebound version
+      placeholder: e.g. v0.15.0-beta (shown in the header of the app)
+    validations:
+      required: true
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where do you use Pagebound?
+      options:
+        - Hosted app (pagebound.app.lupusmalus.dev)
+        - Installed as app (PWA)
+        - Self-hosted (Docker)
+        - From source (dotnet run)
+        - MCP server (stdio)
+        - MCP server (hosted /mcp)
+    validations:
+      required: true
+  - type: input
+    id: browser
+    attributes:
+      label: Browser and OS
+      placeholder: e.g. Chrome 131 on Windows 11, Safari on iOS 18
+  - type: textarea
+    id: console
+    attributes:
+      label: Browser console output
+      description: Open the developer tools (F12) → Console, and paste errors here.
+      render: text
