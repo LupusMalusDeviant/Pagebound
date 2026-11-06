@@ -59,18 +59,24 @@ RUN dotnet publish Pagebound.Web.csproj \
 # google/ngx_brotli). Damit liefert nginx die .br-Dateien aus dem Publish direkt
 # aus (brotli_static, siehe nginx.conf) — Bean PDF-Tool-br01.
 # Fakten aus aports 3.22-stable: das Modul lädt sich selbst über
-# /etc/nginx/modules/10_http_brotli.conf; Sites kommen aus /etc/nginx/http.d/*.conf
-# (leer ausgeliefert); /run/nginx (PID-Datei) legt das Paket NICHT an.
+# /etc/nginx/modules/10_http_brotli.conf; Sites kommen aus /etc/nginx/http.d/*.conf;
+# nginx.post-install legt dort default.conf (404-default_server) und /run/nginx an.
 # Geprüft wird das Image im CI-Job „Docker image smoke" (ci.yml).
 FROM alpine:3.22 AS runtime
 
+# post-install legt /etc/nginx/http.d/default.conf an: ein default_server auf :80,
+# der ALLES mit 404 beantwortet und unseren Block aussticht (so im CI-Smoke
+# passiert). Entfernen; unser Block ist selbst default_server.
 RUN apk add --no-cache nginx nginx-mod-http-brotli \
+    && rm -f /etc/nginx/http.d/default.conf \
     && mkdir -p /run/nginx \
     && ln -sf /dev/stdout /var/log/nginx/access.log \
     && ln -sf /dev/stderr /var/log/nginx/error.log
 
 # Our nginx config for SPA + WASM + PWA (server block inside http {})
 COPY infra/docker/nginx.conf /etc/nginx/http.d/pagebound.conf
+# Konfiguration schon beim Bauen prüfen (Syntax, doppelte default_server, Module).
+RUN nginx -t
 
 # Copy the published static site (inkl. der .br/.gz-Geschwister jeder Datei)
 COPY --from=dotnetbuild /publish/wwwroot/ /usr/share/nginx/html/

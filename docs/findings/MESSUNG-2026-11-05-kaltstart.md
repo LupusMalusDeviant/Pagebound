@@ -87,7 +87,9 @@ Ausreißer: `icudt_EFIGS.dat` kam unkomprimiert (0,55 MB) — als `.br` 0,14 MB.
 - `Dockerfile`: Laufzeit-Stufe auf `alpine:3.22` + `nginx nginx-mod-http-brotli`
   (das offizielle `nginx:alpine` hat kein Brotli-Modul). Alpine-Fakten aus
   aports 3.22-stable: Modul lädt sich über `/etc/nginx/modules/10_http_brotli.conf`,
-  Sites aus `/etc/nginx/http.d/`, `/run/nginx` legt das Paket nicht an.
+  Sites aus `/etc/nginx/http.d/`. **Nachtrag:** `nginx.post-install` legt dort
+  `default.conf` an (404-`default_server`) — beim ersten Lesen übersehen, vom
+  CI-Smoke gefunden; das Dockerfile entfernt sie jetzt.
 - `infra/docker/smoke.sh` + CI-Job „Docker image smoke": baut das Image und
   prüft Kompression (mit und ohne `Via`), Typen, CSP, Landingpages, SPA-Fallback.
 

@@ -22,6 +22,7 @@ Offline-Start.
 - nginx hat hinter Caddy **nie** komprimiert (`gzip_proxied off` + `Via`-Header); Caddy musste jede Antwort selbst packen, `icudt_EFIGS.dat` kam sogar unkomprimiert. Jetzt `gzip_proxied any`
 - woff/woff2 nicht mehr on-the-fly ge-gzipt (wurden dadurch größer)
 - Werkzeugleiste über einer Markierung im oberen Seitenbereich saß bei deutsch eingestelltem Browser falsch (CSS-Wert mit Dezimalkomma)
+- **Docker-Image**: Alpines nginx-Paket legt per post-install einen eigenen `default_server` an, der alles mit 404 beantwortet — im ersten Alpine-Image lieferte nginx deshalb gar nichts aus (vom neuen CI-Smoke gefunden, bevor es deployt wurde). Datei wird entfernt, unser Block ist `default_server`, `nginx -t` läuft beim Build
 - **Offline-Start**: Die App zeigte offline rohe Lokalisierungsschlüssel statt Text und lud keine Schriften — der Service Worker cachte weder `resources/*.json` (der vorgesehene Offline-Rückfall wurde nie befüllt) noch `.woff2`. Jetzt beides; Sprachdateien bleiben online „Netz zuerst"
 
 ## [0.14.0-beta] — 2026-11-05
