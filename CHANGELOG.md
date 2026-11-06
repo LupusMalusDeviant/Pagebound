@@ -4,6 +4,17 @@ Alle nennenswerten Änderungen an Pagebound werden in dieser Datei dokumentiert.
 Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/de/1.1.0/),
 die Versionierung folgt [Semantic Versioning](https://semver.org/lang/de/).
 
+## [Unreleased]
+
+### Behoben
+- **Das ausgelieferte Abbild war unvollständig — auch live.** `boot.js` (Boot-Bildschirm mit Drop-Zone) und `js/lazy-bridges.js` (Nachladen der großen Bridges) sind handgeschrieben und haben keine `.ts`-Quelle; `.dockerignore` schloss `wwwroot/js/*.js` aber pauschal aus, mit der Begründung, alle `.js` dort seien Build-Ergebnisse. Beide Dateien fehlten deshalb im Image. Weil nginx jede unbekannte Route per SPA-Fallback beantwortet, kam für beide `<script>`-Tags `index.html` als `text/html` mit **HTTP 200** zurück — kein 404, also auch keine Fehlermeldung. Die ausgelieferte App startete ohne Boot-Bildschirm und ohne Lazy-Loader. Nachgewiesen an der Live-Seite (`/js/boot.js` → `text/html`, 9083 B) und am lokal gebauten Image
+- **Service Worker: umgeleitete Antworten landeten im Cache.** `cache.add()` legt die Antwort ab, wie sie kommt — auch nach einem Redirect. Eine umgeleitete Antwort darf laut Spezifikation keine Navigation beantworten, und weil `onFetch` jede Navigation genau aus diesem Cache-Eintrag (`index.html`) bedient, wäre die App für **wiederkehrende** Besucher dauerhaft tot, sobald der Server `/index.html` umleitet. Der Body wird jetzt vor dem Cachen in eine frische `Response` kopiert; die Integritätsprüfung bleibt erhalten
+
+### Geändert
+- **CI-E2E läuft gegen das echte Auslieferungs-Image** statt gegen `npx serve`. `serve` leitet `/index.html` per 301 auf `/index` um („cleanUrls") — zusammen mit dem gecachten Redirect oben scheiterten die Browser-Tests mit `net::ERR_FAILED`, der Job war auf `main` dauerhaft rot, ohne dass im Produktpfad etwas kaputt war. Umgekehrt hat der Wegwerf-Server den echten Fehler oben verdeckt: im Runner-Publish lagen `boot.js` und `lazy-bridges.js`, im Image nicht. Der Job baut jetzt das Image, prüft es mit `infra/docker/smoke.sh` und testet dann im Browser
+- **`infra/docker/smoke.sh` prüft jedes `<script src>` aus `index.html`** darauf, dass es als JavaScript ausgeliefert wird (14 Dateien). Das fängt die ganze Fehlerklasse: der SPA-Fallback macht eine fehlende Datei als HTTP 200 unsichtbar, und Kompressions-, CSP- und Routen-Prüfungen konnten sie strukturell nicht sehen
+- **E2E-Suite skippt in der CI nicht mehr still weg**: mit `PAGEBOUND_REQUIRE_SERVER=1` wird ein nicht erreichbarer Server oder Browser zum harten Fehler statt zu 14 übersprungenen Tests bei grünem Job. Lokal bleibt das Skip-Verhalten
+
 ## [0.15.0-beta] — 2026-11-07
 
 Ladezeit-Release: Vom ersten Aufruf bis zur bedienbaren App braucht Pagebound

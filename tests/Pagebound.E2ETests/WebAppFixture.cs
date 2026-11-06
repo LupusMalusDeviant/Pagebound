@@ -28,7 +28,29 @@ public sealed class WebAppFixture : IAsyncLifetime
 
     private IPlaywright? _playwright;
 
+    /// <summary>
+    /// <c>PAGEBOUND_REQUIRE_SERVER=1</c>: Die Suite darf sich NICHT wegskippen.
+    /// Ohne das wäre der CI-Job grün, obwohl kein einziger Test gelaufen ist —
+    /// genau das verbietet die Leitplanke „E2E-Smokes dürfen nicht still
+    /// weg-skippen" (CLAUDE.md). Lokal bleibt das Skip-Verhalten, damit
+    /// <c>dotnet test</c> ohne laufende App nicht rot wird.
+    /// </summary>
+    private static bool ServerRequired =>
+        Environment.GetEnvironmentVariable("PAGEBOUND_REQUIRE_SERVER") is "1" or "true";
+
     public async Task InitializeAsync()
+    {
+        await TryInitializeAsync();
+
+        if (!Available && ServerRequired)
+        {
+            throw new InvalidOperationException(
+                "PAGEBOUND_REQUIRE_SERVER ist gesetzt, die E2E-Suite kann aber nicht laufen: "
+                + SkipReason);
+        }
+    }
+
+    private async Task TryInitializeAsync()
     {
         BaseUrl = (Environment.GetEnvironmentVariable("PAGEBOUND_URL")
                    ?? "http://localhost:5099").TrimEnd('/');

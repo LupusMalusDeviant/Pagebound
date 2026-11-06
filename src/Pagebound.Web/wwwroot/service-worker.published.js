@@ -48,7 +48,7 @@ async function onInstall(event) {
     // die übrigen Assets (v.a. index.html + Framework) trotzdem → der neue Build
     // kommt sauber an. Nicht gecachte Einzel-Assets holt onFetch online nach.
     const cache = await caches.open(cacheName);
-    const results = await Promise.allSettled(assetsRequests.map(req => cache.add(req)));
+    const results = await Promise.allSettled(assetsRequests.map(req => addSanitized(cache, req)));
     const failed = results.filter(r => r.status === 'rejected').length;
     if (failed > 0) {
         console.warn(`Service worker: ${failed} Asset(s) nicht gecacht (werden online nachgeladen)`);
@@ -61,6 +61,38 @@ async function onInstall(event) {
     // an den Client geht. Akzeptabler Trade-off im Pre-Alpha: leichtes Risiko
     // schemainkompatibler Live-Updates gegen drastisch bessere UX bei Releases.
     self.skipWaiting();
+}
+
+// Pendant zu cache.add(), aber ohne umgeleitete Antworten in den Cache zu lassen.
+//
+// Eine Response mit response.redirected darf eine NAVIGATION nicht beantworten:
+// respondWith() liefert dafür einen Netzwerkfehler (Spec: hat die URL-Liste der
+// Antwort mehr als einen Eintrag, ist das Ergebnis ein network error). onFetch
+// beantwortet JEDE Navigation aus genau diesem Cache (index.html bzw. die
+// index.html einer statischen Unterseite) — leitet der Server /index.html also
+// um, ist die App für WIEDERKEHRENDE Besucher tot, und zwar dauerhaft, weil der
+// kaputte Eintrag im Cache liegt. Beobachtet in der CI: `serve` schickt
+// /index.html per 301 auf /index, danach scheiterten 12 von 14 E2E-Tests mit
+// net::ERR_FAILED. Produktions-nginx leitet nicht um — eine Konfigurationszeile
+// davon entfernt aber schon.
+//
+// Deshalb den Body in eine frische Response kopieren, bevor er in den Cache
+// geht. Die Integritätsprüfung bleibt erhalten: sie steckt in der Request
+// (asset.hash), und fetch() wertet sie genauso aus wie cache.add().
+async function addSanitized(cache, request) {
+    const response = await fetch(request);
+    // cache.add() rejectet bei nicht-2xx; dieses Verhalten beibehalten, damit
+    // onInstall weiter zählen kann, was nicht gecacht wurde.
+    if (!response.ok) throw new TypeError(`Asset ${request.url}: HTTP ${response.status}`);
+    await cache.put(request, response.redirected ? await withoutRedirect(response) : response);
+}
+
+async function withoutRedirect(response) {
+    return new Response(await response.blob(), {
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers,
+    });
 }
 
 async function onActivate(event) {

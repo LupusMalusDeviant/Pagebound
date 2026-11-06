@@ -16,14 +16,27 @@
 **/npm-debug.log
 **/.npm/
 
-# Tailwind + esbuild Outputs (werden im jsbuild-Stage neu erzeugt). Alle .js unter
-# wwwroot/js stammen aus .ts-Quellen → komplett ignorieren, damit das Image
-# reproduzierbar nur aus den Quellen entsteht (nie aus lokalen Build-Resten).
+# Tailwind + esbuild Outputs (werden im jsbuild-Stage neu erzeugt) → ignorieren,
+# damit das Image reproduzierbar nur aus den Quellen entsteht, nie aus lokalen
+# Build-Resten.
+#
+# ACHTUNG: NICHT jede .js unter wwwroot/js ist ein Build-Ergebnis. boot.js und
+# lazy-bridges.js sind HANDGESCHRIEBEN (es gibt keine .ts dazu) und in git
+# verfolgt — .gitignore listet deshalb nur die generierten Bridges einzeln auf.
+# Der pauschale Ausschluss hier hat beide aus dem Build-Kontext geworfen: im
+# Image fehlten sie, nginx beantwortete die beiden <script>-Tags per
+# SPA-Fallback mit index.html als text/html. Die ausgelieferte App startete so
+# ohne Boot-Bildschirm und ohne Lazy-Loader — auch live.
+# Jede weitere handgeschriebene Datei hier wieder aufnehmen. Vergessen fällt
+# jetzt auf: smoke.sh prüft, dass jedes <script src> aus index.html als
+# JavaScript ausgeliefert wird.
 src/Pagebound.Web/wwwroot/css/app.css
 src/Pagebound.Web/wwwroot/css/app.css.map
 src/Pagebound.Web/wwwroot/js/*.js
 src/Pagebound.Web/wwwroot/js/*.js.map
 src/Pagebound.Web/wwwroot/js/pdf.worker.min.mjs
+!src/Pagebound.Web/wwwroot/js/boot.js
+!src/Pagebound.Web/wwwroot/js/lazy-bridges.js
 
 # Tests, Doku, Git
 tests/

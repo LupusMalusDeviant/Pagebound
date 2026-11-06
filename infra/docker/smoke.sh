@@ -65,4 +65,32 @@ ok "SPA-Fallback /reader"
 landing=$("${CURL[@]}" "$BASE/pdf-schwaerzen/")
 grep -q '<h1>PDF schwärzen</h1>' <<<"$landing" || fail "Landingpage /pdf-schwaerzen/ fehlt"
 ok "Landingpage /pdf-schwaerzen/"
+
+# ---------------------------------------------------------------------------
+# Jedes <script src> aus index.html muss auch JavaScript sein.
+#
+# Warum als eigene Prüfung: der SPA-Fallback (try_files … /index.html) macht
+# eine FEHLENDE Datei unsichtbar — sie kommt als HTTP 200 mit index.html und
+# text/html zurück, nicht als 404. Genau so sind boot.js und lazy-bridges.js
+# aus dem Image gefallen (pauschaler .dockerignore-Ausschluss), und weder die
+# Kompressions- noch die CSP- noch die Routen-Prüfung oben hat das gesehen:
+# die App lief live ohne Boot-Bildschirm und ohne Lazy-Loader weiter.
+# Diese Prüfung fängt die ganze Klasse — jede im Image fehlende Script-Datei.
+# ---------------------------------------------------------------------------
+index=$("${CURL[@]}" "$BASE/") || fail "index.html nicht abrufbar"
+scripts=$( (grep -oE '<script[^>]+src="[^"]+"' <<<"$index" || true) | grep -oE 'src="[^"]+"' | cut -d'"' -f2 )
+[ -n "$scripts" ] || fail "keine <script src> in index.html gefunden — Parser oder Seite kaputt"
+count=0
+for s in $scripts; do
+  case "$s" in http*|//*) fail "externes Script in index.html: $s (Datenschutzzusage: alles self-hosted)" ;; esac
+  out=$(probe "/${s#/}" - -)
+  IFS='|' read -r status bytes _enc type <<<"$out"
+  [ "$status" = 200 ] || fail "/${s#/} (aus index.html): HTTP $status"
+  case "$type" in
+    *javascript*) ;;
+    *) fail "/${s#/} (aus index.html): Content-Type '$type' statt JavaScript — Datei fehlt im Image, der SPA-Fallback liefert index.html" ;;
+  esac
+  count=$((count + 1))
+done
+ok "$count <script src> aus index.html werden als JavaScript ausgeliefert"
 echo "SMOKE OK"
