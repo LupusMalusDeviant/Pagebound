@@ -3,7 +3,17 @@ namespace Pagebound.Core.Domain;
 /// <summary>
 /// Opaque Handle für ein geladenes PDF. Renderer-spezifisch.
 /// </summary>
-public sealed record PdfDocumentHandle(string Id, int PageCount, string? Title = null);
+/// <param name="Language">
+/// Sprache des Dokuments als BCP-47-Kennung ("de", "en-GB") — <c>/Lang</c> aus
+/// dem PDF-Katalog. <c>null</c>, wenn das Dokument sie nicht angibt, was der
+/// häufigere Fall ist. Das Vorlesen braucht die Sprache des TEXTES, nicht die
+/// der Oberfläche (Nachtrag 4.4 in docs/contracts/datei-eintritt.md).
+/// </param>
+public sealed record PdfDocumentHandle(
+    string Id,
+    int PageCount,
+    string? Title = null,
+    string? Language = null);
 
 public sealed record LoadOptions(string? Password = null);
 

@@ -24,6 +24,15 @@ public sealed class ShareTargetTests
 {
     private readonly WebAppFixture _fx;
 
+    /// <summary>
+    /// Die Form einer erfolgreichen Freigabe-Umleitung: <c>?share=&lt;kennung&gt;</c>
+    /// mit einer UUID oder 32 Hexzeichen (Nachtrag 4.1). Bewusst streng — eine
+    /// Fehlerkennung (failed/rejected/toobig) darf hier nicht durchfallen, und
+    /// eine laufende Nummer ist keine Kennung mehr.
+    /// </summary>
+    private const string ShareKennung =
+        @"^\?share=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{32})$";
+
     public ShareTargetTests(WebAppFixture fx) => _fx = fx;
 
     /// <summary>
@@ -105,10 +114,11 @@ public sealed class ShareTargetTests
 
         var ziel = navigationen.FirstOrDefault(u => new Uri(u).AbsolutePath == "/reader");
         ziel.ShouldNotBeNull("keine Navigation auf /reader beobachtet");
-        // Erfolg heißt: ?share=<n> mit der Nummer des geparkten Eintrags
-        // (Nachtrag 3.1). Eine Fehlerkennung (failed/rejected/toobig) ist kein
-        // Erfolg, und eine leere Query hieße, dass die Nummer fehlt.
-        new Uri(ziel).Query.ShouldMatch(@"^\?share=\d+$",
+        // Erfolg heißt: ?share=<kennung> mit der Kennung des geparkten Eintrags
+        // (Nachtrag 3.1, Form aus 4.1 — UUID oder 32 Hexzeichen). Eine
+        // Fehlerkennung (failed/rejected/toobig) ist kein Erfolg, und eine leere
+        // Query hieße, dass die Kennung fehlt.
+        new Uri(ziel).Query.ShouldMatch(ShareKennung,
             $"der Service Worker hat die Freigabe nicht übernommen: umgeleitet auf {ziel}");
 
         // Der Reader öffnet die Datei: die Seitenzahl des Dokuments erscheint.
@@ -159,10 +169,11 @@ public sealed class ShareTargetTests
 
         var ziel = navigationen.FirstOrDefault(u => new Uri(u).AbsolutePath == "/reader");
         ziel.ShouldNotBeNull("keine Navigation auf /reader beobachtet");
-        // Erfolg heißt: ?share=<n> mit der Nummer des geparkten Eintrags
-        // (Nachtrag 3.1). Eine Fehlerkennung (failed/rejected/toobig) ist kein
-        // Erfolg, und eine leere Query hieße, dass die Nummer fehlt.
-        new Uri(ziel).Query.ShouldMatch(@"^\?share=\d+$",
+        // Erfolg heißt: ?share=<kennung> mit der Kennung des geparkten Eintrags
+        // (Nachtrag 3.1, Form aus 4.1). Eine Fehlerkennung
+        // (failed/rejected/toobig) ist kein Erfolg, und eine leere Query hieße,
+        // dass die Kennung fehlt.
+        new Uri(ziel).Query.ShouldMatch(ShareKennung,
             $"der Service Worker hat die Freigabe nicht übernommen: umgeleitet auf {ziel}");
 
         await page.WaitForFunctionAsync(

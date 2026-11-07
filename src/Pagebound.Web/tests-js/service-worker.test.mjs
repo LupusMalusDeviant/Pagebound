@@ -53,12 +53,28 @@ function makeCaches() {
   return api;
 }
 
-function loadWorker({ version = "v1", fetchImpl, assets = [{ url: "index.html", hash: "sha256-x" }] } = {}) {
+function loadWorker({
+  version = "v1",
+  fetchImpl,
+  assets = [{ url: "index.html", hash: "sha256-x" }],
+  // Für den Rückfall in neueKennung(): eine Engine ohne crypto.randomUUID.
+  // getRandomValues bleibt, das ist viel älter.
+  ohneRandomUUID = false,
+} = {}) {
   const calls = [];
+  // Das ECHTE crypto, nicht ein gezähltes: eine Kennungsvergabe, die der
+  // Prüfstand vorhersagen kann, prüft die Vergabe nicht mehr. Die Tests lesen
+  // die Kennung aus der Umleitung — genau wie boot.js es tut.
+  const echtesCrypto = {
+    getRandomValues: (a) => globalThis.crypto.getRandomValues(a),
+    randomUUID: () => globalThis.crypto.randomUUID(),
+  };
+  if (ohneRandomUUID) delete echtesCrypto.randomUUID;
   const ctx = {
     console: { info() {}, warn() {}, error() {} },
     URL, Response, Request, Headers, FormData, Blob, File,
-    TypeError, Promise, Number, Math, RegExp,
+    TypeError, Promise, Number, Math, RegExp, Date, String, Array, Uint8Array, isFinite,
+    crypto: echtesCrypto,
     fetch: async (req) => {
       calls.push(String(req?.url ?? req));
       return fetchImpl ? fetchImpl(req) : new Response("netz", { status: 200 });
@@ -100,16 +116,25 @@ const shareStore = (ctx) => ctx.caches._stores.get("pb-share");
  * echten Body-Streams — nur so verschränken sich zwei gleichzeitige Abläufe im
  * Prüfstand so wie im Browser (siehe den Wettlauf-Test unten).
  *
- * `headers` wird nachgebaut, weil der Worker Content-Length liest. Ohne Angabe
- * fehlt der Header, wie bei einer Freigabe mit unbekannter Länge.
+ * `headers.get` liefert immer null. So ist es gemessen: ein Service Worker
+ * bekommt bei einer Formular-Navigation auf /share-target acht Header, und
+ * Content-Length ist keiner davon (Nachtrag 4.3).
  */
-function fakeShareRequest(form, { contentLength = null } = {}) {
+function fakeShareRequest(form) {
   return {
     method: "POST",
     url: `${ORIGIN}/share-target`,
-    headers: { get: (name) => (name.toLowerCase() === "content-length" ? contentLength : null) },
+    headers: { get: () => null },
     formData: async () => form,
   };
+}
+
+/** Form einer Freigabe-Kennung (Nachtrag 4.1): UUID oder 32 Hexzeichen. */
+const KENNUNG = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{32})$/;
+
+/** Die Kennung aus der Umleitung — der Weg, den boot.js auch geht. */
+function kennungAus(res) {
+  return new URL(res.headers.get("location")).searchParams.get("share");
 }
 
 test("Freigabe: die Datei wird geparkt und auf /reader umgeleitet", async () => {
@@ -117,23 +142,50 @@ test("Freigabe: die Datei wird geparkt und auf /reader umgeleitet", async () => 
   const res = await ctx.onFetch({ request: shareRequest() });
 
   assert.equal(res.status, 303, "keine 303-Umleitung");
-  assert.equal(res.headers.get("location"), `${ORIGIN}/reader?share=1`);
+  const kennung = kennungAus(res);
+  assert.match(kennung, KENNUNG, `keine Kennung in der Umleitung: ${kennung}`);
   // Der Kern: die Freigabe darf NICHT ins Netz gehen. Es gibt keinen Server,
   // der sie annehmen könnte — der GET-Ausstieg in onFetch würde genau das tun.
   assert.deepEqual(fetchCalls, [], "die Freigabe ging ins Netz");
 
   const store = shareStore(ctx);
-  assert.deepEqual([...store.keys()], ["/__pb-share/1"], "falscher Schlüssel im Parkplatz");
-  const parked = store.get("/__pb-share/1");
+  assert.deepEqual([...store.keys()], [`/__pb-share/${kennung}`], "falscher Schlüssel im Parkplatz");
+  const parked = store.get(`/__pb-share/${kennung}`);
   assert.equal(parked.headers.get("X-Pagebound-Filename"), "geteilt.pdf");
   assert.match(await parked.text(), /^%PDF-/);
+});
+
+test("Freigabe: der Ablagezeitpunkt steht im Eintrag", async () => {
+  // Ohne diesen Zeitstempel kann ein Start nicht unterscheiden, ob ein fremder
+  // Eintrag eine Waise ist oder eine Freigabe, auf die gerade ein anderes
+  // Fenster wartet — und löscht im Zweifel beides (Nachtrag 4.2).
+  const vorher = Date.now();
+  const { ctx } = loadWorker();
+  const res = await ctx.onFetch({ request: shareRequest() });
+  const eintrag = shareStore(ctx).get(`/__pb-share/${kennungAus(res)}`);
+  const roh = eintrag.headers.get("X-Pagebound-Shared-At");
+  assert.ok(roh, "kein Zeitstempel im Eintrag");
+  const ms = Number(roh);
+  assert.ok(Number.isFinite(ms), `Zeitstempel nicht lesbar: ${roh}`);
+  assert.ok(ms >= vorher && ms <= Date.now(), `Zeitstempel liegt daneben: ${ms}`);
+});
+
+test("ohne crypto.randomUUID greift der Rückfall auf 32 Hexzeichen", async () => {
+  // Der Rückfall ist im Vertrag benannt (Nachtrag 4.1), also muss boot.js auch
+  // SEINE Form als Kennung erkennen. Ohne diesen Test wäre das eine Zeile, die
+  // nie läuft, bis sie in einer alten Engine das erste Mal läuft.
+  const { ctx } = loadWorker({ ohneRandomUUID: true });
+  const res = await ctx.onFetch({ request: shareRequest() });
+  const kennung = kennungAus(res);
+  assert.match(kennung, /^[0-9a-f]{32}$/, `Rückfall liefert keine 32 Hexzeichen: ${kennung}`);
+  assert.deepEqual([...shareStore(ctx).keys()], [`/__pb-share/${kennung}`]);
 });
 
 test("Freigabe: Dateiname mit Sonderzeichen übersteht den Header", async () => {
   // Ein Header darf keine Umlaute tragen; unkodiert wirft das oder liefert Müll.
   const { ctx } = loadWorker();
-  await ctx.onFetch({ request: shareRequest({ name: "Prüfung, Entwürfe.pdf" }) });
-  const raw = shareStore(ctx).get("/__pb-share/1").headers.get("X-Pagebound-Filename");
+  const res = await ctx.onFetch({ request: shareRequest({ name: "Prüfung, Entwürfe.pdf" }) });
+  const raw = shareStore(ctx).get(`/__pb-share/${kennungAus(res)}`).headers.get("X-Pagebound-Filename");
   assert.equal(decodeURIComponent(raw), "Prüfung, Entwürfe.pdf");
 });
 
@@ -141,12 +193,14 @@ test("zwei Freigaben nacheinander bekommen eigene Schlüssel", async () => {
   // Mit einem festen Schlüssel überschrieb die zweite die erste, und die erste
   // war ohne eine Spur verloren.
   const { ctx } = loadWorker();
-  await ctx.onFetch({ request: shareRequest({ name: "eins.pdf" }) });
-  await ctx.onFetch({ request: shareRequest({ name: "zwei.pdf" }) });
+  const a = await ctx.onFetch({ request: shareRequest({ name: "eins.pdf" }) });
+  const b = await ctx.onFetch({ request: shareRequest({ name: "zwei.pdf" }) });
+  const ka = kennungAus(a), kb = kennungAus(b);
+  assert.notEqual(ka, kb, "beide Freigaben bekamen dieselbe Kennung");
   const store = shareStore(ctx);
-  assert.deepEqual([...store.keys()].sort(), ["/__pb-share/1", "/__pb-share/2"]);
+  assert.deepEqual([...store.keys()].sort(), [`/__pb-share/${ka}`, `/__pb-share/${kb}`].sort());
   assert.equal(
-    decodeURIComponent(store.get("/__pb-share/1").headers.get("X-Pagebound-Filename")),
+    decodeURIComponent(store.get(`/__pb-share/${ka}`).headers.get("X-Pagebound-Filename")),
     "eins.pdf",
     "die erste Freigabe wurde überschrieben",
   );
@@ -155,31 +209,41 @@ test("zwei Freigaben nacheinander bekommen eigene Schlüssel", async () => {
 test("zwei Freigaben GLEICHZEITIG bekommen eigene Schlüssel", async () => {
   // Der Test oben sieht den Wettlauf nicht: mit `await` dazwischen ist die
   // erste längst fertig. Ein Service Worker bekommt die beiden Fetch-Events
-  // aber ohne Pause, und an jedem `await` (cache.keys, cache.put) wechseln sie
-  // sich ab. Ohne die Sperre lesen beide dieselbe höchste Nummer, schreiben
-  // denselben Schlüssel — und eine der beiden Dateien ist weg, ohne ein Wort.
+  // aber ohne Pause, und an jedem `await` wechseln sie sich ab.
+  //
+  // Bis Nachtrag 4.1 war das ein echter Wettlauf: die Nummer kam aus
+  // `max(vorhandene) + 1`, beide lasen dieselbe höchste Nummer, beide schrieben
+  // denselben Schlüssel, eine Datei war weg. Eine Sperre hielt sie deshalb
+  // hintereinander. Mit einer gezogenen Kennung gibt es nichts zu lesen und
+  // nichts zu sperren — die Eigenschaft gilt von selbst. Der Test bleibt
+  // trotzdem: er prüft die EIGENSCHAFT (zwei gleichzeitige Freigaben überleben
+  // beide), nicht ihre frühere Umsetzung.
   //
   // Zwei echte `Request`-Objekte reichen dafür NICHT: `request.formData()`
   // liest einen Body-Stream und wird erst in einem späteren Makrotask fertig.
   // Gemessen (Reihenfolge der Schritte beider Abläufe):
   //     A:start B:start A:form A:open A:keys A:put B:form B:open B:keys B:put
   // A ist komplett durch, bevor B überhaupt sein Formular hat — keine
-  // Verschränkung, also auch kein Wettlauf, den eine Sperre verhindern müsste.
-  // Ein Test mit echten Requests bleibt deshalb grün, auch wenn man die Sperre
-  // entfernt. Mit vorab gelesenem Formular (formData löst als Mikrotask auf)
-  // verschränken sich die Abläufe wie im Browser:
-  //     A:start B:start A:form B:form A:open B:open A:keys B:keys A:put B:put
+  // Verschränkung. Mit vorab gelesenem Formular (formData löst als Mikrotask
+  // auf) verschränken sich die Abläufe wie im Browser:
+  //     A:start B:start A:form B:form A:open B:open A:put B:put
   const { ctx } = loadWorker();
   const formulare = await Promise.all(
     ["eins.pdf", "zwei.pdf"].map((name) => shareRequest({ name }).formData()),
   );
   const anfragen = formulare.map((form) => fakeShareRequest(form));
 
-  await Promise.all(anfragen.map((request) => ctx.onFetch({ request })));
+  const antworten = await Promise.all(anfragen.map((request) => ctx.onFetch({ request })));
+  const kennungen = antworten.map(kennungAus);
+  assert.notEqual(kennungen[0], kennungen[1], "beide Freigaben bekamen dieselbe Kennung");
 
   const store = shareStore(ctx);
   assert.equal(store.size, 2, "eine der beiden gleichzeitigen Freigaben wurde überschrieben");
-  assert.deepEqual([...store.keys()].sort(), ["/__pb-share/1", "/__pb-share/2"]);
+  assert.deepEqual(
+    [...store.keys()].sort(),
+    kennungen.map((k) => `/__pb-share/${k}`).sort(),
+    "die Umleitungen nennen andere Schlüssel als der Parkplatz hat",
+  );
   const namen = [...store.values()]
     .map((r) => decodeURIComponent(r.headers.get("X-Pagebound-Filename")))
     .sort();
@@ -227,14 +291,14 @@ test("BEKANNTE LÜCKE: ohne Verweis gilt eine fremde Freigabe als Freigabe des G
       formData: async () => form,
     },
   });
-  assert.equal(res.headers.get("location"), `${ORIGIN}/reader?share=1`);
+  assert.match(kennungAus(res), KENNUNG, "heutiges Verhalten: die Freigabe wird angenommen");
   assert.ok(shareStore(ctx), "heutiges Verhalten: die Datei wird geparkt");
 });
 
 test("eine Freigabe von eigener Herkunft wird angenommen", async () => {
   const { ctx } = loadWorker();
-  await ctx.onFetch({ request: shareRequest({ von: `${ORIGIN}/reader` }) });
-  assert.deepEqual([...shareStore(ctx).keys()], ["/__pb-share/1"]);
+  const res = await ctx.onFetch({ request: shareRequest({ von: `${ORIGIN}/reader` }) });
+  assert.deepEqual([...shareStore(ctx).keys()], [`/__pb-share/${kennungAus(res)}`]);
 });
 
 test("die Android-App (TWA) teilt mit einem android-app://-Verweis und wird angenommen", async () => {
@@ -248,11 +312,12 @@ test("die Android-App (TWA) teilt mit einem android-app://-Verweis und wird ange
   const res = await ctx.onFetch({
     request: shareRequest({ name: "von-android.pdf", von: "android-app://de.pagebound.app/" }),
   });
-  assert.equal(res.headers.get("location"), `${ORIGIN}/reader?share=1`, "die Freigabe der eigenen App wurde abgewiesen");
+  const kennung = kennungAus(res);
+  assert.match(kennung, KENNUNG, "die Freigabe der eigenen App wurde abgewiesen");
   const store = shareStore(ctx);
   assert.ok(store, "nichts geparkt — die App bekäme einen leeren Reader");
   assert.equal(
-    decodeURIComponent(store.get("/__pb-share/1").headers.get("X-Pagebound-Filename")),
+    decodeURIComponent(store.get(`/__pb-share/${kennung}`).headers.get("X-Pagebound-Filename")),
     "von-android.pdf",
   );
 });
@@ -288,8 +353,9 @@ test("eine Freigabe knapp unter der Grenze wird abgelegt", async () => {
     configurable: true,
   });
   const res = await ctx.onFetch({ request: fakeShareRequest(form) });
-  assert.equal(res.headers.get("location"), `${ORIGIN}/reader?share=1`);
-  assert.deepEqual([...shareStore(ctx).keys()], ["/__pb-share/1"]);
+  const kennung = kennungAus(res);
+  assert.match(kennung, KENNUNG);
+  assert.deepEqual([...shareStore(ctx).keys()], [`/__pb-share/${kennung}`]);
 });
 
 test("ein fremdes Schema gilt nicht als Gerät", async () => {
@@ -329,87 +395,86 @@ test("ein unlesbarer Verweis gilt nicht als Gerät", async () => {
   assert.equal(res.headers.get("location"), `${ORIGIN}/reader?share=rejected`);
 });
 
-test("die Umleitung nennt die Nummer DIESER Freigabe", async () => {
-  // Nachtrag 3.1: ohne die Nummer holte boot.js „alles, was herumliegt" ab und
-  // öffnete die älteste Freigabe. Die zweite Freigabe muss ihre eigene Nummer
-  // bekommen, nicht wieder die 1.
+test("die Umleitung nennt die Kennung DIESER Freigabe", async () => {
+  // Nachtrag 3.1: ohne die Kennung holte boot.js „alles, was herumliegt" ab und
+  // öffnete die älteste Freigabe. Jede Freigabe braucht ihre eigene Kennung,
+  // und die Umleitung muss auf GENAU deren Eintrag zeigen.
   const { ctx } = loadWorker();
   const erste = await ctx.onFetch({ request: shareRequest({ name: "eins.pdf" }) });
   const zweite = await ctx.onFetch({ request: shareRequest({ name: "zwei.pdf" }) });
-  assert.equal(erste.headers.get("location"), `${ORIGIN}/reader?share=1`);
-  assert.equal(zweite.headers.get("location"), `${ORIGIN}/reader?share=2`);
-  // Und die Nummer zeigt wirklich auf den Eintrag mit diesem Namen.
+  const k1 = kennungAus(erste), k2 = kennungAus(zweite);
+  assert.notEqual(k1, k2, "beide Umleitungen zeigen auf denselben Eintrag");
+  const store = shareStore(ctx);
   assert.equal(
-    decodeURIComponent(shareStore(ctx).get("/__pb-share/2").headers.get("X-Pagebound-Filename")),
+    decodeURIComponent(store.get(`/__pb-share/${k1}`).headers.get("X-Pagebound-Filename")),
+    "eins.pdf",
+  );
+  assert.equal(
+    decodeURIComponent(store.get(`/__pb-share/${k2}`).headers.get("X-Pagebound-Filename")),
     "zwei.pdf",
   );
 });
 
-test("gleichzeitige Freigaben bekommen je ihre eigene Nummer in der Umleitung", async () => {
-  // Die Nummer wird INNERHALB der Sperre vergeben und zurückgegeben. Würde sie
-  // außerhalb gelesen, hätte die zweite Freigabe die Zahl schon weitergedreht
-  // und beide Umleitungen zeigten auf denselben Eintrag.
+test("keine Kennung lässt sich aus einer anderen ableiten", async () => {
+  // Der Grund, warum die laufende Nummer weg ist (Nachtrag 4.1): bei einer
+  // Nummer konnte jeder die nächste und die vorige erraten — ein Link auf
+  // `/reader?share=999` löschte dann jeden Eintrag mit kleinerer Nummer, und
+  // eine stehengebliebene Adresse griff nach einer fremden Freigabe. Dieser
+  // Test würde rot, wenn jemand zur Berechenbarkeit zurückkehrt (Zähler,
+  // Zeitstempel als Kennung, Hash über den Dateinamen).
   const { ctx } = loadWorker();
-  const formulare = await Promise.all(
-    ["eins.pdf", "zwei.pdf"].map((name) => shareRequest({ name }).formData()),
-  );
-  const antworten = await Promise.all(
-    formulare.map((form) => ctx.onFetch({ request: fakeShareRequest(form) })),
-  );
-  const ziele = antworten.map((r) => r.headers.get("location")).sort();
-  assert.deepEqual(ziele, [`${ORIGIN}/reader?share=1`, `${ORIGIN}/reader?share=2`]);
+  const kennungen = [];
+  for (let i = 0; i < 5; i++) {
+    kennungen.push(kennungAus(await ctx.onFetch({ request: shareRequest({ name: `d${i}.pdf` }) })));
+  }
+  assert.equal(new Set(kennungen).size, 5, `Kennungen wiederholen sich: ${kennungen.join(", ")}`);
+  for (const k of kennungen) assert.match(k, KENNUNG, `keine Kennung: ${k}`);
+  // Keine zwei aufeinanderfolgenden unterscheiden sich in nur einem Zeichen —
+  // so sähe ein Zähler aus, auch ein als Hex geschriebener.
+  for (let i = 1; i < kennungen.length; i++) {
+    const a = kennungen[i - 1], b = kennungen[i];
+    let gleich = 0;
+    for (let j = 0; j < Math.min(a.length, b.length); j++) if (a[j] === b[j]) gleich++;
+    assert.ok(
+      a.length - gleich > 4,
+      `aufeinanderfolgende Kennungen sind fast gleich — gezählt statt gezogen? ${a} / ${b}`,
+    );
+  }
 });
 
-test("eine zu große Freigabe wird abgewiesen, OHNE den Body zu lesen", async () => {
-  // Die Prüfung an `file.size` kommt zu spät: `request.formData()` hat den
-  // ganzen Body dann schon gelesen. Eine 1-GB-Freigabe läuft so vollständig
-  // durch den Service Worker, nur damit sie danach abgelehnt wird.
-  // Content-Length steht VOR dem Lesen zur Verfügung.
-  const { ctx } = loadWorker();
-  let gelesen = false;
-  const res = await ctx.onFetch({
-    request: {
-      method: "POST",
-      url: `${ORIGIN}/share-target`,
-      headers: { get: (n) => (n.toLowerCase() === "content-length" ? String(1024 * 1024 * 1024) : null) },
-      formData: async () => { gelesen = true; return new FormData(); },
-    },
-  });
-  assert.equal(res.headers.get("location"), `${ORIGIN}/reader?share=toobig`);
-  assert.equal(gelesen, false, "der Body wurde gelesen, obwohl die Länge schon zu groß war");
-});
-
-test("Content-Length knapp über der Grenze bleibt erlaubt (multipart-Hülle)", async () => {
-  // Der Zuschlag ist nicht Kosmetik: ein multipart-Body ist größer als die
-  // Datei darin (Trennzeichen, Header je Teil). Ohne Zuschlag würde eine Datei
-  // genau an der Grenze abgewiesen, die boot.js annehmen würde.
-  const { ctx } = loadWorker();
-  const form = await shareRequest({ name: "grenznah.pdf" }).formData();
-  const res = await ctx.onFetch({
-    request: fakeShareRequest(form, { contentLength: String(100 * 1024 * 1024 + 2048) }),
-  });
-  assert.equal(res.headers.get("location"), `${ORIGIN}/reader?share=1`);
-  assert.deepEqual([...shareStore(ctx).keys()], ["/__pb-share/1"]);
-});
-
-test("genau an der Grenze wird eine Freigabe noch angenommen", () => {
+test("genau an der Grenze wird eine Freigabe noch angenommen", async () => {
   // Das Verhalten AN der Grenze, nicht knapp darunter: 100 MiB − 1 läuft mit `>`
   // und mit `>=` durch, der Test unterscheidet die beiden also nicht. Genau
   // 100 MiB tut es. Festgelegt ist: die Grenze selbst ist erlaubt (`>`), hier
   // wie in boot.js und in ReaderPane.MaxFileSize.
-  assert.match(
-    source,
-    /if \(file\.size > shareMaxBytes\)/,
-    "nicht mehr `>` — dann ist genau die Grenze plötzlich zu groß",
-  );
+  //
+  // Geprüft am VERHALTEN, nicht an einem Regex auf den Quelltext: ein Regex
+  // würde eine zweite Schranke an anderer Stelle oder einen umformulierten
+  // Vergleich nicht sehen. Die Datei wird nicht wirklich angelegt, nur ihre
+  // `size` überschrieben — genau der Wert, den der Worker liest.
+  const { ctx } = loadWorker();
+  const form = await shareRequest({ name: "genau.pdf" }).formData();
+  const datei = form.getAll("file")[0];
+  Object.defineProperty(datei, "size", { value: 100 * 1024 * 1024, configurable: true });
+  assert.equal(datei.size, 100 * 1024 * 1024, "size ließ sich nicht überschreiben — der Test prüft nichts");
+
+  const res = await ctx.onFetch({ request: fakeShareRequest(form) });
+  const kennung = kennungAus(res);
+  assert.match(kennung, KENNUNG, "genau die Grenze wurde abgewiesen");
+  assert.deepEqual([...shareStore(ctx).keys()], [`/__pb-share/${kennung}`]);
 });
 
-test("genau an der Grenze nimmt auch boot.js die Datei an", async () => {
-  // Zweite Schicht, dieselbe Zahl, dieselbe Richtung des Vergleichs. Läuft eine
-  // davon weg, lehnt eine Schicht ab, was die andere durchlässt — und der
-  // Fehler erscheint erst beim Nutzer.
-  const bootQuelle = readFileSync(join(resolve(here, ".."), "wwwroot", "js", "boot.js"), "utf8");
-  assert.match(bootQuelle, /if \(file\.size > MAX_BYTES\)/);
+test("ein Byte über der Grenze wird abgewiesen", async () => {
+  // Das Gegenstück: die Grenze muss überhaupt greifen.
+  const { ctx } = loadWorker();
+  const form = await shareRequest({ name: "einsdrueber.pdf" }).formData();
+  Object.defineProperty(form.getAll("file")[0], "size", {
+    value: 100 * 1024 * 1024 + 1,
+    configurable: true,
+  });
+  const res = await ctx.onFetch({ request: fakeShareRequest(form) });
+  assert.equal(res.headers.get("location"), `${ORIGIN}/reader?share=toobig`);
+  assert.equal(shareStore(ctx)?.size ?? 0, 0);
 });
 
 test("die Grenze steht in allen drei Schichten auf derselben Zahl", () => {

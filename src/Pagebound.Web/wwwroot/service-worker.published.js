@@ -33,6 +33,15 @@ const offlineAssetsExclude = [ /^service-worker\.js$/, /(^|\/)screenshots\// ];
 const shareCacheName = 'pb-share';
 const shareEntryPrefix = '/__pb-share/';
 const shareFilenameHeader = 'X-Pagebound-Filename';
+// Ablagezeitpunkt in Millisekunden. boot.js räumt einen FREMDEN Eintrag nur weg,
+// wenn er älter als fünf Minuten ist (Nachtrag 4.2) — vorher entschied der
+// Vergleich der Kennungen, und damit löschte ein Start ohne Kennung (oder ein
+// Link auf `?share=999`) die Freigabe eines anderen Fensters.
+//
+// Die Systemuhr ist hier erlaubt: die Reproduzierbarkeitszusage gilt für das
+// MCP-Paket und für erzeugte PDFs. Dieser Zeitstempel bleibt im lokalen
+// Zwischenspeicher und wandert in keine Ausgabe.
+const shareStampHeader = 'X-Pagebound-Shared-At';
 // = ReaderPane.MaxFileSize und MAX_BYTES in boot.js. Hier noch einmal, weil es
 // vor dem Ablegen greifen muss und nicht erst bei der Abholung.
 const shareMaxBytes = 100 * 1024 * 1024;
@@ -176,15 +185,30 @@ function shareFromElsewhere(request) {
     return true;
 }
 
-// Nummernvergabe und Ablegen müssen zusammen laufen. Zwei Fetch-Events wechseln
-// sich an jedem await ab: beide lesen sonst dieselbe höchste Nummer, beide
-// schreiben denselben Schlüssel, und eine Freigabe ist weg. Die Kette hält sie
-// hintereinander.
-let shareLock = Promise.resolve();
-function withShareLock(fn) {
-    const lauf = shareLock.then(fn, fn);
-    shareLock = lauf.then(() => {}, () => {});
-    return lauf;
+// Die Kennung einer Freigabe (Nachtrag 4.1).
+//
+// Früher war das eine laufende Nummer, abgeleitet aus `max(vorhandene) + 1`.
+// Daran hingen zwei Datenverlust-Pfade: nach jeder erfolgreichen Abholung ist
+// der Cache leer, die Zählung fing wieder bei 1 an und eine stehengebliebene
+// Adresse `?share=5` hielt eine frische Freigabe für älter; und weil Nummern
+// vergleichbar sind, löschte ein Link auf `/reader?share=999` jeden Eintrag mit
+// kleinerer Nummer.
+//
+// Eine nicht erratbare Kennung hat beides nicht. Sie macht ausserdem die Sperre
+// um die Vergabe überflüssig — und die ist deshalb ENTFERNT, nicht
+// vorsichtshalber stehengelassen: zwei gleichzeitige Freigaben schreiben
+// verschiedene Schlüssel und können sich nicht überschreiben. Ein Wächter, der
+// keinen Fehler mehr finden kann, täuscht nur Sicherheit vor.
+//
+// `crypto.randomUUID` ist in einem Service Worker immer verfügbar (stets ein
+// sicherer Kontext). Der Rückfall deckt eine Engine ohne diese Funktion; auf
+// seine Form muss boot.js vorbereitet sein (32 Hexzeichen statt UUID).
+function neueKennung() {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+        return crypto.randomUUID();
+    }
+    const b = crypto.getRandomValues(new Uint8Array(16));
+    return Array.from(b, x => x.toString(16).padStart(2, '0')).join('');
 }
 
 async function onShareTarget(request) {
@@ -195,22 +219,22 @@ async function onShareTarget(request) {
         // Eigene Kennung: der Nutzer soll erfahren, warum nichts aufgeht.
         return zuReader('?share=rejected');
     }
-    // Grenze aus Content-Length, VOR formData(). Danach ist der ganze Body schon
-    // gelesen: `file.size` kommt erst, wenn eine 1-GB-Freigabe komplett durch den
-    // Service Worker gelaufen ist. Content-Length ist eine Angabe des Absenders
-    // und darf nicht die einzige Prüfung sein (sie kann fehlen oder lügen) —
-    // deshalb bleibt die Prüfung an `file.size` unten bestehen. Der Zuschlag
-    // deckt die multipart-Hülle (Trennzeichen, Header je Teil).
-    const laenge = Number(request.headers.get('Content-Length'));
-    if (Number.isFinite(laenge) && laenge > shareMaxBytes + 64 * 1024) {
-        console.warn('Service worker: Freigabe zu groß (Content-Length)', laenge);
-        return zuReader('?share=toobig');
-    }
-    // Die Nummer dieser Freigabe, sobald sie im Cache liegt. Sie wandert in die
-    // Umleitung (`?share=<n>`), damit boot.js GENAU diesen Eintrag abholt und
-    // nicht den ältesten, der noch herumliegt (Nachtrag 3.1). Bleibt sie null,
-    // ist etwas schiefgegangen und `problem` sagt, was.
-    let nummer = null;
+    // KEINE Vorprüfung auf Content-Length (Nachtrag 4.3). `b727c01` hatte hier
+    // eine Schranke mit der Zusage, sie verhindere, dass eine 1-GB-Freigabe
+    // vollständig durch den Worker läuft. Die Messung im echten Abbild (echtes
+    // Chromium, echte Formular-Navigation auf /share-target) widerlegt das: der
+    // Worker sieht genau acht Header — accept, content-type, origin, sec-ch-ua,
+    // sec-ch-ua-mobile, sec-ch-ua-platform, upgrade-insecure-requests,
+    // user-agent. `Content-Length` ist nicht dabei, `Number(null)` ist 0, die
+    // Schranke griff nie. Eine Zählung über den Body als Stream wäre kein
+    // Gewinn: dafür muss der Body ebenso gelesen werden. Geprüft wird an
+    // `file.size` unten — das ist die Grenze, die die App wirklich hat.
+
+    // Die Kennung dieser Freigabe, sobald sie im Cache liegt. Sie wandert in die
+    // Umleitung (`?share=<kennung>`), damit boot.js GENAU diesen Eintrag abholt
+    // und nicht den ältesten, der noch herumliegt (Nachtrag 3.1). Bleibt sie
+    // null, ist etwas schiefgegangen und `problem` sagt, was.
+    let kennung = null;
     let problem = 'failed';
     try {
         const form = await request.formData();
@@ -222,47 +246,46 @@ async function onShareTarget(request) {
             // in den Cache Storage, nur damit boot.js sie danach wegen
             // Übergröße ablehnt — auf einem schwachen Telefon kostet das
             // Speicher, Kontingent und Zeit.
-            // Zweite Schranke, an der echten Größe: Content-Length oben kann
-            // fehlen oder falsch sein, diese Zahl stammt aus dem gelesenen Body.
+            //
+            // Das ist die EINZIGE Grenze im Worker, und sie steht an der echten
+            // Größe aus dem gelesenen Body. Der Body ist an dieser Stelle schon
+            // durch — eine Grenze davor gibt es nicht, weil es keinen Header
+            // gibt, der sie tragen könnte (Nachtrag 4.3).
             if (file.size > shareMaxBytes) {
                 console.warn('Service worker: Freigabe zu groß', file.size);
                 return zuReader('?share=toobig');
             }
-            nummer = await withShareLock(async () => {
-                const cache = await caches.open(shareCacheName);
-                // Eigener Schlüssel je Freigabe: zwei kurz hintereinander dürfen
-                // sich nicht überschreiben, und boot.js darf keine löschen, die es
-                // nicht gelesen hat. Die Zahl kommt aus dem Cache selbst — keine
-                // Systemuhr, keine Zufalls-Id.
-                let n = 0;
-                for (const key of await cache.keys()) {
-                    const m = /\/__pb-share\/(\d+)$/.exec(new URL(key.url).pathname);
-                    if (m) n = Math.max(n, Number(m[1]));
-                }
-                await cache.put(shareEntryPrefix + (n + 1), new Response(file, {
-                    headers: {
-                        'Content-Type': file.type || 'application/pdf',
-                        // Prozentkodiert: ein Dateiname darf Zeichen enthalten, die
-                        // in einem HTTP-Header nicht erlaubt sind (Umlaute, Komma).
-                        [shareFilenameHeader]: encodeURIComponent(file.name || 'geteilt.pdf'),
-                    },
-                }));
-                // Innerhalb der Sperre vergeben UND zurückgegeben: außerhalb
-                // könnte eine zweite Freigabe die Zahl schon weitergedreht haben.
-                return n + 1;
-            });
+            // Eigener Schlüssel je Freigabe: zwei kurz hintereinander dürfen
+            // sich nicht überschreiben, und boot.js darf keine löschen, die es
+            // nicht gelesen hat. Die Kennung wird gezogen, nicht aus dem
+            // Cache-Inhalt abgeleitet — deshalb braucht es hier keine Sperre
+            // mehr (Nachtrag 4.1).
+            const neue = neueKennung();
+            const cache = await caches.open(shareCacheName);
+            await cache.put(shareEntryPrefix + neue, new Response(file, {
+                headers: {
+                    'Content-Type': file.type || 'application/pdf',
+                    // Prozentkodiert: ein Dateiname darf Zeichen enthalten, die
+                    // in einem HTTP-Header nicht erlaubt sind (Umlaute, Komma).
+                    [shareFilenameHeader]: encodeURIComponent(file.name || 'geteilt.pdf'),
+                    // Nur zum Aufräumen (Nachtrag 4.2), nie zum Sortieren: wer
+                    // welchen Eintrag holt, steht in der Adresse.
+                    [shareStampHeader]: String(Date.now()),
+                },
+            }));
+            kennung = neue;
             problem = null;
         }
     } catch (err) {
         // Nicht lesbar oder Speicher voll.
         console.warn('Service worker: Freigabe nicht übernommen', err);
     }
-    // Bei einem Fehlschlag sagt die Kennung der App, dass sie das melden soll —
-    // sonst käme der Reader leer hoch und die Freigabe sähe kaputt aus. Im
-    // Erfolgsfall trägt sie die Nummer dieser Freigabe: boot.js holt damit genau
-    // diesen Eintrag ab (Nachtrag 3.1).
+    // Bei einem Fehlschlag steht in `?share=` eine Fehlerkennung, damit die App
+    // das melden kann — sonst käme der Reader leer hoch und die Freigabe sähe
+    // kaputt aus. Im Erfolgsfall steht dort die Kennung dieser Freigabe: boot.js
+    // holt damit genau diesen Eintrag ab (Nachtrag 3.1, Kennung aus 4.1).
     if (problem) return zuReader('?share=' + problem);
-    return zuReader('?share=' + nummer);
+    return zuReader('?share=' + kennung);
 }
 
 async function onFetch(event) {

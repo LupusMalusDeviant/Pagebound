@@ -31,6 +31,7 @@
         shareRejected: "Die Freigabe kam nicht von Ihrem Gerät und wurde abgewiesen.",
         shareTooBig: "Die geteilte Datei ist größer als 100 MB.",
         onlyFirst: "Mehrere geteilte Dateien — geöffnet wird die erste.",
+        replaced: "„{n}“ ersetzt die vorige Datei und wird geöffnet.",
       }
     : {
         loading: "Loading …",
@@ -44,6 +45,7 @@
         shareRejected: "The share did not come from your device and was rejected.",
         shareTooBig: "The shared file is larger than 100 MB.",
         onlyFirst: "Several shared files — the first one opens.",
+        replaced: "“{n}” replaces the previous file and will open.",
       };
 
   var pending = null; // File — PDF
@@ -56,6 +58,17 @@
   var SHARE_CACHE = "pb-share";
   var SHARE_PREFIX = "/__pb-share/";
   var SHARE_NAME_HEADER = "X-Pagebound-Filename";
+  var SHARE_STAMP_HEADER = "X-Pagebound-Shared-At";
+  // Ab wann ein FREMDER Eintrag als Waise gilt (Nachtrag 4.2). Länger als jeder
+  // Start braucht, kurz genug, dass die Zusage der Datenschutzseite stimmt.
+  //
+  // Vorher entschied der Vergleich der Kennungen, und das war ein
+  // Datenverlust-Pfad: das Manifest hat kein `launch_handler`, jede Freigabe
+  // öffnet also ihren eigenen Client. Ein zweiter Start ohne Kennung — ein
+  // Neuladen, ein Dateistart, ein `?share=rejected`, das eine fremde Seite
+  // auslösen kann — löschte alles, was er vorfand, auch die Freigabe, auf die
+  // ein anderes Fenster gerade wartete.
+  var SHARE_ORPHAN_MS = 5 * 60 * 1000;
   // Ein Entwurf ist eine Textdatei mit Layout, keine Mediendatei. Die
   // 100-MB-Grenze der PDFs taugt dafür nicht: der Inhalt wird als String
   // gelesen und als zweite Kopie nach .NET gereicht — bei WASM ist das der
@@ -98,8 +111,17 @@
         return t;
       });
     },
-    /** Der einzige Prüfpunkt: MIME, Größe, Magic Bytes. Jede Quelle geht hier durch. */
-    offer: function (file) { return accept(file); },
+    /**
+     * Der einzige Prüfpunkt: MIME, Größe, Magic Bytes. Jede Quelle geht hier
+     * durch — und zwar über dieselbe Reihung wie die anderen Eintrittswege.
+     *
+     * Vorher ging offer() direkt in accept(). Damit war „die erste gewinnt"
+     * zwischen Drop-Zone und Start/Freigabe nicht zugesichert: eine geteilte
+     * PDF, die gerade auf looksLikePdf wartet, hat `if (pending)` schon
+     * passiert, und eine gleichzeitig abgelegte Datei setzt `pending` ebenfalls.
+     * Es gewann, wer zuletzt auflöste, und keine der beiden Seiten meldete es.
+     */
+    offer: function (file) { return annehmen(file); },
   };
 
   function el(id) { return document.getElementById(id); }
@@ -154,8 +176,17 @@
     if (file.size > MAX_BYTES) { setStatus(T.tooBig, true); return Promise.resolve(false); }
     return looksLikePdf(file).then(function (ok) {
       if (!ok) { setStatus(T.notPdf, true); return false; }
+      // Wer gewinnt, wenn schon eine Datei wartet: DIESE. accept() erreichen nur
+      // ausdrückliche Handlungen des Nutzers (Drop-Zone, Dateiauswahl, offer) —
+      // die automatischen Wege (launchQueue, Freigabe) geben in sortLaunchedNow
+      // einer wartenden Datei den Vortritt. Eine Handlung des Nutzers schlägt
+      // also einen automatischen Eintritt, aber sie verdrängt ihn NICHT
+      // stillschweigend: vorher stand `pending = file` ohne ein Wort, und die
+      // vorige Datei war weg, ohne dass es irgendwo auffiel.
+      var ersetzt = pending && pending !== file ? pending.name : null;
       pending = file;
-      setStatus(T.queued.replace("{n}", file.name), false, true);
+      if (ersetzt) setStatus(T.replaced.replace("{n}", file.name), false, true);
+      else setStatus(T.queued.replace("{n}", file.name), false, true);
       var zone = el("pb-boot-drop");
       if (zone) zone.classList.add("is-queued");
       // Blazor liest die Route erst beim Start — vor dem Boot umstellen genügt.
@@ -213,13 +244,24 @@
   // die, die zuletzt auflöst.
   var sortLock = Promise.resolve();
 
-  function sortLaunched(file, name) {
-    var lauf = sortLock.then(
-      function () { return sortLaunchedNow(file, name); },
-      function () { return sortLaunchedNow(file, name); },
-    );
+  function withSortLock(fn) {
+    var lauf = sortLock.then(fn, fn);
     sortLock = lauf.then(function () {}, function () {});
     return lauf;
+  }
+
+  /**
+   * Der eine Weg in accept() hinein, für JEDEN Aufrufer: Drop-Zone,
+   * Dateiauswahl, offer(). Vorher gingen die drei direkt hinein, und damit galt
+   * „die erste gewinnt" nur zwischen den gestarteten Dateien, nicht gegenüber
+   * der Drop-Zone.
+   */
+  function annehmen(file) {
+    return withSortLock(function () { return accept(file); });
+  }
+
+  function sortLaunched(file, name) {
+    return withSortLock(function () { return sortLaunchedNow(file, name); });
   }
 
   function sortLaunchedNow(file, name) {
@@ -248,8 +290,15 @@
         }
         // Die Route NOCH EINMAL ansehen: zwischen dem ersten designWanted()
         // oben und hier liegt das Lesen der Datei. Hat in dieser Zeit eine PDF
-        // accept() durchlaufen, steht die Route jetzt auf /reader, und
-        // pendingDesign wäre genau die Waise, die Nachtrag 2 verhindern soll.
+        // accept() durchlaufen, steht die Route auf /reader, und pendingDesign
+        // wäre genau die Waise, die Nachtrag 2 verhindern soll.
+        //
+        // EHRLICH GESAGT: seit alle Aufrufer über annehmen() und damit durch
+        // dieselbe Reihung gehen, kann zwischen den beiden Prüfungen kein
+        // accept() mehr laufen — diese Zeile ist nicht mehr erreichbar und
+        // deshalb auch nicht mehr prüfbar. Sie bleibt als zweite Schranke für
+        // einen künftigen Aufrufer, der accept() wieder direkt aufruft; sie
+        // kostet nichts. Dass sie wirkt, ist damit NICHT belegt.
         if (!designWanted()) { setStatus(T.notPdf, true, true); return false; }
         pendingDesign = text;
         return true;
@@ -291,17 +340,17 @@
   }
 
   // Freigabe über das Teilen-Menü: der Service Worker hat die Datei geparkt
-  // (POST /share-target) und auf `/reader?share=<n>` umgeleitet. Die Nummer ist
-  // der Schlüssel des Eintrags — abgeholt wird GENAU dieser, nie „alles, was
-  // noch herumliegt" (Nachtrag 3.1).
+  // (POST /share-target) und auf `/reader?share=<kennung>` umgeleitet. Die
+  // Kennung ist der Schlüssel des Eintrags — abgeholt wird GENAU dieser, nie
+  // „alles, was noch herumliegt" (Nachtrag 3.1, Kennung aus 4.1).
   //
-  // Konnte er sie NICHT übernehmen, steht statt der Nummer eine Kennung da:
-  // failed (Speicher voll, Formular unlesbar), rejected (fremde Herkunft),
+  // Konnte er sie NICHT übernehmen, steht statt der Kennung eine Fehlerkennung
+  // da: failed (Speicher voll, Formular unlesbar), rejected (fremde Herkunft),
   // toobig. Ohne das käme der Reader leer hoch und die Freigabe sähe auf
   // Android einfach kaputt aus, ohne ein Wort.
   //
-  // Beides wird danach aus der Adresse entfernt: eine Kennung, damit die
-  // Meldung nicht bei jedem Neuladen wiederkommt; eine Nummer, weil ihr
+  // Beides wird danach aus der Adresse entfernt: eine Fehlerkennung, damit die
+  // Meldung nicht bei jedem Neuladen wiederkommt; eine Kennung, weil ihr
   // Eintrag dann schon gelöscht ist.
   // Den Wert von `share` lesen — als Parameter, nicht als Teilstring. `indexOf`
   // traf auch `?xshare=failed` und `?foo=share=failed`, also jeden Treffer
@@ -354,9 +403,15 @@
     });
   }
 
-  // Alle Pfade im Freigabe-Cache, mit ihrer Nummer. Ein Eintrag ohne Nummer
-  // (der feste Schlüssel `/__pb-share` aus dem Ursprungsstand) bekommt null und
-  // wird dadurch immer aufgeräumt.
+  // Alle Pfade im Freigabe-Cache. Die Kennung wird hier NICHT ausgewertet: wer
+  // welchen Eintrag holt, entscheidet ein Vergleich des ganzen Pfades mit der
+  // eigenen Kennung aus der Adresse. Nichts wird mehr der Größe nach verglichen
+  // — genau daran hing der Datenverlust (Nachtrag 4.1/4.2).
+  //
+  // Mit erfasst werden auch Schlüssel aus älteren Ständen (Nummern, und der
+  // feste Schlüssel `/__pb-share` aus dem Ursprungsstand). Die tragen keinen
+  // Zeitstempel und gelten damit als alt — sie werden beim ersten Start
+  // aufgeräumt.
   function sharePaths(cache) {
     return cache.keys().then(function (reqs) {
       var liste = [];
@@ -364,68 +419,110 @@
         var p = reqs[i].url;
         try { p = new URL(reqs[i].url).pathname; } catch (e) { /* schon ein Pfad */ }
         if (p.indexOf("/__pb-share") !== 0) continue;
-        var m = /^\/__pb-share\/(\d+)$/.exec(p);
-        liste.push({ pfad: p, nummer: m ? parseInt(m[1], 10) : null });
+        liste.push({ pfad: p });
       }
       return liste;
     });
   }
 
-  // Die Nummer dieser Freigabe aus der Adresse — der Service Worker hat sie
-  // dort hineingeschrieben (Nachtrag 3.1). Alles andere ist keine Nummer.
-  function shareNumber() {
+  // Die Kennung dieser Freigabe aus der Adresse — der Service Worker hat sie
+  // dort hineingeschrieben (Nachtrag 3.1, Form aus 4.1). Erzeugt werden sie
+  // ausschließlich von `crypto.randomUUID()` (kleingeschrieben) oder vom
+  // Rückfall mit 32 Hexzeichen; deshalb wird hier streng kleingeschrieben
+  // geprüft und der Pfad danach genau verglichen. Alles andere — die
+  // Fehlerkennungen `rejected`/`toobig`/`failed`, ein Link mit erratenem Wert,
+  // eine Nummer aus einem älteren Stand — ist keine Kennung.
+  function shareToken() {
     var roh = shareParam();
-    return roh && /^[0-9]+$/.test(roh) ? parseInt(roh, 10) : null;
+    if (!roh) return null;
+    var uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+    if (uuid.test(roh) || /^[0-9a-f]{32}$/.test(roh)) return roh;
+    return null;
+  }
+
+  // Ein FREMDER Eintrag wird nur gelöscht, wenn er nachweislich alt ist
+  // (Nachtrag 4.2). Fehlt der Zeitstempel oder ist er unlesbar, gilt er als alt:
+  // solche Einträge stammen aus einem Stand vor diesem Nachtrag.
+  //
+  // Scheitert das Nachsehen selbst, wird NICHT gelöscht. Im Zweifel steht
+  // Korrektheit über dem Aufräumen: eine Datei des Nutzers verlieren ist
+  // schlimmer, als sie eine Runde länger im Zwischenspeicher zu lassen.
+  function shareIsOrphan(cache, pfad, jetzt) {
+    return cache.match(pfad).then(function (res) {
+      if (!res) return false; // schon weg
+      var roh = res.headers.get(SHARE_STAMP_HEADER);
+      var ms = roh === null ? NaN : Number(roh);
+      if (!isFinite(ms)) return true;
+      return jetzt - ms > SHARE_ORPHAN_MS;
+    }, function () { return false; });
   }
 
   function pickUpShared() {
     reportShareProblem();
-    if (typeof caches === "undefined" || !caches || typeof caches.has !== "function") return Promise.resolve();
-    var meine = shareNumber();
+    var meine = shareToken();
+    var meinPfad = meine ? SHARE_PREFIX + meine : null;
+    if (typeof caches === "undefined" || !caches || typeof caches.has !== "function") {
+      // Kein Cache Storage, aber eine Kennung in der Adresse: die Freigabe kann
+      // nicht abgeholt werden. Vorher kam die App hier still leer hoch.
+      if (meine) { setStatus(T.shareFailed, true, true); dropShareParam(); }
+      return Promise.resolve();
+    }
     return caches.has(SHARE_CACHE).then(function (there) {
       if (!there) {
-        // Die Nummer stand in der Adresse, der Cache ist aber weg (Browser hat
+        // Die Kennung stand in der Adresse, der Cache ist aber weg (Browser hat
         // ihn geräumt). Nicht still leer hochkommen.
-        if (meine !== null) setStatus(T.shareFailed, true, true);
+        if (meine) setStatus(T.shareFailed, true, true);
         return;
       }
       return caches.open(SHARE_CACHE).then(function (cache) {
         // EINE Momentaufnahme. Was danach ankommt, bleibt liegen — es hat seine
-        // eigene Navigation mit seiner eigenen Nummer und wird dort abgeholt.
+        // eigene Navigation mit seiner eigenen Kennung und wird dort abgeholt.
         return sharePaths(cache).then(function (liste) {
+          var jetzt = Date.now();
           var ziel = null;
           for (var i = 0; i < liste.length; i++) {
-            if (liste[i].nummer === meine && meine !== null) ziel = liste[i].pfad;
+            if (meinPfad && liste[i].pfad === meinPfad) ziel = liste[i].pfad;
           }
-          if (meine !== null && !ziel) setStatus(T.shareFailed, true, true);
+          if (meine && !ziel) setStatus(T.shareFailed, true, true);
 
           // Aufräumen, NICHT öffnen: ein liegengebliebener Eintrag darf nie die
           // Route aufreißen (vorher öffnete die älteste Freigabe und die neue
-          // wurde gelöscht). Eine HÖHERE Nummer als die eigene bleibt stehen —
-          // die ist gerade erst angekommen und ihre Navigation ist noch
-          // unterwegs. Ohne eigene Nummer gibt es keine solche Navigation, dann
-          // wird alles aus der Momentaufnahme geräumt.
-          var waisen = [];
+          // wurde gelöscht).
+          //
+          // Entschieden wird allein nach ALTER. Kein Vergleich mit der eigenen
+          // Kennung, und keine Sonderregel für einen Start ohne Kennung: eine
+          // Freigabe, auf die gerade ein anderes Fenster wartet, ist jünger als
+          // fünf Minuten und bleibt deshalb liegen — egal, wer hier startet und
+          // mit welcher Adresse (Nachtrag 4.2).
+          var fremde = [];
           for (var k = 0; k < liste.length; k++) {
-            var e = liste[k];
-            if (e.pfad === ziel) continue;
-            if (meine === null || e.nummer === null || e.nummer < meine) waisen.push(e.pfad);
+            if (liste[k].pfad !== ziel) fremde.push(liste[k].pfad);
           }
 
           var chain = ziel ? takeShared(cache, ziel) : Promise.resolve();
-          for (var j = 0; j < waisen.length; j++) {
+          for (var j = 0; j < fremde.length; j++) {
             chain = chain.then(function (p) {
-              return function () { return cache.delete(p); };
-            }(waisen[j]));
+              return function () {
+                return shareIsOrphan(cache, p, jetzt).then(function (alt) {
+                  return alt ? cache.delete(p) : undefined;
+                });
+              };
+            }(fremde[j]));
           }
           return chain;
         });
       });
+    }).then(null, function (err) {
+      // Scheitert irgendetwas in der Kette (blob(), caches.open(), delete()),
+      // schluckte also() den Fehler: keine Meldung, und die Kennung blieb in der
+      // Adresse stehen.
+      console.warn("Pagebound: Freigabe konnte nicht abgeholt werden", err);
+      if (meine) setStatus(T.shareFailed, true, true);
     }).then(function () {
-      // Die Nummer gehört nicht in die Adresse, die der Nutzer sieht oder als
+      // Die Kennung gehört nicht in die Adresse, die der Nutzer sieht oder als
       // Lesezeichen behält: der Eintrag ist jetzt weg, ein Neuladen fände
-      // nichts mehr und bekäme nur eine Fehlermeldung.
-      if (meine !== null) dropShareParam();
+      // nichts mehr und bekäme nur eine Fehlermeldung. Läuft AUCH im Fehlerfall.
+      if (meine) dropShareParam();
     });
   }
   also(pickUpShared());
@@ -456,7 +553,7 @@
     zone.hidden = false;
 
     input.addEventListener("change", function () {
-      if (input.files && input.files[0]) accept(input.files[0]);
+      if (input.files && input.files[0]) annehmen(input.files[0]);
     });
     // Ablegen auf der ganzen Seite, solange der Boot-Bildschirm steht.
     window.addEventListener("dragover", function (e) {
@@ -473,7 +570,7 @@
       e.preventDefault();
       zone.classList.remove("is-over");
       var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
-      if (f) accept(f);
+      if (f) annehmen(f);
     });
 
     // Ladefortschritt: Blazor schreibt --blazor-load-percentage(-text) auf <html>.

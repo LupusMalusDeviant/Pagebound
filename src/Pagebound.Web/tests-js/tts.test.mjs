@@ -109,15 +109,24 @@ test("mit langHint folgt die Stimme der Sprache des TEXTES", () => {
   assert.equal(spoken[0].lang, "de-DE", "u.lang nicht gesetzt — manche Engines sprechen dann systemsprachlich");
 });
 
-test("ohne langHint entscheidet die Plattform, NICHT die App-Sprache", () => {
-  // Der Fehler, den dieser Test festnagelt: `document.documentElement.lang` ist
-  // die eingestellte App-Sprache (index.html und applyLang() setzen sie), nicht
-  // die des Dokuments. Wer sie als Ersatz nimmt, liest ein englisches PDF bei
+test("ohne langHint fällt die Wahl auf die Plattform, NICHT auf die App-Sprache", () => {
+  // Was dieser Test festnagelt: `document.documentElement.lang` ist die
+  // eingestellte App-Sprache (index.html und applyLang() setzen sie), nicht die
+  // des Dokuments. Wer sie als Ersatz nimmt, liest ein englisches PDF bei
   // deutscher Oberfläche mit deutscher Stimme vor und gibt der Engine dazu
   // `u.lang = "de-DE"` — eine falsche Angabe, nicht nur eine unschöne.
   //
-  // Die App-Sprache steht hier bewusst auf "de", die Vorgabe-Stimme ist
-  // englisch: erwartet wird die englische.
+  // Dies ist ein RÜCKFALL, kein Wunschverhalten: ohne Hinweis kann niemand die
+  // Sprache des Textes kennen, und dann ist die Vorgabe der Plattform die
+  // einzige Wahl, die nichts Falsches behauptet. Sie ist auch nicht gut —
+  // deutsche Oberfläche, deutsches PDF und englische Systemstimme ergeben eine
+  // englische Stimme auf deutschem Text. Gelöst wird das nur dadurch, dass der
+  // Aufrufer die Sprache des Dokuments mitgibt — das tut der Reader seit
+  // Nachtrag 4.4 (`loadPdf` liefert `/Lang` als `LoadResult.language`). Dieser
+  // Rückfall gilt für PDFs, die `/Lang` nicht angeben, und das sind die meisten.
+  //
+  // Die App-Sprache steht bewusst auf "de", die Vorgabe-Stimme ist englisch:
+  // erwartet wird die englische.
   const { tts, spoken } = loadTts([ENGLISCH, LOKAL], "de");
   assert.equal(tts.speak("Some English text."), true);
   assert.equal(
@@ -126,6 +135,39 @@ test("ohne langHint entscheidet die Plattform, NICHT die App-Sprache", () => {
     `die App-Sprache hat die Stimme bestimmt: ${spoken[0].voice.name}`,
   );
   assert.equal(spoken[0].lang, "en-GB", "u.lang muss zur gewählten Stimme passen");
+});
+
+test("der Reader gibt die Dokumentsprache an speak() weiter", () => {
+  // Die SCHWÄCHSTE Prüfung in dieser Kette, und sie wird als solche benannt:
+  // sie liest den Quelltext von ReaderPane.razor, statt das Verhalten zu
+  // messen. Ein Test, der das Verhalten prüft, bräuchte einen gemounteten
+  // Blazor-Baum mit JS-Interop-Attrappe — den gibt es hier nicht.
+  //
+  // Was sie trotzdem findet: dass jemand den vierten Parameter wieder
+  // wegnimmt oder die App-Sprache einsetzt. Genau das ist zweimal passiert
+  // (5edb4ad: App-Sprache; b727c01: Parameter da, aber niemand füllte ihn).
+  //
+  // Was sie NICHT findet: ob `_handle.Language` zur Laufzeit wirklich ankommt.
+  // Dafür stehen die beiden anderen Hälften der Kette: pdfjs-bridge.test.mjs
+  // (echtes PDF.js liefert `/Lang` als `language`) und die Tests hier
+  // (`langHint` bestimmt die Stimme). Die Verbindung dazwischen ist durch
+  // KEINE Verhaltensprüfung gedeckt — das steht so in SECURITY.md nicht, weil
+  // es keine Sicherheitsfrage ist, aber es steht hier.
+  const razor = readFileSync(
+    resolve(dirname(fileURLToPath(import.meta.url)), "../Features/Reader/ReaderPane.razor"),
+    "utf8",
+  );
+  const aufruf = /pageboundTts\.speak"[^;]*?;/s.exec(razor);
+  assert.ok(aufruf, "kein Aufruf von pageboundTts.speak in ReaderPane.razor gefunden");
+  assert.match(
+    aufruf[0],
+    /_handle\.Language/,
+    `speak() bekommt die Dokumentsprache nicht: ${aufruf[0].replace(/\s+/g, " ")}`,
+  );
+  assert.ok(
+    !/documentElement\.lang|L\.Current|AppLanguage/.test(aufruf[0]),
+    `speak() bekommt die APP-Sprache statt der Dokumentsprache: ${aufruf[0].replace(/\s+/g, " ")}`,
+  );
 });
 
 test("eine ausdrücklich gewählte Stimme schlägt den langHint", () => {

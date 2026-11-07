@@ -27,6 +27,19 @@ export interface LoadResult {
   id: string;
   pageCount: number;
   title: string | null;
+  /**
+   * Die Sprache des Dokuments — `/Lang` aus dem Katalog, als BCP-47-Kennung
+   * ("de", "en-GB"). `null`, wenn das PDF sie nicht angibt; das ist der
+   * häufigere Fall (Nachtrag 4.4 in docs/contracts/datei-eintritt.md).
+   *
+   * Wofür: das Vorlesen braucht die Sprache des TEXTES, nicht die der
+   * Oberfläche. Ohne dieses Feld hat es nur zwei schlechte Möglichkeiten — die
+   * App-Sprache (dann liest eine deutsche Stimme ein englisches PDF, und
+   * `utterance.lang` behauptet der Engine gegenüber etwas Falsches) oder die
+   * Vorgabe der Plattform (dann liest eine englische Systemstimme ein deutsches
+   * PDF). Beides ist ein Raten über den Inhalt.
+   */
+  language: string | null;
 }
 
 export interface RenderResult {
@@ -69,15 +82,22 @@ export async function loadPdf(
   documents.set(id, doc);
 
   let title: string | null = null;
+  let language: string | null = null;
   try {
     const meta = await doc.getMetadata();
-    const info = meta?.info as { Title?: string } | undefined;
+    // `Language` ist PDF.js' Name für `/Lang` aus dem Katalog.
+    const info = meta?.info as { Title?: string; Language?: string } | undefined;
     title = info?.Title ?? null;
+    // Leerstring ist keine Sprache: `/Lang ()` kommt vor und wäre als
+    // `utterance.lang = ""` eine Angabe, die nichts aussagt.
+    const lang = info?.Language;
+    language = typeof lang === "string" && lang.trim() !== "" ? lang.trim() : null;
   } catch {
     title = null;
+    language = null;
   }
 
-  return { id, pageCount: doc.numPages, title };
+  return { id, pageCount: doc.numPages, title, language };
 }
 
 export async function renderPage(

@@ -41,7 +41,7 @@ public sealed class PdfJsRenderer : IPdfRenderer
             options.Password)
             .ConfigureAwait(false);
 
-        return new PdfDocumentHandle(result.Id, result.PageCount, result.Title);
+        return new PdfDocumentHandle(result.Id, result.PageCount, result.Title, result.Language);
     }
 
     public async Task<RenderedPage> RenderPageAsync(
@@ -177,7 +177,9 @@ public sealed class PdfJsRenderer : IPdfRenderer
 
     // --- JS-Interop-DTOs ------------------------------------------------------
 
-    private sealed record LoadDto(string Id, int PageCount, string? Title);
+    // Language = `/Lang` aus dem Katalog, von der Brücke mitgeliefert
+    // (Nachtrag 4.4). Fehlt das Feld in der Antwort, bleibt es null.
+    private sealed record LoadDto(string Id, int PageCount, string? Title, string? Language);
 
     private sealed record RenderDto(
         int PageNumber,

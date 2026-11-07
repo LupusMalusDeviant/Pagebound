@@ -83,8 +83,10 @@ function chunk(text: string): string[] {
  * Sprache des Dokuments. Mit ihr las eine deutsche Oberfläche ein englisches PDF
  * mit deutscher Stimme und erzwungenem `u.lang = "de-DE"` — das klingt nicht nur
  * falsch, es ist eine falsche Angabe an die Engine. Die Dokumentsprache steht im
- * PDF (`/Lang`, über die PDF.js-Metadaten); sie durchzureichen ist eigene Arbeit
- * und liegt als Bean vor.
+ * PDF (`/Lang`, über die PDF.js-Metadaten) und wird seit Nachtrag 4.4
+ * durchgereicht: `loadPdf` liefert sie als `LoadResult.language`, der Reader gibt
+ * sie hier als `langHint` weiter. Gibt das PDF sie nicht an — der häufigere
+ * Fall —, bleibt es bei der Vorgabe der Plattform.
  */
 export function speak(
   text: string,

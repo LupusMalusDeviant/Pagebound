@@ -1,6 +1,6 @@
 # Vertrag: Wie eine Datei in Pagebound hineinkommt
 
-Status: **abgenommen 2026-11-07**, einschließlich der Nachträge 1 bis 3 · betrifft `boot.js`,
+Status: **abgenommen 2026-11-07**, einschließlich der Nachträge 1 bis 4 · betrifft `boot.js`,
 `wysiwyg-editor.ts`, `service-worker.published.js`, `ReaderPage.razor`,
 `DesignerPage.razor`, `manifest.webmanifest`
 
@@ -369,3 +369,166 @@ fremde Seite kann den Verweis per `referrerpolicy="no-referrer"` unterdrücken.
 Dann ist `request.referrer` leer und die Freigabe gilt als Freigabe des
 Betriebssystems. Das ist bekannt und wird ausdrücklich in Kauf genommen; es
 gehört in `SECURITY.md`, damit es nicht als Schutz erscheint, der es nicht ist.
+
+---
+
+# Nachtrag 4 — abgenommen 2026-11-07, aus dem Review von b727c01
+
+Nachtrag 3 ist in zwei Punkten auf einer Annahme gebaut, die nicht hält, und ein
+dritter Punkt beruht auf einem Header, den es nicht gibt. Alle drei sind
+nachgemessen, nicht erschlossen.
+
+**Vorbemerkung zu 4.1 und 4.2.** Eine erste Fassung dieses Nachtrags behandelte
+die beiden Befunde einzeln: ein dauerhafter Zähler gegen das Zurückfallen der
+Nummern, eine Altersregel gegen das Wegräumen fremder Einträge. Beide Befunde
+hängen aber an **einer** Entscheidung — dass die Freigabe-Kennung eine laufende
+Nummer ist. Daraus folgt, dass sie irgendwoher kommen muss (und bei leerem Cache
+bei 1 wieder anfängt) und dass Kennungen vergleichbar sind (also „kleiner heißt
+älter" naheliegt und `?share=999` zur Waffe wird). Dieser Nachtrag ersetzt die
+Entscheidung statt ihre beiden Folgen zu verwalten.
+
+## 4.1 Die Freigabe-Kennung ist ein nicht erratbarer Wert, keine laufende Nummer
+
+**Die Annahme.** Nachtrag 3.1 a stützt sich darauf, dass eine höhere Nummer
+neuer ist.
+
+**Warum sie nicht hält.** Die Nummer wird als `max(vorhandene Nummern) + 1`
+aus dem Cache-Inhalt abgeleitet. Ist der Cache leer — und das ist er nach jeder
+erfolgreichen Abholung —, beginnt die Zählung wieder bei 1. Eine Adresse
+`?share=5`, die in einem Tab stehen geblieben ist, hält dann eine frische
+Freigabe `/__pb-share/1` für älter und löscht sie als Waise. Bei gleicher Nummer
+öffnet der alte Tab die Datei der neuen Freigabe, und die richtige Navigation
+findet nichts.
+
+**Die Änderung.**
+
+1. Der Worker erzeugt je Freigabe eine Kennung aus `crypto.randomUUID()`. Ein
+   Service Worker ist immer ein sicherer Kontext, dort ist die Funktion
+   verfügbar; fehlt sie trotzdem, treten 16 Bytes aus
+   `crypto.getRandomValues()` als Hexadezimaltext an ihre Stelle. Der Schlüssel
+   im Cache ist `/__pb-share/<kennung>`, die Umleitung lautet
+   `?share=<kennung>`.
+2. Damit entfällt der Lesen-Ändern-Schreiben-Schritt. Zwei gleichzeitige
+   Freigaben schreiben verschiedene Schlüssel, können sich also nicht
+   überschreiben — **ohne** dass etwas sie hintereinander hält.
+3. **`withShareLock` entfällt deshalb.** Die Sperre hatte genau eine Aufgabe: die
+   Vergabe von `max + 1` unteilbar zu machen. Sie als stillen Zusatzschutz
+   stehen zu lassen wäre ein Wächter ohne Fehler, den er finden könnte. Die
+   Eigenschaft, die sie geschützt hat (zwei Freigaben kurz hintereinander
+   überleben beide), gilt jetzt von selbst und wird weiter geprüft — der
+   vorhandene Test auf zwei gleichzeitige Freigaben bleibt und prüft
+   verschiedene Schlüssel statt aufeinanderfolgende Nummern.
+4. `boot.js` erkennt eine Kennung an ihrer Form (UUID oder 32 Hexzeichen) und
+   hält alles andere für eine Fehlerkennung oder für nichts. Die
+   Fehlerkennungen `rejected`, `toobig`, `failed` können mit keiner Kennung
+   zusammenfallen.
+
+**Was die Zufälligkeit hier nicht berührt.** Die Zusicherung „keine Zufalls-Ids"
+gilt für die Ausgabe des MCP-Pakets: gleiche Eingabe → byte-gleiches PDF. Eine
+Kennung in einem lokalen Zwischenspeicher ist keine Ausgabe; sie verlässt das
+Gerät nicht und steht in keiner erzeugten Datei.
+
+## 4.2 Aufgeräumt wird nach Alter, nicht nach Vergleich der Kennungen
+
+**Die Annahme.** Nachtrag 3.1 a sagt: „Ein Start ohne `?share=` räumt alles auf,
+was er beim Nachsehen vorfindet: dort ist keine eigene Navigation unterwegs."
+
+**Warum sie nicht hält.** Das gilt nur, wenn es genau einen Client gibt. Das
+Manifest hat **kein** `launch_handler`, also öffnet jede Freigabe und jeder
+Dateistart einen eigenen Client. Während Fenster A auf seine Freigabe 1 wartet,
+kann ein zweiter Client ohne Nummer starten — ein Neuladen eines offenen
+Fensters, ein Dateistart über `launchQueue`, oder ein `?share=rejected`, das
+eine fremde Seite sogar selbst auslösen kann. Dieser Client löscht alles, was er
+vorfindet, also auch Eintrag 1. Fenster A meldet dann „konnte nicht übernommen
+werden", und die Datei ist weg. Ein Link auf `/reader?share=999` löscht ebenso
+jeden Eintrag mit kleinerer Nummer.
+
+**Die Änderung.** Aufgeräumt wird nur, was **nachweislich alt** ist. Mit 4.1 gibt
+es kein „kleiner" mehr, über das ein Start einen fremden Eintrag überhaupt
+beanspruchen könnte; was bleibt, ist die Pflicht, nie abgeholte Freigaben
+loszuwerden — das verlangt die Zusage der Datenschutzseite.
+
+1. Der Worker legt zu jeder Freigabe den Ablagezeitpunkt in einen Header
+   (`X-Pagebound-Shared-At`, Millisekunden). Die Systemuhr ist hier erlaubt: die
+   Reproduzierbarkeitszusage gilt für das MCP-Paket und für erzeugte PDFs, nicht
+   für einen Zwischenspeicher. Der Zeitstempel wandert nie in eine Ausgabe.
+2. Ein Start räumt einen **fremden** Eintrag nur weg, wenn er **älter als 5
+   Minuten** ist — unabhängig davon, ob der Start selbst eine Kennung trägt.
+   Fünf Minuten sind länger als jeder Start braucht und kurz genug, dass die
+   Zusage der Datenschutzseite stimmt.
+3. Einen Eintrag ohne Zeitstempel (oder mit unlesbarem) behandelt er als alt.
+   Solche gibt es nur aus einem Stand vor diesem Nachtrag — die alten
+   Nummern-Schlüssel fallen damit beim ersten Start darunter.
+4. Der eigene Eintrag wird weiterhin unabhängig vom Alter geholt.
+5. Fehlt der Eintrag zur eigenen Kennung, bleibt es bei Nachtrag 3.1 b:
+   gemeldet. Das gilt auch, wenn `caches.has()` nein sagt oder die Abholkette
+   scheitert — vorher war beides ein stilles Nichts, und die Kennung blieb sogar
+   in der Adresse stehen.
+6. Die Datenschutzseite (`tools/gen-landing.mjs`, alle Sprachfassungen) und
+   `SECURITY.md` werden im selben Commit nachgezogen: „ein späterer Start löscht
+   sie" wird zu „ein späterer Start löscht sie, sobald sie älter als fünf
+   Minuten ist". Eine Zusage, die den Code überholt, ist der Fehler, den dieses
+   Projekt sich am wenigsten leisten kann.
+
+## 4.3 Die Content-Length-Schranke entfällt — der Header kommt nicht an
+
+**Die Zusage in `b727c01`.** „Größengrenze aus Content-Length VOR `formData()`:
+vorher lief eine 1-GB-Datei vollständig durch den Service Worker."
+
+**Die Messung.** Ein Sonden-Worker im echten Abbild, über die E2E-Strecke mit
+echtem Chromium und einer echten Formular-Navigation auf `/share-target`. Der
+Worker sieht **acht** Header:
+
+```
+accept, content-type, origin, sec-ch-ua, sec-ch-ua-mobile,
+sec-ch-ua-platform, upgrade-insecure-requests, user-agent
+```
+
+`Content-Length` ist **nicht** dabei (`cl=NULL`). `Number(null)` ist `0`, die
+Schranke greift also nie. Die Zusage ist unbelegt, und die beiden Tests dazu
+konnten das nicht sehen, weil sie `headers.get` von Hand nachbauen.
+
+**Die Änderung.** Die Schranke und ihre Zusage entfallen. Eine Zählung über den
+Body als Stream wäre kein Gewinn: dafür muss der Body ebenso gelesen werden.
+Geprüft wird weiter an `file.size` nach `formData()`, und das ist die Grenze, die
+die App wirklich hat. Die Tests mit nachgebauten Headern entfallen mit ihr.
+
+## 4.4 Das Vorlesen bekommt die Sprache des Dokuments
+
+**Warum das hierher gehört und nicht in ein Bean.** Ohne Dokumentsprache hat das
+Vorlesen nur schlechte Wahlmöglichkeiten, und ich habe sie in zwei Commits
+hintereinander gegeneinander getauscht:
+
+| Vorgehen | Schadet bei |
+|---|---|
+| App-Sprache (`5edb4ad`) | deutsche Oberfläche, englisches PDF → deutsche Stimme liest Englisch, und `u.lang = "de-DE"` ist eine **falsche Angabe** an die Engine |
+| Vorgabe der Plattform (`b727c01`) | deutsche Oberfläche, deutsches PDF, englische Systemstimme → englische Stimme liest Deutsch |
+
+Beides ist ein Raten über den Inhalt. Die Sprache steht im Dokument, und PDF.js
+liefert sie an der Stelle, an der die Brücke heute schon den Titel holt.
+
+**Die Änderung.**
+
+1. `pdfjs-bridge.ts` liest in `loadPdf` zusätzlich `info.Language` (das ist
+   `/Lang` aus dem Katalog) und gibt sie im Ergebnis mit.
+2. Das Ergebnis-Objekt bekommt dafür ein Feld `language: string | null`. **Das
+   berührt den Renderer-Vertrag** (`LoadResult` in der Brücke und das
+   C#-Gegenstück in `PdfJsRenderer`) — deshalb steht es hier und wird nicht
+   nebenbei gemacht. Ein zusätzliches, optionales Feld; keine Signatur ändert
+   sich, keine Modulgrenze verschiebt sich.
+3. `ReaderPane` gibt die Sprache als vierten Parameter an
+   `pageboundTts.speak` weiter. Der Parameter `langHint` existiert seit
+   `b727c01`.
+4. Fehlt `/Lang` — bei den meisten PDFs fehlt es —, bleibt es bei der Vorgabe der
+   Plattform. Das ist dann eine bewusste Entscheidung mit Begründung, kein
+   stiller Tausch: nichts Falsches wird behauptet, und `u.lang` passt immer zur
+   gewählten Stimme.
+5. Bean `PDF-Tool-czeg` beschreibt genau diese Arbeit und wird damit erledigt.
+
+**Nebenbefund aus derselben Messung, nicht Teil dieses Nachtrags.** `origin`
+*ist* vorhanden. Anders als der Verweis lässt sich dieser Header nicht per
+`referrerpolicy` unterdrücken; er wäre damit das bessere Signal für die
+Herkunftsprüfung und könnte „Offen 2" schließen. Was Chrome einer Trusted Web
+Activity als `origin` schickt, ist allerdings ungemessen — ohne diese Messung am
+Gerät wäre es genau der Fehler, der in Nachtrag 3.2 schon einmal passiert ist.
+Deshalb hier nur notiert, nicht gebaut.

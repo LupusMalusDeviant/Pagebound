@@ -1678,7 +1678,14 @@
                 text = string.Join(" ", _pageTextItems.Select(i => i.Text));
             }
             if (string.IsNullOrWhiteSpace(text)) { _ttsActive = false; return; }
-            var ok = await JS.InvokeAsync<bool>("pageboundTts.speak", text, 1.0, null).ConfigureAwait(false);
+            // Vierter Parameter: die Sprache des DOKUMENTS (`/Lang`), nicht die
+            // der Oberfläche. Gibt das PDF sie nicht an — der häufigere Fall —,
+            // ist sie null und die Stimme bleibt die Vorgabe der Plattform
+            // (Nachtrag 4.4). Die App-Sprache hier einzusetzen wäre ein Raten
+            // über den Inhalt, und `utterance.lang` behauptete dann etwas
+            // Falsches gegenüber der Engine.
+            var ok = await JS.InvokeAsync<bool>(
+                "pageboundTts.speak", text, 1.0, null, _handle.Language).ConfigureAwait(false);
             _ttsActive = ok;
             _ttsPaused = false;
         }
