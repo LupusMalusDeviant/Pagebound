@@ -1,7 +1,8 @@
 # Vertrag: Wie eine Datei in Pagebound hineinkommt
 
-Status: **zur Abnahme** · Stand 2026-11-07 · betrifft `boot.js`, `wysiwyg-editor.ts`,
-`service-worker.published.js`, `ReaderPage.razor`, `DesignerPage.razor`, `manifest.webmanifest`
+Status: **abgenommen 2026-11-07**, einschließlich Nachtrag 1 · betrifft `boot.js`,
+`wysiwyg-editor.ts`, `service-worker.published.js`, `ReaderPage.razor`,
+`DesignerPage.razor`, `manifest.webmanifest`
 
 Anlass: Für die App-Stores (siehe `docs/distribution/app-stores.md`, Abschnitt 0)
 kommen zwei neue Wege hinzu, auf denen eine Datei in die App gelangt — der
@@ -44,6 +45,16 @@ Neu:
 `offer(file)` bleibt der einzige Prüfpunkt und behält seine heutigen Regeln:
 MIME **und** Magic Bytes (`%PDF`), Größe ≤ 100 MB (= `ReaderPane.MaxFileSize`).
 Jede neue Quelle geht durch `offer()`; keine Quelle parkt selbst.
+
+**Zum MIME-Typ der beiden neuen Quellen.** Bei Drop-Zone und Auswahl kommt er
+vom Browser und ist etwas wert. Bei einem Dateihandler und erst recht bei einer
+Freigabe ist er eine Behauptung des Betriebssystems — Android gibt für eine PDF
+regelmäßig `application/octet-stream`. Beide Quellen sortieren laut diesem
+Vertrag ohnehin **nach Inhalt**; steht dort `%PDF-`, wird `offer()` deshalb ein
+`File` mit dem *geprüften* Typ `application/pdf` übergeben, nicht mit dem
+behaupteten. Sonst verwirft die MIME-Regel eine einwandfreie PDF, und die
+Freigabe ist auf Android schlicht kaputt. Die Regel selbst bleibt unverändert,
+und für die Drop-Zone ändert sich nichts.
 
 ## Die vier Quellen
 
@@ -90,10 +101,17 @@ Datei, und `index.html` bleibt unberührt.
    Gelöscht wird vor dem Verarbeiten, damit eine kaputte Datei nicht bei jedem
    Start erneut auftaucht.
 
-Der Cache `pb-share` ist kein Offline-Cache: `onActivate` löscht heute alle
-Caches, deren Name nicht die aktuelle Fassung trägt. `pb-share` muss davon
-**ausgenommen** werden, sonst verschwindet eine geteilte Datei, wenn zeitgleich
-eine neue Fassung aktiv wird.
+Der Cache `pb-share` ist kein Offline-Cache. `onActivate` räumt heute nur Caches
+weg, deren Name mit `offline-cache-` beginnt und nicht die aktuelle Fassung trägt
+(`service-worker.published.js:102-105`) — ein Cache namens `pb-share` ist davon
+also **schon heute unberührt**, es ist keine Ausnahme einzubauen. Festgeschrieben
+wird dafür die Bedingung, von der das abhängt:
+
+**Der Name des Freigabe-Caches darf nicht mit `cacheNamePrefix`
+(`offline-cache-`) beginnen, und die Aufräumregel in `onActivate` bleibt auf
+dieses Präfix beschränkt.** Wird sie je zu „alles außer dem aktuellen Cache"
+verallgemeinert, verschwindet eine geteilte Datei, sobald während des Teilens
+eine neue Fassung aktiv wird. Der Test unten hält das fest.
 
 ## Was die Datenschutzzusage angeht
 
@@ -110,4 +128,65 @@ connect-src 'self'` bleibt unverändert, `privacy-check.mjs` muss grün bleiben.
   `boot.js`.
 - E2E: `POST /share-target` mit einer PDF führt zu `/reader` mit geöffneter Datei;
   der Eintrag in `pb-share` ist danach weg.
-- E2E: `pb-share` überlebt einen Fassungswechsel des Service Workers.
+- Die Abholung ist nicht zu früh: ein Test mit einem gefüllten `pb-share` und
+  einem `pendingFileName()`-Aufruf **unmittelbar** nach dem Laden von `boot.js`
+  muss den Namen liefern, nicht `null`.
+- `pb-share` überlebt einen Fassungswechsel des Service Workers: `onActivate`
+  mit einem gefüllten `pb-share` und einer neuen Fassung laufen lassen, danach
+  muss der Eintrag noch da sein. Das prüft nicht den heutigen Stand (der ist
+  schon richtig), sondern verhindert, dass eine spätere Verallgemeinerung der
+  Aufräumregel geteilte Dateien still frisst.
+
+---
+
+# Nachtrag 1 — abgenommen 2026-11-07
+
+Beim Lesen des Codes zeigte sich eine Lücke in der Schnittstelle oben. Sie ist
+keine Richtungsänderung, aber sie steht in der Tabelle, die abgenommen wurde.
+
+## Das Problem: die Abholung kommt zu spät
+
+`ReaderPage.razor:151-154` fragt **zuerst** `pendingFileName()` und bricht bei
+leerem Namen ab, bevor es `takePendingFile()` überhaupt aufruft:
+
+```csharp
+var name = await JS.InvokeAsync<string?>("pageboundBoot.pendingFileName");
+if (string.IsNullOrEmpty(name)) return;
+```
+
+Die Abholung aus `pb-share` ist asynchron (`caches.open` → `cache.match` →
+`blob()`). `pendingFileName()` ist heute ein **synchroner** Getter auf eine
+Variable. Mountet der Reader, bevor die Abholung durch ist, antwortet er `null`,
+der Reader bricht ab — und die geteilte Datei ist still verloren, obwohl sie
+gleich danach im Parkplatz landet. Dass der WASM-Start Sekunden braucht und ein
+Cache-Zugriff Millisekunden, ist kein Nachweis: genau diese Art „geht in der
+Praxis" steht hinter den bisherigen Fehlschlägen.
+
+## Die Änderung
+
+**`pendingFileName()` und `takePendingDesign()` warten intern auf die einmalige
+Abholung und liefern ein Promise.** Statt
+
+| `pendingFileName()` | `string \| null` |
+| `takePendingDesign()` | `string \| null` |
+
+gilt
+
+| `pendingFileName()` | `Promise<string \| null>` |
+| `takePendingDesign()` | `Promise<string \| null>` |
+
+`takePendingFile()` liefert schon heute ein Promise und wartet künftig auf
+dasselbe. Beide .NET-Aufrufer verwenden bereits `JS.InvokeAsync`, das ein
+zurückgegebenes Promise auflöst — **an `ReaderPage.razor` und
+`DesignerPage.razor` ändert sich keine Zeile.**
+
+`consumeLaunchDesign()` in `wysiwyg-editor.ts` behält Namen und Aufrufstelle
+(`DesignerPage.razor:921`), gibt die Zuständigkeit aber ab: es ruft nur noch
+`window.pageboundBoot.takePendingDesign()` auf. Der eigene `setConsumer` und der
+Zwischenspeicher `globalThis.__pbLaunchDesign` fallen weg.
+
+## Außerdem festgelegt
+
+Der PDF-Dateihandler bekommt `"action": "/reader"` (im Vertrag oben nicht
+benannt). Der bestehende Design-Handler behält `/editor`, damit eine
+`.pbdesign.json` ohne Umschreiben der Route im Designer landet.

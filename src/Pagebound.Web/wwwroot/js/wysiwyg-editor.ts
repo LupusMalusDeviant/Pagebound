@@ -110,25 +110,26 @@ function readAsDataUrl(file: File): Promise<string> {
 type DotNetRef = { invokeMethodAsync(method: string, ...args: unknown[]): Promise<unknown> };
 
 // --- PWA-File-Handler (.pbdesign.json) -----------------------------------------
-// Der launchQueue-Consumer feuert beim App-Start (vor Blazor-Boot) und parkt den
-// Dateiinhalt; der Designer holt ihn nach dem Mount per consumeLaunchDesign() ab.
-if ("launchQueue" in globalThis) {
-  (globalThis as any).launchQueue.setConsumer(async (params: { files?: Array<{ getFile(): Promise<File> }> }) => {
-    try {
-      if (!params.files || params.files.length === 0) return;
-      const file = await params.files[0].getFile();
-      (globalThis as any).__pbLaunchDesign = await file.text();
-    } catch {
-      /* Datei nicht lesbar — ignorieren */
-    }
-  });
-}
+// Hier steht KEIN launchQueue-Consumer mehr. launchQueue nimmt genau einen
+// Empfänger (setConsumer ersetzt den vorherigen) — ein zweiter hier hätte den
+// in boot.js still überschrieben, und welcher gewinnt, entschiede die
+// Ladereihenfolge der Bundles. Zuständig ist boot.js, das ohne Bundle und vor
+// Blazor läuft; es sortiert nach Dateiinhalt und parkt das Design.
+// Siehe docs/contracts/datei-eintritt.md.
 
-/** Holt eine per Datei-Doppelklick (PWA-File-Handler) übergebene Design-Datei ab (einmalig). */
-export function consumeLaunchDesign(): string | null {
-  const text = (globalThis as any).__pbLaunchDesign as string | undefined;
-  (globalThis as any).__pbLaunchDesign = undefined;
-  return text ?? null;
+/**
+ * Holt eine per Datei-Doppelklick (PWA-File-Handler) übergebene Design-Datei ab
+ * (einmalig). Wartet intern darauf, dass boot.js die Abholung beendet hat —
+ * DesignerPage ruft das per JS.InvokeAsync auf, löst also das Promise auf.
+ */
+export async function consumeLaunchDesign(): Promise<string | null> {
+  const boot = (globalThis as any).pageboundBoot;
+  if (!boot || typeof boot.takePendingDesign !== "function") return null;
+  try {
+    return (await boot.takePendingDesign()) ?? null;
+  } catch {
+    return null;
+  }
 }
 
 /** QR-Code als PNG-Data-URL erzeugen (lokal, kein Netz). */

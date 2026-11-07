@@ -65,6 +65,37 @@ test("Manifest: Store-Pflichtfelder sind gesetzt", () => {
   assert.ok(!/Pagebound\.Web/.test(manifest.name + manifest.short_name), "Projektvorlagen-Name steht noch im Manifest");
 });
 
+test("Manifest: Eintrittswege passen zu dem, was der Code behandelt", () => {
+  // Das Manifest ist eine Zusage an das Betriebssystem. Steht hier ein Pfad
+  // oder ein Feldname, den der Service Worker nicht liest, ist der Weg
+  // trotzdem registriert: Android zeigt Pagebound im Teilen-Menü, und die
+  // Freigabe läuft ins Leere — ohne dass irgendetwas rot würde. Deshalb beide
+  // Seiten gegeneinander halten (docs/contracts/datei-eintritt.md).
+  const sw = readFileSync(join(wwwroot, "service-worker.published.js"), "utf8");
+  const boot = readFileSync(join(wwwroot, "js", "boot.js"), "utf8");
+
+  const st = manifest.share_target;
+  assert.ok(st, "share_target fehlt");
+  assert.equal(st.method, "POST");
+  assert.equal(st.enctype, "multipart/form-data");
+  assert.ok(
+    sw.includes(`url.pathname === '${st.action}'`),
+    `der Service Worker behandelt ${st.action} nicht`,
+  );
+  const feld = st.params?.files?.[0]?.name;
+  assert.ok(feld, "share_target.params.files[0].name fehlt");
+  assert.ok(sw.includes(`form.getAll('${feld}')`), `der Service Worker liest das Feld "${feld}" nicht`);
+
+  // Jeder Dateihandler braucht ein Ziel, das die App kennt, und boot.js muss
+  // die Art erkennen, die er annimmt.
+  const handler = manifest.file_handlers ?? [];
+  const ziele = handler.map((h) => h.action);
+  assert.deepEqual(ziele, ["/reader", "/editor"], "unerwartete Ziele der Dateihandler");
+  const typen = handler.flatMap((h) => Object.keys(h.accept ?? {}));
+  assert.ok(typen.includes("application/pdf"), "kein Dateihandler für PDF");
+  assert.ok(boot.includes("launchQueue.setConsumer"), "boot.js nimmt launchQueue nicht entgegen");
+});
+
 test("Manifest: je ein Screenshot für breite und schmale Darstellung", () => {
   // Der Installationsdialog von Play und MS Store zeigt sie; fehlt die schmale
   // Variante, zeigt Play gar keine.

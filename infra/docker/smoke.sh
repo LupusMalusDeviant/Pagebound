@@ -76,6 +76,18 @@ for pfad in /datenschutz/ /en/privacy/; do
   ok "Datenschutzseite $pfad"
 done
 
+# Der Service Worker: Quelle ist service-worker.published.js, ausgeliefert wird
+# sie beim Veröffentlichen als /service-worker.js. Genau diese Umbenennung macht
+# einen Irrtum unsichtbar — wer auf /service-worker.published.js prüft, bekommt
+# 404 bzw. den Fallback und hält das für „fehlt". Fällt der SW aus dem Abbild
+# oder landet eine alte Fassung darin, läuft die App weiter (nur ohne Offline
+# und ohne Teilen-Ziel), und nichts wird rot.
+expect "/service-worker.js" - - identity application/javascript
+sw=$("${CURL[@]}" "$BASE/service-worker.js")
+grep -q "share-target" <<<"$sw" || fail "/service-worker.js kennt kein Teilen-Ziel — alte Fassung im Abbild"
+grep -q "pb-share" <<<"$sw" || fail "/service-worker.js kennt den Freigabe-Parkplatz nicht"
+ok "/service-worker.js mit Teilen-Ziel"
+
 # ---------------------------------------------------------------------------
 # Jedes <script src> aus index.html muss auch JavaScript sein.
 #

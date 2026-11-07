@@ -17,6 +17,19 @@ const cacheName = `${cacheNamePrefix}${self.assetsManifest.version}`;
 const offlineAssetsInclude = [ /\.dll$/, /\.pdb$/, /\.wasm/, /\.html/, /\.js$/, /\.css$/, /\.woff2?$/, /\.png$/, /\.jpe?g$/, /\.gif$/, /\.ico$/, /\.blat$/, /\.dat$/, /\.webmanifest$/, /^resources\/[a-z]{2}\.json$/ ];
 const offlineAssetsExclude = [ /^service-worker\.js$/ ];
 
+// --- Teilen-Ziel (share_target, Android) -------------------------------------
+// Eine Freigabe („Teilen → Pagebound") kommt als POST /share-target mit
+// multipart/form-data an. Hier wird sie abgefangen und für boot.js geparkt;
+// geprüft wird sie dort, von pageboundBoot.offer() — dem einzigen Prüfpunkt
+// (docs/contracts/datei-eintritt.md).
+//
+// Der Name trägt BEWUSST nicht cacheNamePrefix: onActivate räumt nur
+// offline-cache-* weg, deshalb übersteht eine geteilte Datei einen
+// Fassungswechsel. Wer die Aufräumregel verallgemeinert, bricht das.
+const shareCacheName = 'pb-share';
+const shareEntryUrl = '/__pb-share';
+const shareFilenameHeader = 'X-Pagebound-Filename';
+
 // Replace with your base path if you are hosting on a subfolder. Ensure there is a trailing '/'.
 const base = "/";
 const baseUrl = new URL(base, self.origin);
@@ -110,12 +123,49 @@ async function onActivate(event) {
     await self.clients.claim();
 }
 
+// Nimmt die geteilte Datei an und parkt sie. Antwortet mit einer Umleitung auf
+// /reader, damit die App normal startet und boot.js den Parkplatz leert.
+//
+// Diese Umleitung berührt die Härtung aus c4b7bfb nicht: sie beantwortet ein
+// POST, wird nicht gecacht, und index.html bleibt unberührt. Gecacht wird nur
+// die Datei selbst.
+async function onShareTarget(request) {
+    try {
+        const form = await request.formData();
+        // Der Manifest-Parameter heißt "file"; getAll, weil manche Plattformen
+        // mehrere schicken — die erste echte Datei genügt.
+        const file = form.getAll('file').find(v => typeof v !== 'string' && v);
+        if (file) {
+            const cache = await caches.open(shareCacheName);
+            await cache.put(shareEntryUrl, new Response(file, {
+                headers: {
+                    'Content-Type': file.type || 'application/pdf',
+                    // Prozentkodiert: ein Dateiname darf Zeichen enthalten, die
+                    // in einem HTTP-Header nicht erlaubt sind (Umlaute, Komma).
+                    [shareFilenameHeader]: encodeURIComponent(file.name || 'geteilt.pdf'),
+                },
+            }));
+        }
+    } catch (err) {
+        // Nicht lesbar oder Cache voll: die App startet dann einfach ohne Datei,
+        // statt die Freigabe mit einem Netzwerkfehler zu beantworten.
+        console.warn('Service worker: Freigabe nicht übernommen', err);
+    }
+    // Absolute URL: Response.redirect verlangt sie, relativ wirft es.
+    return Response.redirect(new URL('/reader', self.origin).href, 303);
+}
+
 async function onFetch(event) {
+    const url = new URL(event.request.url);
+
+    if (event.request.method === 'POST' && url.pathname === '/share-target') {
+        return onShareTarget(event.request);
+    }
+
     if (event.request.method !== 'GET') {
         return fetch(event.request);
     }
 
-    const url = new URL(event.request.url);
     const cache = await caches.open(cacheName);
 
     // i18n-Bundles immer frisch vom Netz holen (s.o.), damit der nächste Boot nach
