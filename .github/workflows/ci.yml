@@ -55,13 +55,17 @@ jobs:
       # Systemuhr) — dass es zum Inhalt passt, prüft hier nichts.
       - name: Landing pages up to date (gen-landing.mjs)
         run: |
-          node tools/gen-landing.mjs src/Pagebound.Web/wwwroot | sort > /tmp/landing-written
+          node tools/gen-landing.mjs src/Pagebound.Web/wwwroot | LC_ALL=C sort > /tmp/landing-written
           # Jede eingecheckte Seite unterhalb von wwwroot (die App-eigene
           # wwwroot/index.html hat nach dem Abschneiden des Präfixes keinen
           # Schrägstrich und fällt damit heraus).
-          git ls-files --full-name -- src/Pagebound.Web/wwwroot \
+          # -z: sonst zeigt git einen Pfad mit Nicht-ASCII-Zeichen in Anführungs-
+          # zeichen und oktal maskiert ("…/\303\274ber/index.html") — der fiele
+          # aus dem Vergleich und die Waise bliebe unbemerkt.
+          git ls-files -z --full-name -- src/Pagebound.Web/wwwroot \
+            | tr '\0' '\n' \
             | sed 's|^src/Pagebound\.Web/wwwroot/||' \
-            | grep -E '^.+/index\.html$' | sort > /tmp/landing-tracked
+            | grep -E '^.+/index\.html$' | LC_ALL=C sort > /tmp/landing-tracked
           orphans=$(comm -13 /tmp/landing-written /tmp/landing-tracked)
           # Inhalt vergleichen: git diff normalisiert die Zeilenenden über
           # „* text=auto" in .gitattributes. Neue, nicht eingecheckte Dateien

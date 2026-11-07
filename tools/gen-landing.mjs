@@ -236,12 +236,26 @@ function str(value, what) {
   return value;
 }
 
-function pairs(value, what) {
+// Indexiert prüfen, nicht mit forEach/map: die überspringen die Löcher einer
+// lückenhaften Liste ([, , ,] hat length 3 und kein einziges Element), und das
+// Rendern überspringt sie genauso — es käme eine leere Aufzählung heraus, ohne
+// dass irgendwo „undefined" auftaucht.
+function list(value, what) {
   if (!Array.isArray(value) || value.length === 0) throw new Error(`${what}: leere oder fehlende Liste`);
-  value.forEach((pair, i) => {
-    if (!Array.isArray(pair) || pair.length !== 2) throw new Error(`${what}[${i}]: kein Paar`);
-    pair.forEach((s, j) => str(s, `${what}[${i}][${j}]`));
-  });
+  for (let i = 0; i < value.length; i++) if (!(i in value)) throw new Error(`${what}[${i}]: Lücke in der Liste`);
+  return value;
+}
+
+function strings(value, what, len) {
+  list(value, what);
+  if (len !== undefined && value.length !== len) throw new Error(`${what}: ${value.length} statt ${len} Einträgen`);
+  for (let i = 0; i < value.length; i++) str(value[i], `${what}[${i}]`);
+  return value;
+}
+
+function pairs(value, what) {
+  list(value, what);
+  for (let i = 0; i < value.length; i++) strings(value[i], `${what}[${i}]`, 2);
 }
 
 function validate() {
@@ -258,10 +272,8 @@ function validate() {
       if (!p) throw new Error(`PAGES[${n}].${lang} fehlt`);
       const where = `PAGES[${n}].${lang}`;
       for (const k of PAGE_KEYS) str(p[k], `${where}.${k}`);
-      if (!Array.isArray(p.cta) || p.cta.length !== 2) throw new Error(`${where}.cta: kein Paar`);
-      p.cta.forEach((s, i) => str(s, `${where}.cta[${i}]`));
-      if (!Array.isArray(p.steps) || p.steps.length === 0) throw new Error(`${where}.steps: leer`);
-      p.steps.forEach((s, i) => str(s, `${where}.steps[${i}]`));
+      strings(p.cta, `${where}.cta`, 2);
+      strings(p.steps, `${where}.steps`);
       pairs(p.faq, `${where}.faq`);
       if ("note" in p) str(p.note, `${where}.note`);
       for (const k of Object.keys(p)) if (![...PAGE_KEYS, "cta", "steps", "faq", "note"].includes(k)) throw new Error(`${where}.${k}: unbekannter Schlüssel (Tippfehler?)`);
@@ -323,7 +335,10 @@ const written = [];
 
 function write(rel, text) {
   const path = rel.replaceAll("\\", "/");
-  const at = text.search(/\bundefined\b/);
+  // Als Teilwort suchen, nicht mit Wortgrenzen: ein `p.h1 + ui.sufix` ergibt
+  // „PDF-Seiten löschenundefined" — ohne Wortgrenze davor. Keiner der Texte
+  // hier enthält das Wort, also ist jedes Vorkommen ein Fehler.
+  const at = text.indexOf("undefined");
   if (at >= 0)
     throw new Error(`${path}: enthält das Wort "undefined" — fehlender Text in der Vorlage? …${text.slice(Math.max(0, at - 60), at + 20)}…`);
   writeFileSync(join(ROOT, rel), text, { encoding: "utf8" });
