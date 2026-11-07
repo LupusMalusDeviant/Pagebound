@@ -155,18 +155,25 @@ function shareFromElsewhere(request) {
     try {
         url = new URL(ref);
     } catch {
-        return false; // unlesbarer Verweis: kein Browser-Tab, also keine fremde Seite
+        // Unlesbarer Verweis: nicht als Gerät durchlassen. Wir wissen nicht, was
+        // er ist — und der Zweifel fällt gegen die Freigabe, nicht für sie.
+        return true;
     }
-    // NUR ein http(s)-Verweis mit fremder Origin ist fremd.
+    // Die Schemata werden BENANNT, nicht pauschal erlaubt (Nachtrag 3.2).
     //
     // Die installierte Android-Fassung (Trusted Web Activity) bekommt von Chrome
     // den Verweis `android-app://<paket>/`. Dessen `origin` ist "null" und wäre
     // damit immer ungleich der eigenen: eine Prüfung auf `origin !== self.origin`
     // allein weist in genau dem Build JEDE Freigabe ab — dem Build, um den es in
-    // diesem Meilenstein geht. Dasselbe gilt für jedes andere Schema, über das
-    // ein Betriebssystem eine Freigabe hereingibt.
-    if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
-    return url.origin !== self.origin;
+    // diesem Meilenstein geht.
+    //
+    // Umgekehrt war „jedes Schema außer http(s) ist das Betriebssystem" zu weit
+    // offen: damit galt auch `chrome-extension://` als Gerät. Kommt ein weiterer
+    // Auslieferungsweg hinzu (iOS, Microsoft Store), wird sein Schema hier
+    // eingetragen und geprüft — nicht stillschweigend mitgenommen.
+    if (url.protocol === 'android-app:') return false;
+    if (url.protocol === 'http:' || url.protocol === 'https:') return url.origin !== self.origin;
+    return true;
 }
 
 // Nummernvergabe und Ablegen müssen zusammen laufen. Zwei Fetch-Events wechseln
@@ -188,6 +195,22 @@ async function onShareTarget(request) {
         // Eigene Kennung: der Nutzer soll erfahren, warum nichts aufgeht.
         return zuReader('?share=rejected');
     }
+    // Grenze aus Content-Length, VOR formData(). Danach ist der ganze Body schon
+    // gelesen: `file.size` kommt erst, wenn eine 1-GB-Freigabe komplett durch den
+    // Service Worker gelaufen ist. Content-Length ist eine Angabe des Absenders
+    // und darf nicht die einzige Prüfung sein (sie kann fehlen oder lügen) —
+    // deshalb bleibt die Prüfung an `file.size` unten bestehen. Der Zuschlag
+    // deckt die multipart-Hülle (Trennzeichen, Header je Teil).
+    const laenge = Number(request.headers.get('Content-Length'));
+    if (Number.isFinite(laenge) && laenge > shareMaxBytes + 64 * 1024) {
+        console.warn('Service worker: Freigabe zu groß (Content-Length)', laenge);
+        return zuReader('?share=toobig');
+    }
+    // Die Nummer dieser Freigabe, sobald sie im Cache liegt. Sie wandert in die
+    // Umleitung (`?share=<n>`), damit boot.js GENAU diesen Eintrag abholt und
+    // nicht den ältesten, der noch herumliegt (Nachtrag 3.1). Bleibt sie null,
+    // ist etwas schiefgegangen und `problem` sagt, was.
+    let nummer = null;
     let problem = 'failed';
     try {
         const form = await request.formData();
@@ -199,11 +222,13 @@ async function onShareTarget(request) {
             // in den Cache Storage, nur damit boot.js sie danach wegen
             // Übergröße ablehnt — auf einem schwachen Telefon kostet das
             // Speicher, Kontingent und Zeit.
+            // Zweite Schranke, an der echten Größe: Content-Length oben kann
+            // fehlen oder falsch sein, diese Zahl stammt aus dem gelesenen Body.
             if (file.size > shareMaxBytes) {
                 console.warn('Service worker: Freigabe zu groß', file.size);
                 return zuReader('?share=toobig');
             }
-            await withShareLock(async () => {
+            nummer = await withShareLock(async () => {
                 const cache = await caches.open(shareCacheName);
                 // Eigener Schlüssel je Freigabe: zwei kurz hintereinander dürfen
                 // sich nicht überschreiben, und boot.js darf keine löschen, die es
@@ -222,6 +247,9 @@ async function onShareTarget(request) {
                         [shareFilenameHeader]: encodeURIComponent(file.name || 'geteilt.pdf'),
                     },
                 }));
+                // Innerhalb der Sperre vergeben UND zurückgegeben: außerhalb
+                // könnte eine zweite Freigabe die Zahl schon weitergedreht haben.
+                return n + 1;
             });
             problem = null;
         }
@@ -230,8 +258,11 @@ async function onShareTarget(request) {
         console.warn('Service worker: Freigabe nicht übernommen', err);
     }
     // Bei einem Fehlschlag sagt die Kennung der App, dass sie das melden soll —
-    // sonst käme der Reader leer hoch und die Freigabe sähe kaputt aus.
-    return zuReader(problem ? '?share=' + problem : '');
+    // sonst käme der Reader leer hoch und die Freigabe sähe kaputt aus. Im
+    // Erfolgsfall trägt sie die Nummer dieser Freigabe: boot.js holt damit genau
+    // diesen Eintrag ab (Nachtrag 3.1).
+    if (problem) return zuReader('?share=' + problem);
+    return zuReader('?share=' + nummer);
 }
 
 async function onFetch(event) {

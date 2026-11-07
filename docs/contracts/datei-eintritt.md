@@ -1,6 +1,6 @@
 # Vertrag: Wie eine Datei in Pagebound hineinkommt
 
-Status: **abgenommen 2026-11-07**, einschließlich Nachtrag 1 · betrifft `boot.js`,
+Status: **abgenommen 2026-11-07**, einschließlich der Nachträge 1 bis 3 · betrifft `boot.js`,
 `wysiwyg-editor.ts`, `service-worker.published.js`, `ReaderPage.razor`,
 `DesignerPage.razor`, `manifest.webmanifest`
 
@@ -268,3 +268,104 @@ beantwortet `try_files` den POST mit 405 und der Nutzer sieht eine Fehlerseite.
    öffnen?"). Sie würde die Lücke schließen, die die Herkunftsprüfung offen
    lässt, kostet aber einen Klick bei jeder Freigabe — eine
    Bedienungsentscheidung, nicht meine.
+
+---
+
+# Nachtrag 3 — abgenommen 2026-11-07, aus dem Review von 37f718b
+
+Zwei Änderungen am abgenommenen Stand. Die erste behebt einen Fehler, bei dem
+die App eine Datei öffnet, die der Nutzer nicht gewählt hat; die zweite schließt
+die Herkunftsprüfung, die in Nachtrag 2 zu weit offen stand.
+
+## 3.1 Eine Freigabe wird genau dort abgeholt, wohin sie umgeleitet hat
+
+**Der Fehler.** Nachtrag 2 gibt jeder Freigabe einen eigenen Schlüssel
+`/__pb-share/<n>`, und `boot.js` holt bei jedem Start **alle** geparkten
+Einträge ab, aufsteigend sortiert. Die *älteste* gewinnt also, und jede weitere
+läuft in `if (pending)`, wird aber vorher schon aus dem Cache gelöscht. Daraus
+folgt:
+
+1. Freigabe A wird als `/__pb-share/1` geparkt, der Start bricht ab (Fenster
+   geschlossen, Tab beendet) — A bleibt liegen.
+2. Tage später teilt der Nutzer B. Der Worker legt B als `/__pb-share/2` ab.
+3. `boot.js` nimmt A, öffnet A, und löscht B mit der Meldung „Mehrere geteilte
+   Dateien — geöffnet wird die erste".
+
+Der Nutzer sieht eine Datei, die er nicht gewählt hat; seine eigene ist weg; und
+die Meldung ist falsch, weil er eine Datei geteilt hat. Weil `pickUpShared()`
+bei **jedem** Start und auf **jeder** Route läuft, geht A auch bei einem
+gewöhnlichen Aufruf von `/` oder `/editor` auf, und `accept()` reißt die Route
+auf `/reader`. Das widerspricht auch der Zusage der Datenschutzseite, eine
+geteilte Datei werde „beim nächsten Start der App entnommen und gelöscht":
+gelöscht ja, entnommen nein.
+
+**Die Änderung.** Der Schlüssel wird mitgeteilt, statt erraten.
+
+| | vorher (Nachtrag 2) | neu |
+|---|---|---|
+| Umleitung bei Erfolg | `/reader` | `/reader?share=<n>` |
+| Abholung | alle Einträge, aufsteigend, in Runden | **genau** `/__pb-share/<n>` aus dem Parameter |
+| Start ohne `?share=` | holt alles ab | öffnet nichts aus dem Freigabe-Cache |
+
+Im Einzelnen:
+
+1. Der Worker kennt `n` innerhalb der Sperre und hängt es an das Umleitungsziel.
+   Die Kennung ist eine Zahl; `?share=failed|rejected|toobig` bleiben unverändert
+   die Fehlerfälle.
+2. `boot.js` liest `share` per `URLSearchParams`. Ist der Wert eine Zahl, wird
+   `/__pb-share/<zahl>` geholt, verarbeitet und gelöscht — und nur dieser.
+3. **Waisen werden aufgeräumt, nicht geöffnet.** Jeder andere Eintrag im
+   Freigabe-Cache wird beim Start gelöscht, ohne ihn zu öffnen und ohne Meldung.
+   Damit bleibt die Zusage der Datenschutzseite wahr, und ein liegengebliebener
+   Eintrag kann nie mehr eine Route aufreißen. Das deckt auch den festen
+   Schlüssel `/__pb-share` ohne Nummer aus dem Ursprungsstand ab (nie
+   ausgeliefert — `a194d53` ist bis heute nicht gepusht, belegt über
+   `git log origin/main..HEAD`; die Aufräumregel kostet aber nichts).
+
+   **Zwei Einschränkungen, bei der Umsetzung gefunden** (enger als „jeder andere
+   Eintrag", deshalb hier nachgetragen):
+
+   a) **Eine HÖHERE Nummer als die eigene wird nicht gelöscht.** Teilt der
+      Nutzer B, während die Seite aus Freigabe A noch lebt, parkt der Worker B
+      und antwortet mit einer Umleitung — die Navigation dorthin kommt erst. Ein
+      Aufräumen, das „alles außer meiner" löscht, würde B in genau diesem
+      Fenster wegräumen, und das neue Dokument fände nichts. Gelöscht werden
+      deshalb nur Einträge mit **kleinerer** Nummer und Einträge ohne Nummer.
+      Ein Start **ohne** `?share=` räumt alles auf, was er beim Nachsehen
+      vorfindet: dort ist keine eigene Navigation unterwegs, an der sich die
+      Reihenfolge messen ließe. Maßgeblich ist immer die eine Momentaufnahme von
+      `cache.keys()`; was danach ankommt, bleibt liegen.
+
+   b) **Fehlt der Eintrag zur eigenen Nummer, wird das gemeldet** (dieselbe
+      Meldung wie `?share=failed`). Sonst wäre genau der Fall aus (a) — oder ein
+      vom Browser geräumter Cache — ein stilles Nichts: die App käme leer hoch,
+      und der Nutzer erfährt nicht, dass seine Datei nicht ankam.
+4. Die Runden-Schleife entfällt. Sie sollte eine Freigabe einsammeln, die
+   *während* der Abholung ankommt; eine solche Freigabe hat jetzt ihre eigene
+   Navigation mit ihrer eigenen Nummer und braucht die Schleife nicht.
+5. Die Meldung „Mehrere geteilte Dateien — geöffnet wird die erste" entfällt mit
+   ihr. Mehrere Dateien in **einer** Freigabe bleiben der Fall von Nachtrag 2
+   (die erste gewinnt), dort unverändert.
+
+## 3.2 Die Herkunftsprüfung nennt die Schemata, statt alle fremden zu erlauben
+
+**Der Fehler.** Nachtrag 2 wertet nur einen `http(s)`-Verweis mit fremder Origin
+als fremd — damit die Android-Fassung (`android-app://<paket>/`) nicht jede
+Freigabe abgewiesen bekommt. Das fällt aber nach *offen* aus, mehr als nötig:
+
+- ein Verweis, den `new URL()` nicht lesen kann, gilt jetzt als vertrauenswürdig
+  (vorher als fremd);
+- **jedes** andere Schema gilt als Betriebssystem, auch `chrome-extension://`.
+
+**Die Änderung.** Vertrauenswürdig ist genau: kein Verweis, `about:client`, die
+eigene Origin über `http(s)`, oder das Schema `android-app:`. Alles andere —
+fremde `http(s)`-Origin, jedes weitere Schema, ein unlesbarer Verweis — wird mit
+`?share=rejected` abgewiesen. Kommt ein weiterer Auslieferungsweg hinzu
+(iOS, Microsoft Store), wird sein Schema hier eingetragen und geprüft, nicht
+pauschal erlaubt.
+
+**Was das nicht schließt**, unverändert zu Nachtrag 2 und zu „Offen 2": eine
+fremde Seite kann den Verweis per `referrerpolicy="no-referrer"` unterdrücken.
+Dann ist `request.referrer` leer und die Freigabe gilt als Freigabe des
+Betriebssystems. Das ist bekannt und wird ausdrücklich in Kauf genommen; es
+gehört in `SECURITY.md`, damit es nicht als Schutz erscheint, der es nicht ist.

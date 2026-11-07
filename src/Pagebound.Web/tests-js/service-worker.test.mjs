@@ -94,12 +94,30 @@ function shareRequest({ name = "geteilt.pdf", body = "%PDF-1.7\n", feld = "file"
 
 const shareStore = (ctx) => ctx.caches._stores.get("pb-share");
 
+/**
+ * Eine Freigabe mit vorab gelesenem Formular. `formData()` löst dann als
+ * Mikrotask auf, nicht erst in einem späteren Makrotask wie beim Lesen eines
+ * echten Body-Streams — nur so verschränken sich zwei gleichzeitige Abläufe im
+ * Prüfstand so wie im Browser (siehe den Wettlauf-Test unten).
+ *
+ * `headers` wird nachgebaut, weil der Worker Content-Length liest. Ohne Angabe
+ * fehlt der Header, wie bei einer Freigabe mit unbekannter Länge.
+ */
+function fakeShareRequest(form, { contentLength = null } = {}) {
+  return {
+    method: "POST",
+    url: `${ORIGIN}/share-target`,
+    headers: { get: (name) => (name.toLowerCase() === "content-length" ? contentLength : null) },
+    formData: async () => form,
+  };
+}
+
 test("Freigabe: die Datei wird geparkt und auf /reader umgeleitet", async () => {
   const { ctx, fetchCalls } = loadWorker();
   const res = await ctx.onFetch({ request: shareRequest() });
 
   assert.equal(res.status, 303, "keine 303-Umleitung");
-  assert.equal(res.headers.get("location"), `${ORIGIN}/reader`);
+  assert.equal(res.headers.get("location"), `${ORIGIN}/reader?share=1`);
   // Der Kern: die Freigabe darf NICHT ins Netz gehen. Es gibt keinen Server,
   // der sie annehmen könnte — der GET-Ausstieg in onFetch würde genau das tun.
   assert.deepEqual(fetchCalls, [], "die Freigabe ging ins Netz");
@@ -155,11 +173,7 @@ test("zwei Freigaben GLEICHZEITIG bekommen eigene Schlüssel", async () => {
   const formulare = await Promise.all(
     ["eins.pdf", "zwei.pdf"].map((name) => shareRequest({ name }).formData()),
   );
-  const anfragen = formulare.map((form) => ({
-    method: "POST",
-    url: `${ORIGIN}/share-target`,
-    formData: async () => form,
-  }));
+  const anfragen = formulare.map((form) => fakeShareRequest(form));
 
   await Promise.all(anfragen.map((request) => ctx.onFetch({ request })));
 
@@ -185,6 +199,38 @@ test("eine Freigabe von fremder Herkunft wird abgewiesen, mit eigener Kennung", 
   assert.equal(shareStore(ctx), undefined, "die fremde Datei wurde geparkt");
 });
 
+test("BEKANNTE LÜCKE: ohne Verweis gilt eine fremde Freigabe als Freigabe des Geräts", async () => {
+  // Dieser Test nagelt eine Lücke fest, nicht einen Schutz. Eine fremde Seite
+  // kann ihr Formular mit referrerpolicy="no-referrer" abschicken; dann ist
+  // `request.referrer` leer, und ein leerer Verweis MUSS als Betriebssystem
+  // gelten — eine echte Freigabe hat keinen Verweis auf eine Seite.
+  //
+  // Sec-Fetch-Site hilft nicht: diese Header setzt der Browser erst nach dem
+  // Service Worker. Die Herkunftsprüfung ist deshalb die erste Schranke, nicht
+  // die einzige: die Datei wird wie jede Eingabe über
+  // pageboundBoot.offer() nach MIME UND Magic Bytes geprüft, und der Reader
+  // zeigt den Dateinamen. Was bleibt: eine gültige PDF, die der Nutzer nicht
+  // gewählt hat, kann aufgehen.
+  //
+  // In Kauf genommen, siehe „Offen 2" in docs/contracts/datei-eintritt.md und
+  // die Zeile zum Teilen-Ziel in SECURITY.md. Wird dort entschieden, eine
+  // Rückfrage einzubauen, muss DIESER Test rot werden — dann ist er der
+  // Hinweis, dass die Entscheidung umgesetzt gehört.
+  const { ctx } = loadWorker();
+  const form = await shareRequest({ name: "fremd.pdf" }).formData();
+  const res = await ctx.onFetch({
+    request: {
+      method: "POST",
+      url: `${ORIGIN}/share-target`,
+      referrer: "",
+      headers: { get: () => null },
+      formData: async () => form,
+    },
+  });
+  assert.equal(res.headers.get("location"), `${ORIGIN}/reader?share=1`);
+  assert.ok(shareStore(ctx), "heutiges Verhalten: die Datei wird geparkt");
+});
+
 test("eine Freigabe von eigener Herkunft wird angenommen", async () => {
   const { ctx } = loadWorker();
   await ctx.onFetch({ request: shareRequest({ von: `${ORIGIN}/reader` }) });
@@ -202,7 +248,7 @@ test("die Android-App (TWA) teilt mit einem android-app://-Verweis und wird ange
   const res = await ctx.onFetch({
     request: shareRequest({ name: "von-android.pdf", von: "android-app://de.pagebound.app/" }),
   });
-  assert.equal(res.headers.get("location"), `${ORIGIN}/reader`, "die Freigabe der eigenen App wurde abgewiesen");
+  assert.equal(res.headers.get("location"), `${ORIGIN}/reader?share=1`, "die Freigabe der eigenen App wurde abgewiesen");
   const store = shareStore(ctx);
   assert.ok(store, "nichts geparkt — die App bekäme einen leeren Reader");
   assert.equal(
@@ -225,9 +271,8 @@ test("eine zu große Freigabe wird nicht abgelegt", async () => {
   const datei = form.getAll("file")[0];
   Object.defineProperty(datei, "size", { value: 200 * 1024 * 1024, configurable: true });
   assert.equal(datei.size, 200 * 1024 * 1024, "size ließ sich nicht überschreiben — der Test prüft nichts");
-  const request = { method: "POST", url: echt.url, formData: async () => form };
-
-  const res = await ctx.onFetch({ request });
+  // Ohne Content-Length: so greift genau die Prüfung an der echten Größe.
+  const res = await ctx.onFetch({ request: fakeShareRequest(form) });
   assert.equal(res.status, 303);
   assert.equal(res.headers.get("location"), `${ORIGIN}/reader?share=toobig`);
   assert.equal(shareStore(ctx)?.size ?? 0, 0, "die zu große Datei liegt im Cache Storage");
@@ -242,17 +287,154 @@ test("eine Freigabe knapp unter der Grenze wird abgelegt", async () => {
     value: 100 * 1024 * 1024 - 1,
     configurable: true,
   });
-  const res = await ctx.onFetch({ request: { method: "POST", url: echt.url, formData: async () => form } });
-  assert.equal(res.headers.get("location"), `${ORIGIN}/reader`);
+  const res = await ctx.onFetch({ request: fakeShareRequest(form) });
+  assert.equal(res.headers.get("location"), `${ORIGIN}/reader?share=1`);
   assert.deepEqual([...shareStore(ctx).keys()], ["/__pb-share/1"]);
 });
 
-test("die Grenze im Worker ist dieselbe wie in boot.js und im Reader", () => {
-  // Drei Stellen, eine Zahl. Läuft eine davon weg, lehnt eine Schicht ab, was
-  // die andere durchlässt — und der Fehler erscheint erst beim Nutzer.
+test("ein fremdes Schema gilt nicht als Gerät", async () => {
+  // Nachtrag 3.2. „Jedes Schema außer http(s) ist das Betriebssystem" war zu
+  // weit offen: damit zählte auch eine Browser-Erweiterung als Gerät. Benannt
+  // ist nur android-app: — kommt ein Auslieferungsweg hinzu, wird sein Schema
+  // eingetragen und geprüft, nicht stillschweigend mitgenommen.
+  const { ctx } = loadWorker();
+  for (const ref of ["chrome-extension://abcdefghijklmnop/seite.html", "file:///C:/tmp/seite.html"]) {
+    const res = await ctx.onFetch({
+      request: {
+        method: "POST",
+        url: `${ORIGIN}/share-target`,
+        referrer: ref,
+        headers: { get: () => null },
+        formData: async () => { throw new Error("darf nicht gelesen werden"); },
+      },
+    });
+    assert.equal(res.headers.get("location"), `${ORIGIN}/reader?share=rejected`, `durchgelassen: ${ref}`);
+  }
+  assert.equal(shareStore(ctx), undefined, "eine fremde Datei wurde geparkt");
+});
+
+test("ein unlesbarer Verweis gilt nicht als Gerät", async () => {
+  // Der Zweifel fällt gegen die Freigabe. Vorher war ein Verweis, den
+  // `new URL()` nicht lesen kann, vertrauenswürdig — der Vorgabewert war offen.
+  const { ctx } = loadWorker();
+  const res = await ctx.onFetch({
+    request: {
+      method: "POST",
+      url: `${ORIGIN}/share-target`,
+      referrer: ":::kein-url:::",
+      headers: { get: () => null },
+      formData: async () => { throw new Error("darf nicht gelesen werden"); },
+    },
+  });
+  assert.equal(res.headers.get("location"), `${ORIGIN}/reader?share=rejected`);
+});
+
+test("die Umleitung nennt die Nummer DIESER Freigabe", async () => {
+  // Nachtrag 3.1: ohne die Nummer holte boot.js „alles, was herumliegt" ab und
+  // öffnete die älteste Freigabe. Die zweite Freigabe muss ihre eigene Nummer
+  // bekommen, nicht wieder die 1.
+  const { ctx } = loadWorker();
+  const erste = await ctx.onFetch({ request: shareRequest({ name: "eins.pdf" }) });
+  const zweite = await ctx.onFetch({ request: shareRequest({ name: "zwei.pdf" }) });
+  assert.equal(erste.headers.get("location"), `${ORIGIN}/reader?share=1`);
+  assert.equal(zweite.headers.get("location"), `${ORIGIN}/reader?share=2`);
+  // Und die Nummer zeigt wirklich auf den Eintrag mit diesem Namen.
+  assert.equal(
+    decodeURIComponent(shareStore(ctx).get("/__pb-share/2").headers.get("X-Pagebound-Filename")),
+    "zwei.pdf",
+  );
+});
+
+test("gleichzeitige Freigaben bekommen je ihre eigene Nummer in der Umleitung", async () => {
+  // Die Nummer wird INNERHALB der Sperre vergeben und zurückgegeben. Würde sie
+  // außerhalb gelesen, hätte die zweite Freigabe die Zahl schon weitergedreht
+  // und beide Umleitungen zeigten auf denselben Eintrag.
+  const { ctx } = loadWorker();
+  const formulare = await Promise.all(
+    ["eins.pdf", "zwei.pdf"].map((name) => shareRequest({ name }).formData()),
+  );
+  const antworten = await Promise.all(
+    formulare.map((form) => ctx.onFetch({ request: fakeShareRequest(form) })),
+  );
+  const ziele = antworten.map((r) => r.headers.get("location")).sort();
+  assert.deepEqual(ziele, [`${ORIGIN}/reader?share=1`, `${ORIGIN}/reader?share=2`]);
+});
+
+test("eine zu große Freigabe wird abgewiesen, OHNE den Body zu lesen", async () => {
+  // Die Prüfung an `file.size` kommt zu spät: `request.formData()` hat den
+  // ganzen Body dann schon gelesen. Eine 1-GB-Freigabe läuft so vollständig
+  // durch den Service Worker, nur damit sie danach abgelehnt wird.
+  // Content-Length steht VOR dem Lesen zur Verfügung.
+  const { ctx } = loadWorker();
+  let gelesen = false;
+  const res = await ctx.onFetch({
+    request: {
+      method: "POST",
+      url: `${ORIGIN}/share-target`,
+      headers: { get: (n) => (n.toLowerCase() === "content-length" ? String(1024 * 1024 * 1024) : null) },
+      formData: async () => { gelesen = true; return new FormData(); },
+    },
+  });
+  assert.equal(res.headers.get("location"), `${ORIGIN}/reader?share=toobig`);
+  assert.equal(gelesen, false, "der Body wurde gelesen, obwohl die Länge schon zu groß war");
+});
+
+test("Content-Length knapp über der Grenze bleibt erlaubt (multipart-Hülle)", async () => {
+  // Der Zuschlag ist nicht Kosmetik: ein multipart-Body ist größer als die
+  // Datei darin (Trennzeichen, Header je Teil). Ohne Zuschlag würde eine Datei
+  // genau an der Grenze abgewiesen, die boot.js annehmen würde.
+  const { ctx } = loadWorker();
+  const form = await shareRequest({ name: "grenznah.pdf" }).formData();
+  const res = await ctx.onFetch({
+    request: fakeShareRequest(form, { contentLength: String(100 * 1024 * 1024 + 2048) }),
+  });
+  assert.equal(res.headers.get("location"), `${ORIGIN}/reader?share=1`);
+  assert.deepEqual([...shareStore(ctx).keys()], ["/__pb-share/1"]);
+});
+
+test("genau an der Grenze wird eine Freigabe noch angenommen", () => {
+  // Das Verhalten AN der Grenze, nicht knapp darunter: 100 MiB − 1 läuft mit `>`
+  // und mit `>=` durch, der Test unterscheidet die beiden also nicht. Genau
+  // 100 MiB tut es. Festgelegt ist: die Grenze selbst ist erlaubt (`>`), hier
+  // wie in boot.js und in ReaderPane.MaxFileSize.
+  assert.match(
+    source,
+    /if \(file\.size > shareMaxBytes\)/,
+    "nicht mehr `>` — dann ist genau die Grenze plötzlich zu groß",
+  );
+});
+
+test("genau an der Grenze nimmt auch boot.js die Datei an", async () => {
+  // Zweite Schicht, dieselbe Zahl, dieselbe Richtung des Vergleichs. Läuft eine
+  // davon weg, lehnt eine Schicht ab, was die andere durchlässt — und der
+  // Fehler erscheint erst beim Nutzer.
+  const bootQuelle = readFileSync(join(resolve(here, ".."), "wwwroot", "js", "boot.js"), "utf8");
+  assert.match(bootQuelle, /if \(file\.size > MAX_BYTES\)/);
+});
+
+test("die Grenze steht in allen drei Schichten auf derselben Zahl", () => {
+  // Quelltextvergleich, und das ist hier die einzige Möglichkeit: die dritte
+  // Schicht ist C#. Entscheidend ist, dass der Test die dritte Stelle wirklich
+  // ansieht — vorher hieß er „und im Reader", ohne ReaderPane je zu öffnen.
   assert.match(source, /const shareMaxBytes = 100 \* 1024 \* 1024;/);
   const boot = readFileSync(join(resolve(here, ".."), "wwwroot", "js", "boot.js"), "utf8");
   assert.match(boot, /MAX_BYTES\s*=\s*100 \* 1024 \* 1024/);
+
+  const reader = readFileSync(
+    join(resolve(here, ".."), "Features", "Reader", "ReaderPane.razor"),
+    "utf8",
+  );
+  // C#-Literale dürfen Suffixe (100L) und Unterstriche (100_000) tragen; beides
+  // wird entfernt, dann wird das Produkt ausgerechnet — ohne eval.
+  const treffer = /MaxFileSize\s*=\s*([0-9_LlUu\s*]+);/.exec(reader);
+  assert.ok(treffer, "ReaderPane.MaxFileSize nicht gefunden — umbenannt? Dann hier mitziehen.");
+  const faktoren = treffer[1]
+    .replace(/[_LlUu\s]/g, "")
+    .split("*")
+    .map(Number);
+  assert.ok(faktoren.every(Number.isFinite), `MaxFileSize nicht lesbar: ${treffer[1].trim()}`);
+  const wert = faktoren.reduce((a, b) => a * b, 1);
+  assert.equal(wert, 100 * 1024 * 1024, `ReaderPane.MaxFileSize ist ${wert}, nicht 100 MiB`);
 });
 
 test("Freigabe ohne Datei: Umleitung mit Fehlerkennung", async () => {

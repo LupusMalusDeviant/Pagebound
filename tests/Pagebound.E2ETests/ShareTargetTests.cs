@@ -87,11 +87,29 @@ public sealed class ShareTargetTests
         Skip.IfNot(_fx.Available, _fx.SkipReason);
         var page = await OpenControlledAsync();
 
+        // Die Fehlerkennung steht nur in der URL, auf die der Service Worker
+        // umleitet; `boot.js` räumt sie danach per history.replaceState weg. Eine
+        // Prüfung auf `location.search` konnte deshalb nicht mehr rot werden —
+        // und sie sah nur `failed` an, nicht `rejected` oder `toobig`. Die
+        // beobachtete Navigation ist eindeutig.
+        var navigationen = new List<string>();
+        page.FrameNavigated += (_, frame) =>
+        {
+            if (frame == page.MainFrame) navigationen.Add(frame.Url);
+        };
+
         await ShareAsync(page, "geteilt.pdf", MinimalPdf(pageCount: 2));
 
         // Die Umleitung muss der Browser auf eine Navigation befolgen.
         await page.WaitForURLAsync(u => new Uri(u).AbsolutePath == "/reader", new PageWaitForURLOptions { Timeout = 30_000 });
-        (await page.EvaluateAsync<string>("location.search")).ShouldNotContain("share=failed");
+
+        var ziel = navigationen.FirstOrDefault(u => new Uri(u).AbsolutePath == "/reader");
+        ziel.ShouldNotBeNull("keine Navigation auf /reader beobachtet");
+        // Erfolg heißt: ?share=<n> mit der Nummer des geparkten Eintrags
+        // (Nachtrag 3.1). Eine Fehlerkennung (failed/rejected/toobig) ist kein
+        // Erfolg, und eine leere Query hieße, dass die Nummer fehlt.
+        new Uri(ziel).Query.ShouldMatch(@"^\?share=\d+$",
+            $"der Service Worker hat die Freigabe nicht übernommen: umgeleitet auf {ziel}");
 
         // Der Reader öffnet die Datei: die Seitenzahl des Dokuments erscheint.
         await page.GetByText(new System.Text.RegularExpressions.Regex("(von|of) 2")).First
@@ -141,7 +159,10 @@ public sealed class ShareTargetTests
 
         var ziel = navigationen.FirstOrDefault(u => new Uri(u).AbsolutePath == "/reader");
         ziel.ShouldNotBeNull("keine Navigation auf /reader beobachtet");
-        new Uri(ziel).Query.ShouldBeEmpty(
+        // Erfolg heißt: ?share=<n> mit der Nummer des geparkten Eintrags
+        // (Nachtrag 3.1). Eine Fehlerkennung (failed/rejected/toobig) ist kein
+        // Erfolg, und eine leere Query hieße, dass die Nummer fehlt.
+        new Uri(ziel).Query.ShouldMatch(@"^\?share=\d+$",
             $"der Service Worker hat die Freigabe nicht übernommen: umgeleitet auf {ziel}");
 
         await page.WaitForFunctionAsync(

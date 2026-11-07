@@ -206,7 +206,23 @@
     }
   }
 
+  // Alle Eintrittswege laufen hintereinander durch den Sortierer, nicht
+  // gleichzeitig. Sonst kommen eine über launchQueue gestartete Datei und eine
+  // geteilte Datei beide an `if (pending)` vorbei, bevor eine von beiden
+  // accept() fertig hat — „die erste gewinnt" ist dann nicht die erste, sondern
+  // die, die zuletzt auflöst.
+  var sortLock = Promise.resolve();
+
   function sortLaunched(file, name) {
+    var lauf = sortLock.then(
+      function () { return sortLaunchedNow(file, name); },
+      function () { return sortLaunchedNow(file, name); },
+    );
+    sortLock = lauf.then(function () {}, function () {});
+    return lauf;
+  }
+
+  function sortLaunchedNow(file, name) {
     if (!file) return Promise.resolve(false);
     return sniff(file).then(function (kind) {
       if (kind === "pdf") {
@@ -230,6 +246,11 @@
           setStatus(T.notPdf, true, true);
           return false;
         }
+        // Die Route NOCH EINMAL ansehen: zwischen dem ersten designWanted()
+        // oben und hier liegt das Lesen der Datei. Hat in dieser Zeit eine PDF
+        // accept() durchlaufen, steht die Route jetzt auf /reader, und
+        // pendingDesign wäre genau die Waise, die Nachtrag 2 verhindern soll.
+        if (!designWanted()) { setStatus(T.notPdf, true, true); return false; }
         pendingDesign = text;
         return true;
       }, function () { setStatus(T.notPdf, true, true); return false; });
@@ -270,26 +291,49 @@
   }
 
   // Freigabe über das Teilen-Menü: der Service Worker hat die Datei geparkt
-  // (POST /share-target) und auf /reader umgeleitet.
+  // (POST /share-target) und auf `/reader?share=<n>` umgeleitet. Die Nummer ist
+  // der Schlüssel des Eintrags — abgeholt wird GENAU dieser, nie „alles, was
+  // noch herumliegt" (Nachtrag 3.1).
   //
-  // Konnte er sie NICHT übernehmen, sagt er das über die Adresse: failed
-  // (Speicher voll, Formular unlesbar), rejected (fremde Herkunft), toobig.
-  // Ohne das käme der Reader leer hoch und die Freigabe sähe auf Android
-  // einfach kaputt aus, ohne ein Wort.
+  // Konnte er sie NICHT übernehmen, steht statt der Nummer eine Kennung da:
+  // failed (Speicher voll, Formular unlesbar), rejected (fremde Herkunft),
+  // toobig. Ohne das käme der Reader leer hoch und die Freigabe sähe auf
+  // Android einfach kaputt aus, ohne ein Wort.
   //
-  // Die Kennung wird danach aus der Adresse entfernt: sonst erscheint die
-  // Meldung bei jedem Neuladen wieder, auch Tage später.
+  // Beides wird danach aus der Adresse entfernt: eine Kennung, damit die
+  // Meldung nicht bei jedem Neuladen wiederkommt; eine Nummer, weil ihr
+  // Eintrag dann schon gelöscht ist.
+  // Den Wert von `share` lesen — als Parameter, nicht als Teilstring. `indexOf`
+  // traf auch `?xshare=failed` und `?foo=share=failed`, also jeden Treffer
+  // irgendwo in der Adresse.
+  function shareParam() {
+    try {
+      return new URLSearchParams(location.search || "").get("share");
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // Die Kennung danach aus der Adresse entfernen, aber nur sie: alle anderen
+  // Parameter und der Hash bleiben stehen. Vorher fiel location.hash weg.
+  function dropShareParam() {
+    try {
+      var p = new URLSearchParams(location.search || "");
+      p.delete("share");
+      var rest = p.toString();
+      history.replaceState(null, "", location.pathname + (rest ? "?" + rest : "") + (location.hash || ""));
+    } catch (e) { /* ignorieren */ }
+  }
+
   function reportShareProblem() {
-    var s = location.search || "";
-    var text = s.indexOf("share=rejected") >= 0 ? T.shareRejected
-      : s.indexOf("share=toobig") >= 0 ? T.shareTooBig
-      : s.indexOf("share=failed") >= 0 ? T.shareFailed
+    var kennung = shareParam();
+    var text = kennung === "rejected" ? T.shareRejected
+      : kennung === "toobig" ? T.shareTooBig
+      : kennung === "failed" ? T.shareFailed
       : null;
     if (!text) return;
     setStatus(text, true, true);
-    try {
-      history.replaceState(null, "", location.pathname + s.replace(/[?&]share=[a-z]+/g, "").replace(/^&/, "?"));
-    } catch (e) { /* ignorieren */ }
+    dropShareParam();
   }
 
   function takeShared(cache, pfad) {
@@ -310,46 +354,78 @@
     });
   }
 
+  // Alle Pfade im Freigabe-Cache, mit ihrer Nummer. Ein Eintrag ohne Nummer
+  // (der feste Schlüssel `/__pb-share` aus dem Ursprungsstand) bekommt null und
+  // wird dadurch immer aufgeräumt.
   function sharePaths(cache) {
     return cache.keys().then(function (reqs) {
-      var pfade = [];
+      var liste = [];
       for (var i = 0; i < reqs.length; i++) {
         var p = reqs[i].url;
         try { p = new URL(reqs[i].url).pathname; } catch (e) { /* schon ein Pfad */ }
-        if (p.indexOf(SHARE_PREFIX) === 0) pfade.push(p);
+        if (p.indexOf("/__pb-share") !== 0) continue;
+        var m = /^\/__pb-share\/(\d+)$/.exec(p);
+        liste.push({ pfad: p, nummer: m ? parseInt(m[1], 10) : null });
       }
-      pfade.sort(function (a, b) {
-        return (parseInt(a.slice(SHARE_PREFIX.length), 10) || 0) - (parseInt(b.slice(SHARE_PREFIX.length), 10) || 0);
-      });
-      return pfade;
+      return liste;
     });
+  }
+
+  // Die Nummer dieser Freigabe aus der Adresse — der Service Worker hat sie
+  // dort hineingeschrieben (Nachtrag 3.1). Alles andere ist keine Nummer.
+  function shareNumber() {
+    var roh = shareParam();
+    return roh && /^[0-9]+$/.test(roh) ? parseInt(roh, 10) : null;
   }
 
   function pickUpShared() {
     reportShareProblem();
     if (typeof caches === "undefined" || !caches || typeof caches.has !== "function") return Promise.resolve();
+    var meine = shareNumber();
     return caches.has(SHARE_CACHE).then(function (there) {
-      if (!there) return;
+      if (!there) {
+        // Die Nummer stand in der Adresse, der Cache ist aber weg (Browser hat
+        // ihn geräumt). Nicht still leer hochkommen.
+        if (meine !== null) setStatus(T.shareFailed, true, true);
+        return;
+      }
       return caches.open(SHARE_CACHE).then(function (cache) {
-        // In Runden, nicht über eine einzige Momentaufnahme von keys(): eine
-        // Freigabe, die WÄHREND der Abholung ankommt, bliebe sonst liegen und
-        // ginge erst beim nächsten Start auf — irgendwann später, und dann
-        // reißt accept() die Route unerwartet auf /reader.
-        // Begrenzt, damit ein Dauerstrom von Freigaben den Start nicht aufhält.
-        var runden = 0;
-        function runde() {
-          if (++runden > 5) return Promise.resolve();
-          return sharePaths(cache).then(function (pfade) {
-            if (pfade.length === 0) return;
-            var chain = Promise.resolve();
-            for (var k = 0; k < pfade.length; k++) {
-              chain = chain.then(function (p) { return function () { return takeShared(cache, p); }; }(pfade[k]));
-            }
-            return chain.then(runde);
-          });
-        }
-        return runde();
+        // EINE Momentaufnahme. Was danach ankommt, bleibt liegen — es hat seine
+        // eigene Navigation mit seiner eigenen Nummer und wird dort abgeholt.
+        return sharePaths(cache).then(function (liste) {
+          var ziel = null;
+          for (var i = 0; i < liste.length; i++) {
+            if (liste[i].nummer === meine && meine !== null) ziel = liste[i].pfad;
+          }
+          if (meine !== null && !ziel) setStatus(T.shareFailed, true, true);
+
+          // Aufräumen, NICHT öffnen: ein liegengebliebener Eintrag darf nie die
+          // Route aufreißen (vorher öffnete die älteste Freigabe und die neue
+          // wurde gelöscht). Eine HÖHERE Nummer als die eigene bleibt stehen —
+          // die ist gerade erst angekommen und ihre Navigation ist noch
+          // unterwegs. Ohne eigene Nummer gibt es keine solche Navigation, dann
+          // wird alles aus der Momentaufnahme geräumt.
+          var waisen = [];
+          for (var k = 0; k < liste.length; k++) {
+            var e = liste[k];
+            if (e.pfad === ziel) continue;
+            if (meine === null || e.nummer === null || e.nummer < meine) waisen.push(e.pfad);
+          }
+
+          var chain = ziel ? takeShared(cache, ziel) : Promise.resolve();
+          for (var j = 0; j < waisen.length; j++) {
+            chain = chain.then(function (p) {
+              return function () { return cache.delete(p); };
+            }(waisen[j]));
+          }
+          return chain;
+        });
       });
+    }).then(function () {
+      // Die Nummer gehört nicht in die Adresse, die der Nutzer sieht oder als
+      // Lesezeichen behält: der Eintrag ist jetzt weg, ein Neuladen fände
+      // nichts mehr und bekäme nur eine Fehlermeldung.
+      if (meine !== null) dropShareParam();
     });
   }
   also(pickUpShared());

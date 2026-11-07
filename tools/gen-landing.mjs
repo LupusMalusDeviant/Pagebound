@@ -246,7 +246,7 @@ const PRIVACY = {
       ]],
       ["Was auf Ihrem Gerät gespeichert wird", [
         "Damit Ihre Sammlung und Ihre Einstellungen einen Neustart überleben, legt Pagebound sie im Speicher Ihres Browsers ab (IndexedDB und localStorage).",
-        "Im Cache-Speicher des Browsers liegt außerdem die App selbst, damit sie offline startet. Teilen Sie eine Datei über das Teilen-Menü an Pagebound, wird sie dort kurz zwischengelagert und beim nächsten Start der App entnommen und gelöscht.",
+        "Im Cache-Speicher des Browsers liegt außerdem die App selbst, damit sie offline startet. Teilen Sie eine Datei über das Teilen-Menü an Pagebound, wird sie dort kurz zwischengelagert; der nächste Start der App entnimmt sie und löscht sie. Kommt dieser Start nicht zustande, wird sie beim folgenden Start gelöscht, ohne geöffnet zu werden.",
         "Diese Daten bleiben auf dem Gerät. Sie können sie jederzeit über die Website-Daten Ihres Browsers löschen; danach startet Pagebound wie beim ersten Mal.",
       ]],
       ["Beim Abruf dieser Seite", [
@@ -290,7 +290,7 @@ const PRIVACY = {
       ]],
       ["What is stored on your device", [
         "So that your library and settings survive a restart, Pagebound keeps them in your browser's storage (IndexedDB and localStorage).",
-        "The browser's cache storage also holds the app itself, so that it starts offline. If you share a file with Pagebound through the share menu, it is briefly stored there and is taken out and deleted the next time the app starts.",
+        "The browser's cache storage also holds the app itself, so that it starts offline. If you share a file with Pagebound through the share menu, it is briefly stored there; the next start of the app takes it out and deletes it. If that start never completes, the following start deletes it without opening it.",
         "That data stays on the device. You can delete it at any time through your browser's site data; Pagebound then starts as it did the first time.",
       ]],
       ["When you load this site", [

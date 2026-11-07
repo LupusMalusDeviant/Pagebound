@@ -98,14 +98,40 @@ test("leerer Text spricht nicht", () => {
   assert.deepEqual(spoken, []);
 });
 
-test("die Stimme folgt der Sprache des Dokuments, nicht der des Systems", () => {
-  // Die „default"-Stimme ist die des Systems. Ein deutsches Dokument wurde
-  // damit englisch vorgelesen, obwohl eine deutsche lokale Stimme da war.
-  const ENGLISCH = { name: "Daniel", voiceURI: "lokal-en", lang: "en-GB", default: true, localService: true };
-  const { tts, spoken } = loadTts([ENGLISCH, LOKAL], "de");
-  assert.equal(tts.speak("Ein deutscher Satz."), true);
+const ENGLISCH = { name: "Daniel", voiceURI: "lokal-en", lang: "en-GB", default: true, localService: true };
+
+test("mit langHint folgt die Stimme der Sprache des TEXTES", () => {
+  // Nur der Aufrufer kennt die Sprache des vorgelesenen Textes. Gibt er sie an,
+  // wird sie genommen — auch gegen die Vorgabe-Stimme des Systems.
+  const { tts, spoken } = loadTts([ENGLISCH, LOKAL]);
+  assert.equal(tts.speak("Ein deutscher Satz.", 1, null, "de-DE"), true);
   assert.equal(spoken[0].voice.voiceURI, "lokal-de", `genommen: ${spoken[0].voice.name}`);
   assert.equal(spoken[0].lang, "de-DE", "u.lang nicht gesetzt — manche Engines sprechen dann systemsprachlich");
+});
+
+test("ohne langHint entscheidet die Plattform, NICHT die App-Sprache", () => {
+  // Der Fehler, den dieser Test festnagelt: `document.documentElement.lang` ist
+  // die eingestellte App-Sprache (index.html und applyLang() setzen sie), nicht
+  // die des Dokuments. Wer sie als Ersatz nimmt, liest ein englisches PDF bei
+  // deutscher Oberfläche mit deutscher Stimme vor und gibt der Engine dazu
+  // `u.lang = "de-DE"` — eine falsche Angabe, nicht nur eine unschöne.
+  //
+  // Die App-Sprache steht hier bewusst auf "de", die Vorgabe-Stimme ist
+  // englisch: erwartet wird die englische.
+  const { tts, spoken } = loadTts([ENGLISCH, LOKAL], "de");
+  assert.equal(tts.speak("Some English text."), true);
+  assert.equal(
+    spoken[0].voice.voiceURI,
+    "lokal-en",
+    `die App-Sprache hat die Stimme bestimmt: ${spoken[0].voice.name}`,
+  );
+  assert.equal(spoken[0].lang, "en-GB", "u.lang muss zur gewählten Stimme passen");
+});
+
+test("eine ausdrücklich gewählte Stimme schlägt den langHint", () => {
+  const { tts, spoken } = loadTts([ENGLISCH, LOKAL, LOKAL2]);
+  assert.equal(tts.speak("Text", 1, "lokal-de-2", "en-GB"), true);
+  assert.equal(spoken[0].voice.voiceURI, "lokal-de-2");
 });
 
 test("isSupported sagt nein, wenn es nur Netz-Stimmen gibt", () => {

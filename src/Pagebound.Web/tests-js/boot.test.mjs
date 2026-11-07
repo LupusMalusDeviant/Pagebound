@@ -63,14 +63,16 @@ function fakeEl(onText) {
  * Skript steht. Ohne das meidet der Test genau den Pfad, der eine Meldung
  * überschreiben kann.
  */
-function loadBoot({ shared = [], path = "/", search = "", lang = "de", withZone = true } = {}) {
+function loadBoot({ shared = [], path = "/", search = "", hash = "", lang = "de", withZone = true } = {}) {
   const stores = new Map();
   if (shared.length) {
     const store = new Map();
     shared.forEach((s, i) => {
       const headers = new Headers();
       if (s.name !== undefined) headers.set("X-Pagebound-Filename", encodeURIComponent(s.name));
-      store.set(`/__pb-share/${s.key ?? i + 1}`, new Response(s.body, { headers }));
+      // rawKey: ein Schlüssel ohne Nummer — der feste `/__pb-share` aus dem
+      // Ursprungsstand. Er muss aufgeräumt werden, nicht geöffnet.
+      store.set(s.rawKey ?? `/__pb-share/${s.key ?? i + 1}`, new Response(s.body, { headers }));
     });
     stores.set("pb-share", store);
   }
@@ -88,7 +90,7 @@ function loadBoot({ shared = [], path = "/", search = "", lang = "de", withZone 
 
   const ctx = {
     console: { info() {}, warn() {}, error() {} },
-    URL, Response, Headers, Blob, File, Promise, Uint8Array, JSON,
+    URL, URLSearchParams, Response, Headers, Blob, File, Promise, Uint8Array, JSON,
     parseFloat, parseInt, String, Math, Array, Number,
     setTimeout: (fn, ms) => setTimeout(fn, ms),
     caches: {
@@ -105,8 +107,19 @@ function loadBoot({ shared = [], path = "/", search = "", lang = "de", withZone 
       },
     },
     navigator: { language: lang },
-    location: { pathname: path, search },
-    history: { replaceState: (_s, _t, url) => routed.push(url) },
+    location: { pathname: path, search, hash },
+    // replaceState ändert im Browser auch `location` — ohne das sieht eine
+    // Prüfung auf location.pathname nach einem Routenwechsel noch die alte
+    // Route, und ein Test dazu kann nicht rot werden.
+    history: {
+      replaceState: (_s, _t, url) => {
+        routed.push(url);
+        const u = new URL(url, "https://pruefstand.test");
+        ctx.location.pathname = u.pathname;
+        ctx.location.search = u.search;
+        ctx.location.hash = u.hash;
+      },
+    },
     MutationObserver: class { observe() {} disconnect() {} },
     getComputedStyle: () => ({ getPropertyValue: () => "0" }),
   };
@@ -140,6 +153,49 @@ function loadBoot({ shared = [], path = "/", search = "", lang = "de", withZone 
 }
 
 const pdfFile = (name = "echt.pdf") => new File([PDF], name, { type: "application/pdf" });
+
+/**
+ * Eine Datei, deren Lesen als MIKROTASK auflöst.
+ *
+ * Ein echtes `File` taugt für Wettlauf-Tests nicht: `slice().arrayBuffer()`
+ * liest einen Stream und wird erst in einem späteren Makrotask fertig. Zwei
+ * gleichzeitige Abläufe verschränken sich dadurch gar nicht — der erste ist
+ * komplett durch, bevor der zweite seine Bytes hat. Ein Test mit echten Dateien
+ * bleibt deshalb grün, auch wenn man die Reihung entfernt. Im Browser, wo die
+ * Bytes längst im Speicher liegen, verschränken sie sich.
+ */
+function fakeFile(body, name, { type = "application/pdf", slowText = false } = {}) {
+  const bytes = new TextEncoder().encode(body);
+  return {
+    name,
+    type,
+    size: bytes.length,
+    slice: () => ({ arrayBuffer: async () => bytes.buffer.slice(0, Math.min(1024, bytes.length)) }),
+    text: async () => body,
+  };
+}
+
+/**
+ * Wie fakeFile, aber das Lesen des Inhalts hält an, bis der Test es freigibt.
+ *
+ * Damit ist das Fenster beweisbar statt erhofft: `gelesen` löst auf, sobald
+ * boot.js `text()` aufgerufen hat — also NACH dem ersten `designWanted()`. Was
+ * der Test dann tut, liegt garantiert zwischen den beiden Routenprüfungen. Ein
+ * `setTimeout(0)` würde das nicht leisten: wann welcher Ablauf wie viele Ticks
+ * braucht, hängt an Umsetzungsdetails, und der Test wäre entweder zahnlos oder
+ * launisch.
+ */
+function haltendeDatei(body, name, type) {
+  let weiter;
+  let melden;
+  const gelesen = new Promise((r) => { melden = r; });
+  const datei = fakeFile(body, name, { type });
+  datei.text = () => {
+    melden();
+    return new Promise((r) => { weiter = () => r(body); });
+  };
+  return { datei, gelesen, weiter: () => weiter() };
+}
 
 // --- offer(): der einzige Prüfpunkt -----------------------------------------
 
@@ -177,7 +233,11 @@ test("Freigabe: die geparkte Datei ist da, auch wenn sofort gefragt wird", async
   // Das Wettrennen aus Nachtrag 1: ReaderPage fragt zuerst pendingFileName()
   // und bricht bei leerem Namen ab. Die Abholung aus pb-share ist asynchron —
   // ein synchroner Getter hätte hier null geliefert und die Datei verworfen.
-  const { boot } = loadBoot({ shared: [{ name: "Prüfung, geteilt.pdf", body: PDF }], path: "/reader" });
+  const { boot } = loadBoot({
+    shared: [{ name: "Prüfung, geteilt.pdf", body: PDF }],
+    path: "/reader",
+    search: "?share=1",
+  });
   assert.equal(await boot.pendingFileName(), "Prüfung, geteilt.pdf", "die geteilte Datei wurde zu früh abgefragt");
   assert.ok((await boot.takePendingFile()).length > 0);
 });
@@ -185,29 +245,180 @@ test("Freigabe: die geparkte Datei ist da, auch wenn sofort gefragt wird", async
 test("Freigabe: der Parkplatz ist danach wirklich leer", async () => {
   // Am Speicher geprüft, nicht am Quelltext: eine abgelehnte Datei darf nicht
   // bei jedem Start erneut auftauchen.
-  const { boot, shareStore } = loadBoot({ shared: [{ name: "einmal.pdf", body: PDF }], path: "/reader" });
+  const { boot, shareStore } = loadBoot({
+    shared: [{ name: "einmal.pdf", body: PDF }],
+    path: "/reader",
+    search: "?share=1",
+  });
   await boot.pendingFileName();
   assert.equal(shareStore().size, 0, "der Eintrag liegt noch im Parkplatz");
 });
 
 test("Freigabe: auch eine abgelehnte Datei wird aus dem Parkplatz entfernt", async () => {
-  const { boot, shareStore } = loadBoot({ shared: [{ name: "kaputt.pdf", body: "kein PDF" }], path: "/reader" });
+  const { boot, shareStore } = loadBoot({
+    shared: [{ name: "kaputt.pdf", body: "kein PDF" }],
+    path: "/reader",
+    search: "?share=1",
+  });
   assert.equal(await boot.pendingFileName(), null);
   assert.equal(shareStore().size, 0, "die abgelehnte Datei käme beim nächsten Start wieder");
 });
 
-test("Freigabe: zwei Einträge werden beide abgearbeitet, der erste gewinnt", async () => {
+// --- Nachtrag 3.1: abgeholt wird GENAU der Eintrag aus der Adresse ----------
+
+test("Freigabe: geöffnet wird der Eintrag aus der Adresse, nicht der älteste", async () => {
+  // DER Fehler, den Nachtrag 3.1 behebt. Vorher holte boot.js alle Einträge
+  // aufsteigend ab: die ÄLTESTE Freigabe gewann, und die gerade geteilte lief
+  // in `if (pending)` — nachdem sie schon aus dem Cache gelöscht war. Der
+  // Nutzer sah eine Datei, die er nicht gewählt hatte, und seine war weg.
   const { boot, shareStore, status } = loadBoot({
-    shared: [{ name: "eins.pdf", body: PDF }, { name: "zwei.pdf", body: PDF }],
+    shared: [
+      { key: 1, name: "liegengeblieben.pdf", body: PDF },
+      { key: 2, name: "gerade-geteilt.pdf", body: PDF },
+    ],
     path: "/reader",
+    search: "?share=2",
   });
-  assert.equal(await boot.pendingFileName(), "eins.pdf");
-  assert.equal(shareStore().size, 0, "ein Eintrag blieb liegen");
-  assert.ok(status.some((s) => /erste|first/i.test(s)), "die zweite Datei wurde stillschweigend verworfen");
+  assert.equal(
+    await boot.pendingFileName(),
+    "gerade-geteilt.pdf",
+    `geöffnet wurde die falsche Datei; Meldungen: ${status.join(" | ")}`,
+  );
+  assert.equal(shareStore().size, 0, "die Waise liegt noch da");
+  assert.ok(
+    !status.some((s) => /erste|first/i.test(s)),
+    "gemeldet wurde 'mehrere geteilte Dateien' — der Nutzer hat aber eine geteilt",
+  );
+});
+
+test("Freigabe: eine Waise wird gelöscht, aber nicht geöffnet", async () => {
+  // Auf jeder Route, nicht nur auf /reader: vorher riss accept() bei einem
+  // gewöhnlichen Start von / die Route auf /reader, wegen einer Datei, die der
+  // Nutzer vor Tagen geteilt hatte.
+  const { boot, shareStore, routed } = loadBoot({
+    shared: [{ key: 1, name: "liegengeblieben.pdf", body: PDF }],
+    path: "/",
+  });
+  assert.equal(await boot.pendingFileName(), null, "eine Waise wurde geöffnet");
+  assert.equal(shareStore().size, 0, "die Waise wurde nicht aufgeräumt");
+  assert.deepEqual(routed, [], `die Route wurde umgestellt: ${JSON.stringify(routed)}`);
+});
+
+test("Freigabe: eine HÖHERE Nummer bleibt liegen, ihre Navigation kommt noch", async () => {
+  // Teilt der Nutzer B, während die Seite aus Freigabe A noch lebt, parkt der
+  // Worker B und antwortet mit einer Umleitung — die Navigation dorthin kommt
+  // erst. Ein Aufräumen „alles außer meiner" würde B in diesem Fenster
+  // wegräumen, und das neue Dokument fände nichts (Nachtrag 3.1 a).
+  const { boot, shareStore } = loadBoot({
+    shared: [
+      { key: 1, name: "meine.pdf", body: PDF },
+      { key: 2, name: "kommt-noch.pdf", body: PDF },
+    ],
+    path: "/reader",
+    search: "?share=1",
+  });
+  assert.equal(await boot.pendingFileName(), "meine.pdf");
+  assert.deepEqual([...shareStore().keys()], ["/__pb-share/2"], "die neuere Freigabe wurde weggeräumt");
+});
+
+test("Freigabe: ein Schlüssel ohne Nummer wird aufgeräumt", async () => {
+  // Der feste `/__pb-share` aus dem Ursprungsstand. Nie ausgeliefert, aber er
+  // würde sonst für immer im Cache Storage liegen — und die Zusage der
+  // Datenschutzseite („wird gelöscht") wäre unwahr.
+  const { boot, shareStore } = loadBoot({
+    shared: [{ rawKey: "/__pb-share", name: "alt.pdf", body: PDF }],
+    path: "/",
+  });
+  assert.equal(await boot.pendingFileName(), null);
+  assert.equal(shareStore().size, 0, "der alte Schlüssel blieb liegen");
+});
+
+test("Freigabe: fehlt der Eintrag zur Nummer, wird das gemeldet", async () => {
+  // Sonst käme die App leer hoch und der Nutzer erfährt nicht, dass seine
+  // Datei nicht ankam — ein stilles Nichts (Nachtrag 3.1 b).
+  const { boot, sub } = loadBoot({
+    shared: [{ key: 1, name: "fremde-waise.pdf", body: PDF }],
+    path: "/reader",
+    search: "?share=7",
+  });
+  assert.equal(await boot.pendingFileName(), null);
+  assert.match(sub.textContent, /nicht übernommen|could not be taken/i, `gemeldet: „${sub.textContent}"`);
+  assert.ok(sub.classList.contains("is-error"), "nicht als Fehler markiert");
+});
+
+test("Freigabe: die Nummer verschwindet nach der Abholung aus der Adresse", async () => {
+  // Der Eintrag ist danach gelöscht; ein Neuladen oder Lesezeichen mit der
+  // Nummer bekäme nur noch eine Fehlermeldung.
+  const { boot, routed } = loadBoot({
+    shared: [{ key: 4, name: "geteilt.pdf", body: PDF }],
+    path: "/reader",
+    search: "?share=4",
+  });
+  await boot.pendingFileName();
+  assert.deepEqual(routed, ["/reader"], `Adressänderungen: ${JSON.stringify(routed)}`);
+});
+
+test("zwei Dateien gleichzeitig gestartet: eine gewinnt, und das wird gemeldet", async () => {
+  // Beide Eintrittswege laufen zur selben Zeit los. Ohne Reihung kommen beide
+  // an `if (pending)` vorbei, bevor eine von beiden accept() fertig hat — dann
+  // gewinnt nicht „die erste", sondern die, die zuletzt auflöst, der Parkplatz
+  // wird überschrieben, und die Meldung „geöffnet wird die erste" bleibt aus.
+  //
+  // Mit Dateien, deren Bytes als Mikrotask kommen (siehe fakeFile): echte
+  // File-Objekte serialisieren sich selbst und der Test könnte nicht rot werden.
+  const { boot, launch, status } = loadBoot({ path: "/reader" });
+  launch(fakeFile(PDF, "eins.pdf"));
+  launch(fakeFile(PDF, "zwei.pdf"));
+
+  const name = await boot.pendingFileName();
+  assert.ok(name === "eins.pdf" || name === "zwei.pdf", `keine der beiden Dateien geparkt: ${name}`);
+  assert.ok(
+    status.some((s) => /erste|first/i.test(s)),
+    `die zweite Datei verschwand ohne Meldung; Meldungen: ${status.join(" | ")}`,
+  );
+  assert.equal(await boot.pendingFileName(), name, "der Parkplatz hat sich hinterher noch geändert");
+});
+
+test("Entwurf und abgelegte PDF gleichzeitig: der Entwurf wird nicht zur Waise", async () => {
+  // Die Route wird NACH dem Lesen der Datei noch einmal angesehen. Der Weg
+  // dahin: `offer()` (Drop-Zone, Dateiauswahl) ruft accept() DIREKT auf, nicht
+  // über den Sortierer — die Reihung der Eintrittswege greift hier also nicht.
+  // Also: designWanted() sagt auf /editor ja, dann stellt accept() für die
+  // abgelegte PDF die Route auf /reader und leert pendingDesign — und der
+  // Entwurf setzt sich danach wieder, obwohl der Designer in diesem Start nie
+  // gemountet wird. Beim späteren Wechsel dorthin ersetzte er dessen Dokument,
+  // ohne dass jemand ihn gewählt hat. Genau das verhindert Nachtrag 2.
+  const { boot, launch } = loadBoot({ path: "/editor" });
+  const entwurf = haltendeDatei(DESIGN, "entwurf.pbdesign.json", "application/json");
+  launch(entwurf.datei);
+
+  // Warten, bis boot.js den Inhalt liest: dann ist die erste Routenprüfung
+  // durch (Route war /editor) und der Entwurf steht kurz vor pendingDesign.
+  await entwurf.gelesen;
+
+  // Jetzt die PDF ablegen. offer() geht DIREKT in accept(), nicht über den
+  // Sortierer — die Reihung der Eintrittswege greift hier nicht.
+  // Nicht pendingFileName() abfragen, solange der Entwurf hängt: das wartet auf
+  // das ready-Gatter, in dem der Entwurf steckt — und wäre ein Deadlock.
+  assert.equal(await boot.offer(fakeFile(PDF, "dazwischen.pdf")), true, "die PDF wurde nicht angenommen");
+
+  // Und erst jetzt kommt der Inhalt des Entwurfs an.
+  entwurf.weiter();
+  assert.equal(await boot.pendingFileName(), "dazwischen.pdf");
+
+  assert.equal(
+    await boot.takePendingDesign(),
+    null,
+    "die PDF hat die Route auf /reader gestellt, der Entwurf blieb als Waise liegen",
+  );
 });
 
 test("Freigabe ohne Dateinamen-Header: Ersatzname statt Absturz", async () => {
-  const { boot } = loadBoot({ shared: [{ name: undefined, body: PDF }], path: "/reader" });
+  const { boot } = loadBoot({
+    shared: [{ name: undefined, body: PDF }],
+    path: "/reader",
+    search: "?share=1",
+  });
   assert.equal(await boot.pendingFileName(), "geteilt.pdf");
 });
 
@@ -215,7 +426,11 @@ test("Freigabe: ein JSON wird NICHT als Entwurf geparkt", async () => {
   // Sonst liegt es im Design-Parkplatz, der Reader fragt nur nach einer PDF und
   // bekommt nichts — und beim nächsten Wechsel in den Designer ersetzt es
   // dessen Dokument, ohne dass der Nutzer in diesem Moment etwas gewählt hat.
-  const { boot } = loadBoot({ shared: [{ name: "daten.pdf", body: DESIGN }], path: "/reader" });
+  const { boot } = loadBoot({
+    shared: [{ name: "daten.pdf", body: DESIGN }],
+    path: "/reader",
+    search: "?share=1",
+  });
   assert.equal(await boot.pendingFileName(), null);
   assert.equal(await boot.takePendingDesign(), null, "ein geteiltes JSON landete im Design-Parkplatz");
 });
@@ -247,6 +462,33 @@ test("Freigabe: die Kennung verschwindet aus der Adresse", () => {
   // Sonst erscheint die Meldung bei jedem Neuladen wieder, auch Tage später.
   const { routed } = loadBoot({ path: "/reader", search: "?share=failed" });
   assert.deepEqual(routed, ["/reader"], `Adressänderungen: ${JSON.stringify(routed)}`);
+});
+
+test("Freigabe: nur die Kennung geht, andere Parameter und der Hash bleiben", () => {
+  // Ein `search.replace(/share=…/)` nahm den Hash gar nicht mit — jeder Anker
+  // und jede Lesemarke in der Adresse war nach einer Freigabe-Meldung weg.
+  const { routed, sub } = loadBoot({
+    path: "/reader",
+    search: "?seite=7&share=toobig&zoom=150",
+    hash: "#anker",
+  });
+  assert.match(sub.textContent, /größer als|larger than/i);
+  assert.deepEqual(routed, ["/reader?seite=7&zoom=150#anker"], `Adressänderungen: ${JSON.stringify(routed)}`);
+});
+
+test("Freigabe: ein Parameter, der nur ÄHNLICH heißt, löst keine Meldung aus", () => {
+  // `search.indexOf("share=failed")` traf auch `?xshare=failed` und
+  // `?weiter=/x?share=failed` — dann stand die Fehlermeldung ohne jede Freigabe
+  // da, und die Adresse wurde dafür auch noch umgeschrieben.
+  for (const such of ["?xshare=failed", "?weiter=%2Fx%3Fshare%3Drejected", "?share=sonstwas"]) {
+    const { sub, routed } = loadBoot({ path: "/reader", search: such });
+    assert.equal(
+      sub.classList.contains("is-error"),
+      false,
+      `${such} hat eine Fehlermeldung ausgelöst: „${sub.textContent}"`,
+    );
+    assert.deepEqual(routed, [], `${such} hat die Adresse umgeschrieben: ${JSON.stringify(routed)}`);
+  }
 });
 
 test("ohne Freigabe-Problem steht der Begrüßungstext", () => {

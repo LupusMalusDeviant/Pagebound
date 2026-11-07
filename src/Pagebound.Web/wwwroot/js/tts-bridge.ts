@@ -12,6 +12,10 @@
 // Deshalb werden ausschließlich Stimmen angeboten UND benutzt, die
 // `localService === true` melden. Fehlt die Eigenschaft (alte Engine), wird die
 // Stimme nicht angeboten — lieber kein Vorlesen als stilles Abfließen.
+//
+// Welche lokale Stimme es wird, entscheidet der Aufrufer (`voiceUri`) oder die
+// Sprache des TEXTES (`langHint`). Die App-Sprache entscheidet es NICHT — siehe
+// den Kommentar an speak().
 // =============================================================================
 const synth: SpeechSynthesis | undefined =
   typeof window !== "undefined" ? window.speechSynthesis : undefined;
@@ -66,8 +70,28 @@ function chunk(text: string): string[] {
   return out;
 }
 
-/** Startet das Vorlesen (bricht Laufendes ab). Gibt false, wenn nicht unterstützt/leer. */
-export function speak(text: string, rate?: number, voiceUri?: string | null): boolean {
+/**
+ * Startet das Vorlesen (bricht Laufendes ab). Gibt false, wenn nicht
+ * unterstützt/leer.
+ *
+ * `langHint` ist die Sprache des vorgelesenen TEXTES (BCP-47, z. B. "en-GB"),
+ * nicht die der Oberfläche. Nur der Aufrufer kann sie kennen; wer sie nicht
+ * kennt, lässt sie weg und bekommt die Vorgabe-Stimme der Plattform.
+ *
+ * Ausdrücklich NICHT benutzt wird `document.documentElement.lang`: das ist die
+ * eingestellte App-Sprache (index.html und `applyLang()` setzen sie), nicht die
+ * Sprache des Dokuments. Mit ihr las eine deutsche Oberfläche ein englisches PDF
+ * mit deutscher Stimme und erzwungenem `u.lang = "de-DE"` — das klingt nicht nur
+ * falsch, es ist eine falsche Angabe an die Engine. Die Dokumentsprache steht im
+ * PDF (`/Lang`, über die PDF.js-Metadaten); sie durchzureichen ist eigene Arbeit
+ * und liegt als Bean vor.
+ */
+export function speak(
+  text: string,
+  rate?: number,
+  voiceUri?: string | null,
+  langHint?: string | null,
+): boolean {
   if (!synth || !isSupported()) return false;
   synth.cancel();
   const chunks = chunk(text);
@@ -78,19 +102,17 @@ export function speak(text: string, rate?: number, voiceUri?: string | null): bo
   const lokal = localVoices();
   if (lokal.length === 0) return false;
   const gewuenscht = voiceUri ? lokal.find((v) => v.voiceURI === voiceUri) : undefined;
-  // Ohne ausdrückliche Wahl die Sprache des Dokuments bevorzugen: die
-  // „default"-Stimme des Systems ist die des Systems, nicht die des Textes —
-  // ein deutsches Dokument wurde sonst mit englischer Stimme vorgelesen.
-  const wunschLang = (typeof document !== "undefined" ? document.documentElement.lang : "") || "";
-  const passend = wunschLang
-    ? lokal.find((v) => v.lang && v.lang.toLowerCase().startsWith(wunschLang.toLowerCase().slice(0, 2)))
+  const hinweis = (langHint || "").trim().toLowerCase().slice(0, 2);
+  const passend = hinweis
+    ? lokal.find((v) => v.lang && v.lang.toLowerCase().startsWith(hinweis))
     : undefined;
   const voice = gewuenscht ?? passend ?? lokal.find((v) => v.default) ?? lokal[0];
   for (const c of chunks) {
     const u = new SpeechSynthesisUtterance(c);
     u.voice = voice;
     // lang mitgeben: manche Engines ignorieren voice.lang und nehmen sonst die
-    // Systemsprache für die Aussprache.
+    // Systemsprache für die Aussprache. Genommen wird die Sprache der GEWÄHLTEN
+    // Stimme — damit Angabe und Stimme nie auseinanderlaufen.
     u.lang = voice.lang;
     if (rate && rate > 0) u.rate = Math.min(2, Math.max(0.5, rate));
     synth.speak(u);
