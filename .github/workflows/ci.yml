@@ -62,8 +62,18 @@ jobs:
           # -z: sonst zeigt git einen Pfad mit Nicht-ASCII-Zeichen in Anführungs-
           # zeichen und oktal maskiert ("…/\303\274ber/index.html") — der fiele
           # aus dem Vergleich und die Waise bliebe unbemerkt.
-          git ls-files -z --full-name -- src/Pagebound.Web/wwwroot \
-            | tr '\0' '\n' \
+          git ls-files -z --full-name -- src/Pagebound.Web/wwwroot > /tmp/landing-ls
+          # Ein Dateiname DARF unter Linux einen Zeilenumbruch enthalten; der
+          # würde beim Umstellen auf Zeilen in zwei Teile zerfallen und beide
+          # fielen aus dem Vergleich. Zeilen zählen statt raten:
+          records=$(tr -dc '\0' < /tmp/landing-ls | wc -c)
+          lines=$(tr '\0' '\n' < /tmp/landing-ls | wc -l)
+          if [ "$records" -ne "$lines" ]; then
+            echo "Pfad mit Zeilenumbruch unter wwwroot ($records Einträge, $lines Zeilen):"
+            echo "umbenennen — die Waisen-Prüfung kann ihn nicht vergleichen."
+            exit 1
+          fi
+          tr '\0' '\n' < /tmp/landing-ls \
             | sed 's|^src/Pagebound\.Web/wwwroot/||' \
             | grep -E '^.+/index\.html$' | LC_ALL=C sort > /tmp/landing-tracked
           orphans=$(comm -13 /tmp/landing-written /tmp/landing-tracked)

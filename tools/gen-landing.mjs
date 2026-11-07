@@ -272,6 +272,9 @@ function validate() {
       if (!p) throw new Error(`PAGES[${n}].${lang} fehlt`);
       const where = `PAGES[${n}].${lang}`;
       for (const k of PAGE_KEYS) str(p[k], `${where}.${k}`);
+      // Der Slug wird zum Verzeichnisnamen und zum Pfad in sitemap/hreflang:
+      // keine Schrägstriche, kein Leerraum, keine Umlaute, kein "..".
+      if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(p.slug)) throw new Error(`${where}.slug: nur a-z, 0-9 und Bindestriche (${JSON.stringify(p.slug)})`);
       strings(p.cta, `${where}.cta`, 2);
       strings(p.steps, `${where}.steps`);
       pairs(p.faq, `${where}.faq`);
