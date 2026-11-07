@@ -45,7 +45,14 @@ public sealed class BootScreenTests
             Buffer = MinimalPdf(pageCount: 2),
         });
         // Die Prüfung (MIME + Magic-Bytes) ist asynchron — auf ihr Ergebnis warten.
-        await page.WaitForFunctionAsync("() => pageboundBoot.pendingFileName() === 'boot.pdf'", null, new PageWaitForFunctionOptions { Timeout = 10_000 });
+        // pendingFileName() liefert ein Promise (es wartet auf die Abholung aus
+        // dem Freigabe-Parkplatz, siehe docs/contracts/datei-eintritt.md,
+        // Nachtrag 1). Ein Vergleich mit dem Promise selbst wird NIE wahr —
+        // deshalb auflösen, bevor verglichen wird.
+        await page.WaitForFunctionAsync(
+            "async () => (await pageboundBoot.pendingFileName()) === 'boot.pdf'",
+            null,
+            new PageWaitForFunctionOptions { Timeout = 10_000 });
         (await page.Locator("#pb-boot-drop-sub").TextContentAsync()).ShouldContain("boot.pdf");
         (await page.EvaluateAsync<string>("location.pathname")).ShouldBe("/reader");
 

@@ -1,7 +1,17 @@
 // =============================================================================
 // TTS-Bridge — Seiten-Text per Web Speech API vorlesen (Barrierefreiheit).
-// 100 % lokal (Browser-Stimmen), keine Dependency, kein Netz. Global
-// `pageboundTts` (siehe esbuild.mjs). C#-Aufrufer: der Reader (Vorlesen).
+// Global `pageboundTts` (siehe esbuild.mjs). C#-Aufrufer: der Reader (Vorlesen).
+//
+// WICHTIG, und der Grund für localVoices() unten: die Web Speech API ist NICHT
+// von sich aus lokal. In Chrome sind die „Google …"-Stimmen serverseitig — der
+// vorgelesene Text geht dann an Google. Die CSP greift dagegen nicht, weil der
+// Browser die Verbindung selbst aufbaut, nicht die Seite. Das wäre ein Bruch
+// der Kernzusage (SECURITY.md: keine Anfrage an Dritte), und zwar der
+// unauffälligste: es funktioniert ja.
+//
+// Deshalb werden ausschließlich Stimmen angeboten UND benutzt, die
+// `localService === true` melden. Fehlt die Eigenschaft (alte Engine), wird die
+// Stimme nicht angeboten — lieber kein Vorlesen als stilles Abfließen.
 // =============================================================================
 const synth: SpeechSynthesis | undefined =
   typeof window !== "undefined" ? window.speechSynthesis : undefined;
@@ -13,13 +23,22 @@ export interface VoiceDto {
   isDefault: boolean;
 }
 
+/** Nur Stimmen, die im Gerät rechnen. Alles andere schickt den Text weg. */
+function localVoices(): SpeechSynthesisVoice[] {
+  if (!synth) return [];
+  return synth.getVoices().filter((v) => v.localService === true);
+}
+
 export function isSupported(): boolean {
-  return !!synth && typeof SpeechSynthesisUtterance !== "undefined";
+  if (!synth || typeof SpeechSynthesisUtterance === "undefined") return false;
+  // getVoices() ist beim ersten Aufruf oft noch leer (die Liste kommt
+  // asynchron). Dann gilt die Funktion als unterstützt; speak() entscheidet
+  // später erneut, und ohne lokale Stimme liest es nicht vor.
+  return true;
 }
 
 export function listVoices(): VoiceDto[] {
-  if (!synth) return [];
-  return synth.getVoices().map((v) => ({
+  return localVoices().map((v) => ({
     name: v.name,
     uri: v.voiceURI,
     lang: v.lang,
@@ -49,10 +68,16 @@ export function speak(text: string, rate?: number, voiceUri?: string | null): bo
   synth.cancel();
   const chunks = chunk(text);
   if (chunks.length === 0) return false;
-  const voice = voiceUri ? synth.getVoices().find((v) => v.voiceURI === voiceUri) : undefined;
+  // Die Stimme wird IMMER gesetzt. Ohne u.voice nimmt die Engine ihre Vorgabe —
+  // und die ist je nach Plattform eine Netz-Stimme. Gibt es keine lokale, wird
+  // nicht vorgelesen.
+  const lokal = localVoices();
+  if (lokal.length === 0) return false;
+  const gewuenscht = voiceUri ? lokal.find((v) => v.voiceURI === voiceUri) : undefined;
+  const voice = gewuenscht ?? lokal.find((v) => v.default) ?? lokal[0];
   for (const c of chunks) {
     const u = new SpeechSynthesisUtterance(c);
-    if (voice) u.voice = voice;
+    u.voice = voice;
     if (rate && rate > 0) u.rate = Math.min(2, Math.max(0.5, rate));
     synth.speak(u);
   }

@@ -15,7 +15,11 @@ const cacheName = `${cacheNamePrefix}${self.assetsManifest.version}`;
 // Sonstiges JSON bleibt draußen.
 // woff2: /\.woff$/ allein erfasst .woff2 nicht — offline fehlten alle Schriften.
 const offlineAssetsInclude = [ /\.dll$/, /\.pdb$/, /\.wasm/, /\.html/, /\.js$/, /\.css$/, /\.woff2?$/, /\.png$/, /\.jpe?g$/, /\.gif$/, /\.ico$/, /\.blat$/, /\.dat$/, /\.webmanifest$/, /^resources\/[a-z]{2}\.json$/ ];
-const offlineAssetsExclude = [ /^service-worker\.js$/ ];
+// screenshots/: nur für die Store-Einträge da, in der App nie gezeigt. Über
+// /\.png$/ wären sie bei JEDER Installation mitgeladen worden — rund 1,5 MB,
+// die niemand sieht. Das Muster greift auch auf eine absolute URL, damit es
+// nicht davon abhängt, in welcher Form das Asset-Manifest die Pfade führt.
+const offlineAssetsExclude = [ /^service-worker\.js$/, /(^|\/)screenshots\// ];
 
 // --- Teilen-Ziel (share_target, Android) -------------------------------------
 // Eine Freigabe („Teilen → Pagebound") kommt als POST /share-target mit
@@ -27,7 +31,7 @@ const offlineAssetsExclude = [ /^service-worker\.js$/ ];
 // offline-cache-* weg, deshalb übersteht eine geteilte Datei einen
 // Fassungswechsel. Wer die Aufräumregel verallgemeinert, bricht das.
 const shareCacheName = 'pb-share';
-const shareEntryUrl = '/__pb-share';
+const shareEntryPrefix = '/__pb-share/';
 const shareFilenameHeader = 'X-Pagebound-Filename';
 
 // Replace with your base path if you are hosting on a subfolder. Ensure there is a trailing '/'.
@@ -129,7 +133,34 @@ async function onActivate(event) {
 // Diese Umleitung berührt die Härtung aus c4b7bfb nicht: sie beantwortet ein
 // POST, wird nicht gecacht, und index.html bleibt unberührt. Gecacht wird nur
 // die Datei selbst.
+// Eine Freigabe kommt vom Betriebssystem und hat keinen Verweis auf eine
+// fremde Seite. Ein POST mit einem Verweis von woanders ist KEINE Freigabe,
+// sondern ein fremdes Formular, das auf /share-target zeigt: damit könnte eine
+// beliebige Website eine Datei mit einem Namen ihrer Wahl in das Pagebound des
+// Nutzers schieben und sie öffnen lassen. Das wird abgewiesen.
+//
+// Sec-Fetch-Site hilft hier nicht: diese Header setzt der Browser erst NACH dem
+// Service Worker, sie stehen in event.request.headers nicht zuverlässig. Ein
+// Angreifer kann den Verweis auch unterdrücken (referrer-policy) — dann greift
+// diese Prüfung nicht, deshalb ist sie nur die erste Schranke und nicht die
+// einzige: ein Entwurf wird über diesen Weg gar nicht angenommen (boot.js
+// parkt Entwürfe nur auf /editor), und der Reader zeigt den Dateinamen an.
+function shareFromElsewhere(request) {
+    const ref = request.referrer;
+    if (!ref || ref === 'about:client') return false; // kein Verweis: Betriebssystem
+    try {
+        return new URL(ref).origin !== self.origin;
+    } catch {
+        return true; // unlesbarer Verweis: nicht vertrauen
+    }
+}
+
 async function onShareTarget(request) {
+    if (shareFromElsewhere(request)) {
+        console.warn('Service worker: Freigabe von fremder Herkunft abgewiesen', request.referrer);
+        return Response.redirect(new URL('/reader', self.origin).href, 303);
+    }
+    let ok = false;
     try {
         const form = await request.formData();
         // Der Manifest-Parameter heißt "file"; getAll, weil manche Plattformen
@@ -137,7 +168,16 @@ async function onShareTarget(request) {
         const file = form.getAll('file').find(v => typeof v !== 'string' && v);
         if (file) {
             const cache = await caches.open(shareCacheName);
-            await cache.put(shareEntryUrl, new Response(file, {
+            // Eigener Schlüssel je Freigabe: zwei kurz hintereinander dürfen
+            // sich nicht überschreiben, und boot.js darf keine löschen, die es
+            // nicht gelesen hat. Die Zahl kommt aus dem Cache selbst — keine
+            // Systemuhr, keine Zufalls-Id.
+            let n = 0;
+            for (const key of await cache.keys()) {
+                const m = /\/__pb-share\/(\d+)$/.exec(new URL(key.url).pathname);
+                if (m) n = Math.max(n, Number(m[1]));
+            }
+            await cache.put(shareEntryPrefix + (n + 1), new Response(file, {
                 headers: {
                     'Content-Type': file.type || 'application/pdf',
                     // Prozentkodiert: ein Dateiname darf Zeichen enthalten, die
@@ -145,14 +185,17 @@ async function onShareTarget(request) {
                     [shareFilenameHeader]: encodeURIComponent(file.name || 'geteilt.pdf'),
                 },
             }));
+            ok = true;
         }
     } catch (err) {
-        // Nicht lesbar oder Cache voll: die App startet dann einfach ohne Datei,
-        // statt die Freigabe mit einem Netzwerkfehler zu beantworten.
+        // Nicht lesbar oder Speicher voll.
         console.warn('Service worker: Freigabe nicht übernommen', err);
     }
     // Absolute URL: Response.redirect verlangt sie, relativ wirft es.
-    return Response.redirect(new URL('/reader', self.origin).href, 303);
+    // Bei einem Fehlschlag sagt ?share=failed der App, dass sie das melden
+    // soll — sonst käme der Reader leer hoch und die Freigabe sähe kaputt aus.
+    const ziel = ok ? '/reader' : '/reader?share=failed';
+    return Response.redirect(new URL(ziel, self.origin).href, 303);
 }
 
 async function onFetch(event) {

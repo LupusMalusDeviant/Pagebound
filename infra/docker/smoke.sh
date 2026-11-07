@@ -88,6 +88,13 @@ grep -q "share-target" <<<"$sw" || fail "/service-worker.js kennt kein Teilen-Zi
 grep -q "pb-share" <<<"$sw" || fail "/service-worker.js kennt den Freigabe-Parkplatz nicht"
 ok "/service-worker.js mit Teilen-Ziel"
 
+# Ohne Service Worker landet POST /share-target beim Server. try_files auf eine
+# statische Datei antwortet einem POST mit 405 — der Nutzer sähe eine
+# Fehlerseite statt der App. Der Server muss selbst umleiten.
+code=$("${CURL[@]}" -o /dev/null -X POST -w '%{http_code}' "$BASE/share-target")
+[ "$code" = 303 ] || fail "POST /share-target: HTTP $code statt 303 (ohne Service Worker antwortet nginx sonst 405)"
+ok "POST /share-target → 303 (Server-Rückfall)"
+
 # ---------------------------------------------------------------------------
 # Jedes <script src> aus index.html muss auch JavaScript sein.
 #

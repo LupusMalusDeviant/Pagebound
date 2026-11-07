@@ -246,15 +246,17 @@ const PRIVACY = {
       ]],
       ["Was auf Ihrem Gerät gespeichert wird", [
         "Damit Ihre Sammlung und Ihre Einstellungen einen Neustart überleben, legt Pagebound sie im Speicher Ihres Browsers ab (IndexedDB und localStorage).",
+        "Im Cache-Speicher des Browsers liegt außerdem die App selbst, damit sie offline startet. Teilen Sie eine Datei über das Teilen-Menü an Pagebound, wird sie dort kurz zwischengelagert und beim nächsten Start der App entnommen und gelöscht.",
         "Diese Daten bleiben auf dem Gerät. Sie können sie jederzeit über die Website-Daten Ihres Browsers löschen; danach startet Pagebound wie beim ersten Mal.",
       ]],
       ["Beim Abruf dieser Seite", [
         "Pagebound wird wie jede Website von einem Webserver ausgeliefert. Dabei fallen beim Hosting technische Zugriffsdaten an: IP-Adresse, Zeitpunkt und angefragte Datei. Sie sind für die Auslieferung und den Schutz vor Missbrauch nötig und werden nicht mit anderen Daten zusammengeführt und nicht zur Wiedererkennung verwendet.",
-        "Rechtsgrundlage ist das berechtigte Interesse am sicheren Betrieb (Art. 6 Abs. 1 lit. f DSGVO).",
-        "Ist die App einmal geladen, kommt sie ohne weitere Verbindung aus und funktioniert auch offline.",
+        "Rechtsgrundlage ist das berechtigte Interesse am sicheren Betrieb (Art. 6 Abs. 1 lit. f DSGVO). Betrieben wird der Server bei der Infomaniak Network SA in der Schweiz, die die Daten als Auftragsverarbeiter nur zur Auslieferung verwendet.",
+        "Bei jedem Start sieht die App nach, ob es eine neue Fassung gibt, und lädt ihre Sprachdateien — beides von dieser Herkunft, nicht von Dritten. Danach arbeitet sie ohne weitere Verbindung und funktioniert auch offline.",
       ]],
       ["Keine fremden Dienste", [
         "Schriften, Symbole und die OCR-Modelle werden von dieser Herkunft ausgeliefert. Es gibt keine Einbindung von CDN, Kartendiensten, Schriftdiensten, sozialen Netzwerken oder Analysewerkzeugen.",
+        "Auch das Vorlesen bleibt im Gerät: Pagebound benutzt ausschließlich Stimmen, die Ihr Browser selbst berechnet. Stimmen, die den Text zum Vorlesen an einen Server schicken würden, werden nicht angeboten und nicht verwendet.",
         "Die Inhaltssicherheitsrichtlinie der Seite erlaubt Verbindungen nur zur eigenen Herkunft; eine Prüfung im Build bricht ab, sobald eine fremde Adresse im Code auftaucht.",
       ]],
       ["Ihre Rechte", [
@@ -287,15 +289,17 @@ const PRIVACY = {
       ]],
       ["What is stored on your device", [
         "So that your library and settings survive a restart, Pagebound keeps them in your browser's storage (IndexedDB and localStorage).",
+        "The browser's cache storage also holds the app itself, so that it starts offline. If you share a file with Pagebound through the share menu, it is briefly stored there and is taken out and deleted the next time the app starts.",
         "That data stays on the device. You can delete it at any time through your browser's site data; Pagebound then starts as it did the first time.",
       ]],
       ["When you load this site", [
         "Like any website, Pagebound is delivered by a web server. In doing so the hosting records technical access data: IP address, time and the file requested. It is needed to deliver the site and to protect it from abuse; it is not combined with other data and not used to recognise you.",
-        "The legal basis is the legitimate interest in secure operation (Art. 6(1)(f) GDPR).",
-        "Once the app has loaded it needs no further connection and works offline.",
+        "The legal basis is the legitimate interest in secure operation (Art. 6(1)(f) GDPR). The server is operated by Infomaniak Network SA in Switzerland, which processes the data on our behalf solely to deliver the site.",
+        "On every start the app checks whether a new version exists and loads its language files — both from this origin, not from third parties. After that it needs no further connection and works offline.",
       ]],
       ["No third-party services", [
         "Fonts, icons and the OCR models are served from this origin. There is no CDN, map service, font service, social network or analytics tool embedded.",
+        "Reading aloud stays on the device as well: Pagebound only uses voices your browser computes itself. Voices that would send the text to a server in order to speak it are neither offered nor used.",
         "The site's content security policy permits connections to its own origin only, and a build check fails as soon as an outside address appears in the code.",
       ]],
       ["Your rights", [

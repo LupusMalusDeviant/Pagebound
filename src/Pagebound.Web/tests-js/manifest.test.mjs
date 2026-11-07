@@ -102,4 +102,13 @@ test("Manifest: je ein Screenshot für breite und schmale Darstellung", () => {
   const forms = (manifest.screenshots ?? []).map((s) => s.form_factor);
   for (const f of ["wide", "narrow"]) assert.ok(forms.includes(f), `kein Screenshot mit form_factor "${f}"`);
   for (const s of manifest.screenshots ?? []) assert.ok(s.label, `${s.src}: label fehlt`);
+
+  // Die Play Console nimmt höchstens 2:1 zwischen langer und kurzer Seite.
+  // Ein Telefon-Viewport (390x844) ergibt 2,16 und wird abgelehnt — das fällt
+  // sonst erst bei der Einreichung auf, Wochen nach dem Commit.
+  for (const s of manifest.screenshots ?? []) {
+    const [w, h] = s.sizes.split("x").map(Number);
+    const r = Math.max(w, h) / Math.min(w, h);
+    assert.ok(r <= 2, `${s.src}: Seitenverhältnis ${r.toFixed(2)}:1 — Play erlaubt höchstens 2:1`);
+  }
 });

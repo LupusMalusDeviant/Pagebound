@@ -44,7 +44,9 @@ Neu:
 
 `offer(file)` bleibt der einzige Prüfpunkt und behält seine heutigen Regeln:
 MIME **und** Magic Bytes (`%PDF`), Größe ≤ 100 MB (= `ReaderPane.MaxFileSize`).
-Jede neue Quelle geht durch `offer()`; keine Quelle parkt selbst.
+Jede PDF geht durch `offer()`; keine Quelle parkt eine PDF selbst. Den
+Design-Parkplatz füllt `sortLaunched()` direkt — und nur dort, wo ihn auch
+jemand abholt, siehe Nachtrag 2.
 
 **Zum MIME-Typ der beiden neuen Quellen.** Bei Drop-Zone und Auswahl kommt er
 vom Browser und ist etwas wert. Bei einem Dateihandler und erst recht bei einer
@@ -103,7 +105,7 @@ Datei, und `index.html` bleibt unberührt.
 
 Der Cache `pb-share` ist kein Offline-Cache. `onActivate` räumt heute nur Caches
 weg, deren Name mit `offline-cache-` beginnt und nicht die aktuelle Fassung trägt
-(`service-worker.published.js:102-105`) — ein Cache namens `pb-share` ist davon
+(`onActivate`, die `filter`-Zeile auf `cacheNamePrefix`) — ein Cache namens `pb-share` ist davon
 also **schon heute unberührt**, es ist keine Ausnahme einzubauen. Festgeschrieben
 wird dafür die Bedingung, von der das abhängt:
 
@@ -190,3 +192,59 @@ Zwischenspeicher `globalThis.__pbLaunchDesign` fallen weg.
 Der PDF-Dateihandler bekommt `"action": "/reader"` (im Vertrag oben nicht
 benannt). Der bestehende Design-Handler behält `/editor`, damit eine
 `.pbdesign.json` ohne Umschreiben der Route im Designer landet.
+
+---
+
+# Nachtrag 2 — abgenommen 2026-11-07, aus dem Review von a194d53
+
+Ein unabhängiges Review fand im umgesetzten Stand sechs Lücken. Was daraus
+verbindlich wird:
+
+**Ein Entwurf wird nur geparkt, wo ihn jemand abholt.** `sortLaunched()` parkt
+ein JSON ausschließlich auf der Designer-Route (`location.pathname` beginnt mit
+`/editor`), sonst wird es mit derselben Meldung wie eine abgelehnte Drop-Datei
+verworfen. Vorher landete ein über das Teilen-Menü hereinkommendes JSON im
+Design-Parkplatz, der Reader (der nur nach einer PDF fragt) bekam nichts — und
+beim nächsten Wechsel in den Designer ersetzte es dessen Dokument, ohne dass der
+Nutzer in diesem Moment eine Datei gewählt hatte.
+
+**Ein Entwurf hat seine eigene Größengrenze** (5 MB) und muss ein JSON-*Objekt*
+sein. Die 100-MB-Grenze der PDFs taugt dafür nicht: der Inhalt wird als String
+gelesen und als zweite Kopie nach .NET gereicht.
+
+**Jede Freigabe bekommt einen eigenen Schlüssel** unter `/__pb-share/<n>`, die
+Zahl aus dem Cache selbst (keine Uhr, keine Zufalls-Id). `boot.js` arbeitet alle
+Einträge in Schlüsselreihenfolge ab; die erste annehmbare PDF gewinnt, weitere
+werden gemeldet. Mit einem festen Schlüssel ging bei zwei Freigaben kurz
+hintereinander eine verloren, oder `boot.js` löschte eine, die es nie gelesen
+hatte.
+
+**Eine Freigabe mit Verweis auf eine fremde Herkunft wird abgewiesen.** Eine
+beliebige Website kann ein Formular auf `/share-target` absenden und damit eine
+Datei mit einem Namen ihrer Wahl in das Pagebound des Nutzers schieben. Der
+Service Worker nimmt nur an, was keinen Verweis hat (so kommt eine echte
+Freigabe) oder einen auf die eigene Herkunft. Das ist die **erste** Schranke,
+nicht die einzige: `Sec-Fetch-Site` steht im Service Worker nicht zuverlässig
+zur Verfügung, und ein Angreifer kann den Verweis unterdrücken.
+
+**Ein Fehlschlag wird gesagt.** Kann der Service Worker die Freigabe nicht
+übernehmen (Speicher voll, Formular unlesbar), leitet er auf
+`/reader?share=failed`, und `boot.js` meldet es. Ohne das käme der Reader leer
+hoch, und die Freigabe sähe auf Android ohne ein Wort kaputt aus.
+
+**Dasselbe tut der Server**, wenn der Service Worker (noch) keine Kontrolle hat:
+`location = /share-target { return 303 /reader?share=failed; }`. Sonst
+beantwortet `try_files` den POST mit 405 und der Nutzer sieht eine Fehlerseite.
+
+## Offen, nicht entschieden
+
+1. **Eine Datei, die SPÄTER in derselben Sitzung gestartet wird**, erreicht die
+   Seite nicht. `boot.js` hält den Start einen Makrotask an, damit gestapelte
+   Startparameter sicher im `ready`-Gatter liegen; ein zweites „Öffnen mit" ohne
+   neuen Tab kommt danach und wird erst beim nächsten Mount abgeholt. Die
+   saubere Lösung ist eine Benachrichtigung an die Seite — das ändert
+   `ReaderPage.razor` und braucht deshalb einen eigenen Nachtrag.
+2. **Eine Rückfrage vor dem Öffnen einer geteilten Datei** („Geteilte Datei ‚x'
+   öffnen?"). Sie würde die Lücke schließen, die die Herkunftsprüfung offen
+   lässt, kostet aber einen Klick bei jeder Freigabe — eine
+   Bedienungsentscheidung, nicht meine.

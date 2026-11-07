@@ -28,11 +28,17 @@ let chromium;
 try { ({ chromium } = require("playwright")); }
 catch { ({ chromium } = require(resolve(root, process.env.PLAYWRIGHT_MODULE || "playwright"))); }
 
-// Breite Darstellung fuer Desktop-Stores, schmale fuer Play. Die Maße sind die
-// von den Stores erwarteten Seitenverhaeltnisse (16:10 bzw. 9:19,5).
+// Breite Darstellung fuer Desktop-Stores, schmale fuer Play.
+//
+// Zum schmalen Maß: die Play Console nimmt fuer Telefon-Screenshots hoechstens
+// 2:1 zwischen langer und kurzer Seite. Ein Telefon-Viewport wie 390x844 waere
+// 2,16:1 — formal die natuerlichere Groesse, aber die Einreichung wird damit
+// abgelehnt. Deshalb 390x693 (1,78:1, also 9:16), was Play und die reichere
+// Installations-Oberflaeche des Manifests (bis 2,3:1) beide annehmen.
+// @2x: 1280x800 -> 2560x1600, 390x693 -> 780x1386.
 const SHOTS = [
   { file: "wide-start.png", width: 1280, height: 800, form: "wide", path: "/" },
-  { file: "narrow-start.png", width: 390, height: 844, form: "narrow", path: "/" },
+  { file: "narrow-start.png", width: 390, height: 693, form: "narrow", path: "/" },
 ];
 
 mkdirSync(out, { recursive: true });
