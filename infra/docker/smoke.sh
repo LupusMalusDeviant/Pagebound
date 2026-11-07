@@ -66,6 +66,16 @@ landing=$("${CURL[@]}" "$BASE/pdf-schwaerzen/")
 grep -q '<h1>PDF schwärzen</h1>' <<<"$landing" || fail "Landingpage /pdf-schwaerzen/ fehlt"
 ok "Landingpage /pdf-schwaerzen/"
 
+# Die Datenschutzseiten sind die URL, die den Stores genannt wird (Google Play
+# und Microsoft Store verlangen sie). Fehlen sie im Abbild, liefert der
+# SPA-Fallback die App mit HTTP 200 — der Prüfer sähe statt der Erklärung den
+# Reader. Darum auf die Überschrift prüfen, nicht auf den Status.
+for pfad in /datenschutz/ /en/privacy/; do
+  seite=$("${CURL[@]}" "$BASE$pfad")
+  grep -qE '<h1>(Datenschutz|Privacy)</h1>' <<<"$seite" || fail "Datenschutzseite $pfad fehlt (SPA-Fallback liefert die App)"
+  ok "Datenschutzseite $pfad"
+done
+
 # ---------------------------------------------------------------------------
 # Jedes <script src> aus index.html muss auch JavaScript sein.
 #
@@ -97,4 +107,46 @@ while IFS= read -r s; do
   count=$((count + 1))
 done <<<"$scripts"
 ok "$count <script src> aus index.html werden als JavaScript ausgeliefert"
+
+# ---------------------------------------------------------------------------
+# Icons und Screenshots aus dem Manifest müssen als Bild ankommen.
+#
+# Dieselbe Fehlerklasse wie oben, nur für die Store-Dateien: fehlt ein Icon im
+# Abbild, liefert der SPA-Fallback index.html mit HTTP 200 — Android zeigt dann
+# ein leeres Icon, und der Store lehnt die Einreichung ab, ohne dass hier je
+# etwas rot geworden wäre. manifest.test.mjs prüft dieselben Dateien im Repo;
+# diese Prüfung ist die am ausgelieferten Abbild.
+#
+# JSON wird hier mit einem regulären Ausdruck gelesen, anders als das HTML oben:
+# in JSON kann ein Zeichenkettenwert kein unmaskiertes " enthalten, der Wert
+# endet also immer am nächsten Anführungszeichen. Gegengezählt wird trotzdem.
+# ---------------------------------------------------------------------------
+out=$(probe "/manifest.webmanifest" - -)
+IFS='|' read -r status _bytes _enc type <<<"$out"
+[ "$status" = 200 ] || fail "/manifest.webmanifest: HTTP $status"
+case "$type" in
+  *json*) ;;
+  *) fail "/manifest.webmanifest: Content-Type '$type' statt JSON — Datei fehlt im Image" ;;
+esac
+mf=$("${CURL[@]}" "$BASE/manifest.webmanifest") || fail "manifest.webmanifest nicht abrufbar"
+keys=$( (grep -oE '"src"[[:space:]]*:' <<<"$mf" || true) | grep -c . )
+srcs=$( (grep -oE '"src"[[:space:]]*:[[:space:]]*"[^"]*"' <<<"$mf" || true) | sed -E 's/.*"([^"]*)"$/\1/' )
+found=$( (grep -c . <<<"$srcs") || true )
+[ "$keys" -gt 0 ] || fail "manifest.webmanifest enthält kein \"src\" — Datei kaputt oder leer"
+[ "$found" -eq "$keys" ] || fail "manifest.webmanifest: $keys \"src\"-Felder, aber $found lesbare Werte"
+shots=0
+while IFS= read -r s; do
+  [ -n "$s" ] || continue
+  case "$s" in http*|//*) fail "externes Bild im Manifest: $s (Datenschutzzusage: alles self-hosted)" ;; esac
+  out=$(probe "/${s#/}" - -)
+  IFS='|' read -r status bytes _enc type <<<"$out"
+  [ "$status" = 200 ] || fail "/${s#/} (aus manifest.webmanifest): HTTP $status"
+  case "$type" in
+    image/*) ;;
+    *) fail "/${s#/} (aus manifest.webmanifest): Content-Type '$type' statt Bild — Datei fehlt im Image" ;;
+  esac
+  [ "$bytes" -gt 1000 ] || fail "/${s#/}: nur $bytes B — kaputtes oder leeres Bild"
+  shots=$((shots + 1))
+done <<<"$srcs"
+ok "$shots Icons/Screenshots aus manifest.webmanifest werden als Bild ausgeliefert"
 echo "SMOKE OK"

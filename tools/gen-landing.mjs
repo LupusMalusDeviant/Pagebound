@@ -32,6 +32,7 @@ const UI = {
     locale: "de_DE", home: "Zur App", nav: "Navigation", ogimg: "og-image.png",
     cta_note: "Kostenlos, ohne Anmeldung. Beim ersten Öffnen lädt die App einmalig einige MB und funktioniert danach auch offline.",
     how: "So geht’s", faq: "Häufige Fragen", more: "Weitere Werkzeuge", lang_other: "English",
+    privacy: "Datenschutz",
     suffix: " – ohne Upload | Pagebound",
     footer: "Pagebound ist ein quelloffener PDF-Reader und -Editor, der vollständig im Browser läuft.",
     source: "Quellcode auf GitHub",
@@ -45,6 +46,7 @@ const UI = {
     locale: "en_US", home: "Open the app", nav: "Navigation", ogimg: "og-image-en.png",
     cta_note: "Free, no sign-up. The first visit downloads a few MB once; after that it also works offline.",
     how: "How it works", faq: "FAQ", more: "More tools", lang_other: "Deutsch",
+    privacy: "Privacy",
     suffix: " – no upload | Pagebound",
     footer: "Pagebound is an open-source PDF reader and editor that runs entirely in your browser.",
     source: "Source code on GitHub",
@@ -217,6 +219,97 @@ const PAGES = [
   },
 ];
 
+// Datenschutzseite — eigene URL, weil Google Play und der Microsoft Store eine
+// verlangen (docs/distribution/app-stores.md). Inhaltlich muss sie mit SECURITY.md
+// und dem tatsächlichen Verhalten übereinstimmen; `tools/privacy-check.mjs`
+// erzwingt den technischen Teil (kein externer Request, keine Telemetrie).
+// Kontakt: die Projektseite. Verlangt ein Store eine benannte verantwortliche
+// Stelle mit Anschrift, gehört sie hier hinein — das kann nur der Betreiber.
+const PRIVACY = {
+  de: {
+    slug: "datenschutz",
+    title: "Datenschutz – Pagebound erhebt keine Daten",
+    desc: "Pagebound verarbeitet PDFs vollständig im Browser. Keine Uploads, keine Konten, keine Cookies, keine Telemetrie, kein Tracking. Was auf dem Gerät bleibt und was beim Abruf der Seite anfällt.",
+    h1: "Datenschutz",
+    lead: "Pagebound ist so gebaut, dass gar keine Daten anfallen können: Ihre PDFs werden im Browser verarbeitet und verlassen Ihr Gerät nicht.",
+    updated: "Stand: 7. November 2026",
+    sections: [
+      ["Kurz gefasst", [
+        "Es gibt kein Benutzerkonto, keine Anmeldung und keine Zahlung.",
+        "Ihre Dateien werden nicht hochgeladen. Es gibt keinen Server, der sie entgegennehmen könnte.",
+        "Keine Cookies, keine Werbung, keine Analyse, keine Telemetrie, keine Weitergabe an Dritte.",
+      ]],
+      ["Ihre Dateien", [
+        "Alles, was Pagebound mit einer PDF tut — lesen, annotieren, unterschreiben, schwärzen, zusammenfügen, verschlüsseln, Text erkennen —, geschieht in Ihrem Browser auf Ihrem Gerät.",
+        "Auch die Texterkennung (OCR) läuft lokal: das Programm und die Sprachmodelle werden von dieser Seite mitgeliefert, nicht von einem fremden Dienst geladen.",
+        "Ergebnisse speichern Sie selbst als Datei. Pagebound schickt sie nirgendwohin.",
+      ]],
+      ["Was auf Ihrem Gerät gespeichert wird", [
+        "Damit Ihre Sammlung und Ihre Einstellungen einen Neustart überleben, legt Pagebound sie im Speicher Ihres Browsers ab (IndexedDB und localStorage).",
+        "Diese Daten bleiben auf dem Gerät. Sie können sie jederzeit über die Website-Daten Ihres Browsers löschen; danach startet Pagebound wie beim ersten Mal.",
+      ]],
+      ["Beim Abruf dieser Seite", [
+        "Pagebound wird wie jede Website von einem Webserver ausgeliefert. Dabei fallen beim Hosting technische Zugriffsdaten an: IP-Adresse, Zeitpunkt und angefragte Datei. Sie sind für die Auslieferung und den Schutz vor Missbrauch nötig und werden nicht mit anderen Daten zusammengeführt und nicht zur Wiedererkennung verwendet.",
+        "Rechtsgrundlage ist das berechtigte Interesse am sicheren Betrieb (Art. 6 Abs. 1 lit. f DSGVO).",
+        "Ist die App einmal geladen, kommt sie ohne weitere Verbindung aus und funktioniert auch offline.",
+      ]],
+      ["Keine fremden Dienste", [
+        "Schriften, Symbole und die OCR-Modelle werden von dieser Herkunft ausgeliefert. Es gibt keine Einbindung von CDN, Kartendiensten, Schriftdiensten, sozialen Netzwerken oder Analysewerkzeugen.",
+        "Die Inhaltssicherheitsrichtlinie der Seite erlaubt Verbindungen nur zur eigenen Herkunft; eine Prüfung im Build bricht ab, sobald eine fremde Adresse im Code auftaucht.",
+      ]],
+      ["Ihre Rechte", [
+        "Soweit überhaupt personenbezogene Daten verarbeitet werden — das betrifft nur die Zugriffsdaten oben —, haben Sie das Recht auf Auskunft, Berichtigung, Löschung, Einschränkung, Datenübertragbarkeit und Widerspruch sowie das Recht, sich bei einer Aufsichtsbehörde zu beschweren.",
+        "Die Dateien, die Sie mit Pagebound bearbeiten, liegen bei Ihnen; darauf hat der Betreiber keinen Zugriff.",
+      ]],
+      ["Kontakt und Änderungen", [
+        "Fragen zum Datenschutz richten Sie bitte über die Projektseite an den Betreiber.",
+        "Ändert sich etwas an der Verarbeitung, wird diese Seite angepasst; der Stand steht oben.",
+      ]],
+    ],
+  },
+  en: {
+    slug: "privacy",
+    title: "Privacy – Pagebound collects no data",
+    desc: "Pagebound processes PDFs entirely in your browser. No uploads, no accounts, no cookies, no telemetry, no tracking. What stays on your device and what the web server sees.",
+    h1: "Privacy",
+    lead: "Pagebound is built so that no data can accumulate in the first place: your PDFs are processed in the browser and never leave your device.",
+    updated: "Last updated: 7 November 2026",
+    sections: [
+      ["In short", [
+        "There is no account, no sign-in and no payment.",
+        "Your files are not uploaded. There is no server that could receive them.",
+        "No cookies, no ads, no analytics, no telemetry, nothing passed to third parties.",
+      ]],
+      ["Your files", [
+        "Everything Pagebound does with a PDF — reading, annotating, signing, redacting, merging, encrypting, recognising text — happens in your browser, on your device.",
+        "Text recognition (OCR) runs locally as well: the program and the language models ship with this site instead of being fetched from an outside service.",
+        "You save the result yourself as a file. Pagebound sends it nowhere.",
+      ]],
+      ["What is stored on your device", [
+        "So that your library and settings survive a restart, Pagebound keeps them in your browser's storage (IndexedDB and localStorage).",
+        "That data stays on the device. You can delete it at any time through your browser's site data; Pagebound then starts as it did the first time.",
+      ]],
+      ["When you load this site", [
+        "Like any website, Pagebound is delivered by a web server. In doing so the hosting records technical access data: IP address, time and the file requested. It is needed to deliver the site and to protect it from abuse; it is not combined with other data and not used to recognise you.",
+        "The legal basis is the legitimate interest in secure operation (Art. 6(1)(f) GDPR).",
+        "Once the app has loaded it needs no further connection and works offline.",
+      ]],
+      ["No third-party services", [
+        "Fonts, icons and the OCR models are served from this origin. There is no CDN, map service, font service, social network or analytics tool embedded.",
+        "The site's content security policy permits connections to its own origin only, and a build check fails as soon as an outside address appears in the code.",
+      ]],
+      ["Your rights", [
+        "Where personal data is processed at all — which concerns only the access data above — you have the right to information, rectification, erasure, restriction, data portability and objection, as well as the right to lodge a complaint with a supervisory authority.",
+        "The files you work on with Pagebound stay with you; the operator has no access to them.",
+      ]],
+      ["Contact and changes", [
+        "For questions about privacy, please contact the operator through the project page.",
+        "If anything about the processing changes, this page is updated; the date is shown above.",
+      ]],
+    ],
+  },
+};
+
 const nl = "\n";
 const LANGS = ["de", "en"];
 
@@ -228,7 +321,8 @@ const LANGS = ["de", "en"];
 // erzeugte Datei wird danach auf „undefined" geprüft (fängt auch einen Tippfehler
 // in der Vorlage selbst, den validate() nicht sehen kann).
 // ---------------------------------------------------------------------------
-const UI_KEYS = ["locale", "home", "nav", "ogimg", "cta_note", "how", "faq", "more", "lang_other", "suffix", "footer", "source"];
+const UI_KEYS = ["locale", "home", "nav", "ogimg", "cta_note", "how", "faq", "more", "lang_other", "privacy", "suffix", "footer", "source"];
+const PRIVACY_KEYS = ["slug", "title", "desc", "h1", "lead", "updated"];
 const PAGE_KEYS = ["slug", "title", "desc", "h1", "lead"];
 
 function str(value, what) {
@@ -286,6 +380,23 @@ function validate() {
         throw new Error(`Slug doppelt: ${lang}/${group[lang].slug}`);
     }
   });
+  for (const lang of LANGS) {
+    const p = PRIVACY[lang];
+    if (!p) throw new Error(`PRIVACY.${lang} fehlt`);
+    const where = `PRIVACY.${lang}`;
+    for (const k of PRIVACY_KEYS) str(p[k], `${where}.${k}`);
+    if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(p.slug)) throw new Error(`${where}.slug: nur a-z, 0-9 und Bindestriche (${JSON.stringify(p.slug)})`);
+    if (PAGES.some((g) => g[lang].slug === p.slug)) throw new Error(`${where}.slug: kollidiert mit einer Landingpage (${p.slug})`);
+    list(p.sections, `${where}.sections`);
+    for (let i = 0; i < p.sections.length; i++) {
+      const s = p.sections[i];
+      list(s, `${where}.sections[${i}]`);
+      if (s.length !== 2) throw new Error(`${where}.sections[${i}]: ${s.length} statt 2 Einträgen (Titel, Absätze)`);
+      str(s[0], `${where}.sections[${i}][0]`);
+      strings(s[1], `${where}.sections[${i}][1]`);
+    }
+    for (const k of Object.keys(p)) if (![...PRIVACY_KEYS, "sections"].includes(k)) throw new Error(`${where}.${k}: unbekannter Schlüssel (Tippfehler?)`);
+  }
 }
 
 // Wie Pythons html.escape(s, quote=True).
@@ -331,6 +442,8 @@ function pathOf(lang, slug) {
   str(slug, "slug");
   return lang === "de" ? `/${slug}/` : `/en/${slug}/`;
 }
+
+const privacyPath = (lang) => pathOf(lang, PRIVACY[lang].slug);
 
 // Jede erzeugte Datei: Pfad relativ zu ROOT, immer mit Schrägstrichen, damit die
 // CI die Liste gegen `git ls-files` halten kann (Waisen-Prüfung).
@@ -437,7 +550,7 @@ ${others.map((o) => `                <li><a href="${pathOf(lang, o.slug)}">${esc
         </main>
         <footer>
             ${esc(ui.footer)}
-            <a href="${home}">${ui.home}</a> · <a href="${REPO}">${ui.source}</a>
+            <a href="${home}">${ui.home}</a> · <a href="${REPO}">${ui.source}</a> · <a href="${privacyPath(lang)}">${ui.privacy}</a>
         </footer>
     </div>
 </body>
@@ -448,8 +561,85 @@ ${others.map((o) => `                <li><a href="${pathOf(lang, o.slug)}">${esc
   write(join(dir, "index.html"), out);
 }
 
+// Datenschutzseite: dieselbe Hülle, aber kein Werkzeug — kein CTA, keine
+// Schritte, keine FAQ. Eigene Vorlage statt Sonderfälle in render(), damit die
+// Landingpages davon unberührt bleiben.
+function renderPrivacy(lang) {
+  const p = PRIVACY[lang], ui = UI[lang];
+  const other = lang === "de" ? "en" : "de";
+  const url = ORIGIN + privacyPath(lang);
+  const alt = Object.fromEntries(LANGS.map((l) => [l, ORIGIN + privacyPath(l)]));
+  const image = `${ORIGIN}/${ui.ogimg}`;
+  const home = lang === "de" ? "/" : "/?lang=en";
+  const ld = {
+    "@context": "https://schema.org",
+    "@type": "WebPage",
+    name: p.h1 + " – Pagebound",
+    url,
+    inLanguage: lang,
+    description: p.desc,
+    isPartOf: { "@type": "WebSite", name: "Pagebound", url: ORIGIN + "/" },
+  };
+  const out = `<!DOCTYPE html>
+<html lang="${lang}">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>${esc(p.title)}</title>
+    <meta name="description" content="${esc(p.desc)}" />
+    <link rel="canonical" href="${url}" />
+    <link rel="alternate" hreflang="de" href="${alt.de}" />
+    <link rel="alternate" hreflang="en" href="${alt.en}" />
+    <link rel="alternate" hreflang="x-default" href="${alt.de}" />
+    <meta name="robots" content="index, follow" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Pagebound" />
+    <meta property="og:locale" content="${ui.locale}" />
+    <meta property="og:locale:alternate" content="${UI[other].locale}" />
+    <meta property="og:title" content="${esc(p.h1 + ui.suffix)}" />
+    <meta property="og:description" content="${esc(p.desc)}" />
+    <meta property="og:url" content="${url}" />
+    <meta property="og:image" content="${image}" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="${esc(p.h1 + ui.suffix)}" />
+    <meta name="twitter:description" content="${esc(p.desc)}" />
+    <meta name="twitter:image" content="${image}" />
+    <meta name="theme-color" content="#0f172a" />
+    <link rel="icon" href="/favicon.ico" sizes="any" />
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <link rel="stylesheet" href="/landing/landing.css" />
+    <script type="application/ld+json">${jsonForScript(ld, "ld")}</script>
+</head>
+<body>
+    <div class="wrap">
+        <header class="top">
+            <a class="brand" href="${home}"><img src="/favicon.png" alt="" width="28" height="28" /> Pagebound</a>
+            <nav aria-label="${ui.nav}"><a href="${privacyPath(other)}" hreflang="${other}" lang="${other}">${ui.lang_other}</a> · <a href="${home}">${ui.home}</a></nav>
+        </header>
+        <main>
+            <h1>${esc(p.h1)}</h1>
+            <p class="lead">${esc(p.lead)}</p>
+            <p class="note">${esc(p.updated)}</p>
+${p.sections.map(([title, paras]) => `            <h2>${esc(title)}</h2>` + nl + paras.map((t) => `            <p>${esc(t)}</p>`).join(nl)).join(nl)}
+        </main>
+        <footer>
+            ${esc(ui.footer)}
+            <a href="${home}">${ui.home}</a> · <a href="${REPO}">${ui.source}</a>
+        </footer>
+    </div>
+</body>
+</html>
+`;
+  const dir = privacyPath(lang).replace(/^\/|\/$/g, "");
+  mkdirSync(join(ROOT, dir), { recursive: true });
+  write(join(dir, "index.html"), out);
+}
+
 validate();
 for (const g of PAGES) for (const lang of LANGS) render(g, lang);
+for (const lang of LANGS) renderPrivacy(lang);
 
 // sitemap.xml mit lastmod und Sprachalternativen (xhtml:link)
 {
@@ -460,6 +650,11 @@ for (const g of PAGES) for (const lang of LANGS) render(g, lang);
     let alts = LANGS.map((l) => `<xhtml:link rel="alternate" hreflang="${l}" href="${ORIGIN}${pathOf(l, g[l].slug)}"/>`).join("");
     alts += `<xhtml:link rel="alternate" hreflang="x-default" href="${ORIGIN}${pathOf("de", g.de.slug)}"/>`;
     for (const l of LANGS) s += `  <url><loc>${ORIGIN}${pathOf(l, g[l].slug)}</loc><lastmod>${LASTMOD}</lastmod>${alts}</url>\n`;
+  }
+  {
+    let alts = LANGS.map((l) => `<xhtml:link rel="alternate" hreflang="${l}" href="${ORIGIN}${privacyPath(l)}"/>`).join("");
+    alts += `<xhtml:link rel="alternate" hreflang="x-default" href="${ORIGIN}${privacyPath("de")}"/>`;
+    for (const l of LANGS) s += `  <url><loc>${ORIGIN}${privacyPath(l)}</loc><lastmod>${LASTMOD}</lastmod>${alts}</url>\n`;
   }
   s += "</urlset>\n";
   write("sitemap.xml", s);

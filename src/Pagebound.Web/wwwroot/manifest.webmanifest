@@ -3,6 +3,7 @@
   "short_name": "Pagebound",
   "description": "PDFs lesen, annotieren, unterschreiben, schwärzen und bearbeiten – komplett im Browser, ohne Upload, ohne Konto, ohne Tracking.",
   "lang": "de",
+  "dir": "ltr",
   "categories": ["productivity", "utilities", "business"],
   "id": "./",
   "start_url": "./",
@@ -22,12 +23,36 @@
     {
       "src": "icon-512.png",
       "type": "image/png",
-      "sizes": "512x512"
+      "sizes": "512x512",
+      "purpose": "any"
     },
     {
       "src": "icon-192.png",
       "type": "image/png",
-      "sizes": "192x192"
+      "sizes": "192x192",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-512-maskable.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "maskable"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "screenshots/wide-start.png",
+      "type": "image/png",
+      "sizes": "2560x1600",
+      "form_factor": "wide",
+      "label": "Startseite von Pagebound mit Reader, Library und PDF-Werkzeugen"
+    },
+    {
+      "src": "screenshots/narrow-start.png",
+      "type": "image/png",
+      "sizes": "780x1688",
+      "form_factor": "narrow",
+      "label": "Pagebound auf dem Telefon: Reader, Designer und Library"
     }
   ]
 }
