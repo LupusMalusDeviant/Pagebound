@@ -253,6 +253,7 @@ const PRIVACY = {
         "Pagebound wird wie jede Website von einem Webserver ausgeliefert. Dabei fallen beim Hosting technische Zugriffsdaten an: IP-Adresse, Zeitpunkt und angefragte Datei. Sie sind für die Auslieferung und den Schutz vor Missbrauch nötig und werden nicht mit anderen Daten zusammengeführt und nicht zur Wiedererkennung verwendet.",
         "Rechtsgrundlage ist das berechtigte Interesse am sicheren Betrieb (Art. 6 Abs. 1 lit. f DSGVO). Betrieben wird der Server bei der Infomaniak Network SA in der Schweiz, die die Daten als Auftragsverarbeiter nur zur Auslieferung verwendet.",
         "Bei jedem Start sieht die App nach, ob es eine neue Fassung gibt, und lädt ihre Sprachdateien — beides von dieser Herkunft, nicht von Dritten. Danach arbeitet sie ohne weitere Verbindung und funktioniert auch offline.",
+        "Eine Ausnahme: die Sprachmodelle für die Texterkennung sind rund 4 MB groß und werden nicht im Voraus mitgeliefert. Die erste Texterkennung holt sie von dieser Herkunft nach; danach liegen sie auf dem Gerät und funktionieren auch offline.",
       ]],
       ["Keine fremden Dienste", [
         "Schriften, Symbole und die OCR-Modelle werden von dieser Herkunft ausgeliefert. Es gibt keine Einbindung von CDN, Kartendiensten, Schriftdiensten, sozialen Netzwerken oder Analysewerkzeugen.",
@@ -264,7 +265,7 @@ const PRIVACY = {
         "Die Dateien, die Sie mit Pagebound bearbeiten, liegen bei Ihnen; darauf hat der Betreiber keinen Zugriff.",
       ]],
       ["Kontakt und Änderungen", [
-        "Fragen zum Datenschutz richten Sie bitte über die Projektseite an den Betreiber.",
+        "Fragen zum Datenschutz richten Sie bitte über die Projektseite des Vorhabens an den Betreiber: github.com/LupusMalusDeviant/Pagebound (Reiter „Issues“, oder für Sicherheitsmeldungen „Security“).",
         "Ändert sich etwas an der Verarbeitung, wird diese Seite angepasst; der Stand steht oben.",
       ]],
     ],
@@ -296,6 +297,7 @@ const PRIVACY = {
         "Like any website, Pagebound is delivered by a web server. In doing so the hosting records technical access data: IP address, time and the file requested. It is needed to deliver the site and to protect it from abuse; it is not combined with other data and not used to recognise you.",
         "The legal basis is the legitimate interest in secure operation (Art. 6(1)(f) GDPR). The server is operated by Infomaniak Network SA in Switzerland, which processes the data on our behalf solely to deliver the site.",
         "On every start the app checks whether a new version exists and loads its language files — both from this origin, not from third parties. After that it needs no further connection and works offline.",
+        "One exception: the language models for text recognition are about 4 MB and are not shipped in advance. The first text recognition fetches them from this origin; after that they stay on the device and work offline too.",
       ]],
       ["No third-party services", [
         "Fonts, icons and the OCR models are served from this origin. There is no CDN, map service, font service, social network or analytics tool embedded.",
@@ -307,7 +309,7 @@ const PRIVACY = {
         "The files you work on with Pagebound stay with you; the operator has no access to them.",
       ]],
       ["Contact and changes", [
-        "For questions about privacy, please contact the operator through the project page.",
+        "For questions about privacy, please contact the operator through the project page: github.com/LupusMalusDeviant/Pagebound (the “Issues” tab, or “Security” for security reports).",
         "If anything about the processing changes, this page is updated; the date is shown above.",
       ]],
     ],

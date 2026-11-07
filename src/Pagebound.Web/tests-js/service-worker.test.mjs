@@ -119,7 +119,7 @@ test("Freigabe: Dateiname mit Sonderzeichen übersteht den Header", async () => 
   assert.equal(decodeURIComponent(raw), "Prüfung, Entwürfe.pdf");
 });
 
-test("zwei Freigaben kurz hintereinander bekommen eigene Schlüssel", async () => {
+test("zwei Freigaben nacheinander bekommen eigene Schlüssel", async () => {
   // Mit einem festen Schlüssel überschrieb die zweite die erste, und die erste
   // war ohne eine Spur verloren.
   const { ctx } = loadWorker();
@@ -134,13 +134,54 @@ test("zwei Freigaben kurz hintereinander bekommen eigene Schlüssel", async () =
   );
 });
 
-test("eine Freigabe von fremder Herkunft wird abgewiesen", async () => {
+test("zwei Freigaben GLEICHZEITIG bekommen eigene Schlüssel", async () => {
+  // Der Test oben sieht den Wettlauf nicht: mit `await` dazwischen ist die
+  // erste längst fertig. Ein Service Worker bekommt die beiden Fetch-Events
+  // aber ohne Pause, und an jedem `await` (cache.keys, cache.put) wechseln sie
+  // sich ab. Ohne die Sperre lesen beide dieselbe höchste Nummer, schreiben
+  // denselben Schlüssel — und eine der beiden Dateien ist weg, ohne ein Wort.
+  //
+  // Zwei echte `Request`-Objekte reichen dafür NICHT: `request.formData()`
+  // liest einen Body-Stream und wird erst in einem späteren Makrotask fertig.
+  // Gemessen (Reihenfolge der Schritte beider Abläufe):
+  //     A:start B:start A:form A:open A:keys A:put B:form B:open B:keys B:put
+  // A ist komplett durch, bevor B überhaupt sein Formular hat — keine
+  // Verschränkung, also auch kein Wettlauf, den eine Sperre verhindern müsste.
+  // Ein Test mit echten Requests bleibt deshalb grün, auch wenn man die Sperre
+  // entfernt. Mit vorab gelesenem Formular (formData löst als Mikrotask auf)
+  // verschränken sich die Abläufe wie im Browser:
+  //     A:start B:start A:form B:form A:open B:open A:keys B:keys A:put B:put
+  const { ctx } = loadWorker();
+  const formulare = await Promise.all(
+    ["eins.pdf", "zwei.pdf"].map((name) => shareRequest({ name }).formData()),
+  );
+  const anfragen = formulare.map((form) => ({
+    method: "POST",
+    url: `${ORIGIN}/share-target`,
+    formData: async () => form,
+  }));
+
+  await Promise.all(anfragen.map((request) => ctx.onFetch({ request })));
+
+  const store = shareStore(ctx);
+  assert.equal(store.size, 2, "eine der beiden gleichzeitigen Freigaben wurde überschrieben");
+  assert.deepEqual([...store.keys()].sort(), ["/__pb-share/1", "/__pb-share/2"]);
+  const namen = [...store.values()]
+    .map((r) => decodeURIComponent(r.headers.get("X-Pagebound-Filename")))
+    .sort();
+  assert.deepEqual(namen, ["eins.pdf", "zwei.pdf"]);
+});
+
+test("eine Freigabe von fremder Herkunft wird abgewiesen, mit eigener Kennung", async () => {
   // Eine beliebige Website kann ein Formular auf /share-target absenden. Das
   // ist keine Freigabe, sondern eine fremde Datei mit einem Namen der Wahl des
   // Angreifers, die sich im Pagebound des Nutzers öffnen würde.
   const { ctx } = loadWorker();
   const res = await ctx.onFetch({ request: shareRequest({ von: "https://boese.example/seite" }) });
   assert.equal(res.status, 303, "soll weiterleiten, nicht scheitern");
+  // Ohne eigene Kennung käme der Reader leer hoch: der Nutzer sieht, dass
+  // nichts aufgeht, und erfährt nicht warum.
+  assert.equal(res.headers.get("location"), `${ORIGIN}/reader?share=rejected`);
   assert.equal(shareStore(ctx), undefined, "die fremde Datei wurde geparkt");
 });
 
@@ -148,6 +189,70 @@ test("eine Freigabe von eigener Herkunft wird angenommen", async () => {
   const { ctx } = loadWorker();
   await ctx.onFetch({ request: shareRequest({ von: `${ORIGIN}/reader` }) });
   assert.deepEqual([...shareStore(ctx).keys()], ["/__pb-share/1"]);
+});
+
+test("die Android-App (TWA) teilt mit einem android-app://-Verweis und wird angenommen", async () => {
+  // Der Punkt dieses Tests. Chrome gibt einer Trusted Web Activity den Verweis
+  // `android-app://<paket>/` — und dessen `URL.origin` ist "null", also immer
+  // ungleich der eigenen Origin. Eine Herkunftsprüfung, die nur
+  // `origin !== self.origin` fragt, weist damit JEDE Freigabe in genau der
+  // Play-Fassung ab, um die es in diesem Meilenstein geht. Im Browser fällt das
+  // nicht auf, weil es dort keinen solchen Verweis gibt.
+  const { ctx } = loadWorker();
+  const res = await ctx.onFetch({
+    request: shareRequest({ name: "von-android.pdf", von: "android-app://de.pagebound.app/" }),
+  });
+  assert.equal(res.headers.get("location"), `${ORIGIN}/reader`, "die Freigabe der eigenen App wurde abgewiesen");
+  const store = shareStore(ctx);
+  assert.ok(store, "nichts geparkt — die App bekäme einen leeren Reader");
+  assert.equal(
+    decodeURIComponent(store.get("/__pb-share/1").headers.get("X-Pagebound-Filename")),
+    "von-android.pdf",
+  );
+});
+
+test("eine zu große Freigabe wird nicht abgelegt", async () => {
+  // Grenze VOR dem Ablegen: sonst wandert eine 1-GB-Datei vollständig in den
+  // Cache Storage, nur damit boot.js sie danach wegen Übergröße ablehnt — auf
+  // einem Telefon kostet das Speicher, Kontingent und Zeit, und das Kontingent
+  // bleibt belegt, wenn der Reader nie hochkommt.
+  //
+  // Die Datei wird nicht wirklich angelegt (200 MB im Test wären unsinnig),
+  // sondern ihre `size` überschrieben — genau der Wert, den der Worker liest.
+  const { ctx } = loadWorker();
+  const echt = shareRequest({ name: "riesig.pdf" });
+  const form = await echt.formData();
+  const datei = form.getAll("file")[0];
+  Object.defineProperty(datei, "size", { value: 200 * 1024 * 1024, configurable: true });
+  assert.equal(datei.size, 200 * 1024 * 1024, "size ließ sich nicht überschreiben — der Test prüft nichts");
+  const request = { method: "POST", url: echt.url, formData: async () => form };
+
+  const res = await ctx.onFetch({ request });
+  assert.equal(res.status, 303);
+  assert.equal(res.headers.get("location"), `${ORIGIN}/reader?share=toobig`);
+  assert.equal(shareStore(ctx)?.size ?? 0, 0, "die zu große Datei liegt im Cache Storage");
+});
+
+test("eine Freigabe knapp unter der Grenze wird abgelegt", async () => {
+  // Gegenstück: die Grenze darf nicht alles abweisen.
+  const { ctx } = loadWorker();
+  const echt = shareRequest({ name: "knapp.pdf" });
+  const form = await echt.formData();
+  Object.defineProperty(form.getAll("file")[0], "size", {
+    value: 100 * 1024 * 1024 - 1,
+    configurable: true,
+  });
+  const res = await ctx.onFetch({ request: { method: "POST", url: echt.url, formData: async () => form } });
+  assert.equal(res.headers.get("location"), `${ORIGIN}/reader`);
+  assert.deepEqual([...shareStore(ctx).keys()], ["/__pb-share/1"]);
+});
+
+test("die Grenze im Worker ist dieselbe wie in boot.js und im Reader", () => {
+  // Drei Stellen, eine Zahl. Läuft eine davon weg, lehnt eine Schicht ab, was
+  // die andere durchlässt — und der Fehler erscheint erst beim Nutzer.
+  assert.match(source, /const shareMaxBytes = 100 \* 1024 \* 1024;/);
+  const boot = readFileSync(join(resolve(here, ".."), "wwwroot", "js", "boot.js"), "utf8");
+  assert.match(boot, /MAX_BYTES\s*=\s*100 \* 1024 \* 1024/);
 });
 
 test("Freigabe ohne Datei: Umleitung mit Fehlerkennung", async () => {

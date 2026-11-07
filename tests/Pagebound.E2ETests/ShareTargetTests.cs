@@ -115,11 +115,34 @@ public sealed class ShareTargetTests
         Skip.IfNot(_fx.Available, _fx.SkipReason);
         var page = await OpenControlledAsync();
 
+        // Dass am Ende nichts geparkt ist, wäre auch wahr, wenn der Service
+        // Worker die Freigabe gar nicht erst angenommen hätte
+        // (?share=failed/rejected) — der Test wäre dann grün, obwohl das
+        // Teilen-Ziel kaputt ist. Also die Übernahme eigens belegen, und zwar an
+        // der Umleitung selbst: die Kennung steht nur in der URL, auf die der
+        // Worker umleitet, und boot.js räumt sie danach mit
+        // history.replaceState weg. Eine Prüfung auf `location.search` gewinnt
+        // oder verliert je nach Zeitpunkt; die Navigation ist eindeutig.
+        //
+        // Auch die Fehlermeldung taugt dafür nicht: eine ist hier RICHTIG („Das
+        // ist keine PDF-Datei."), weil die Datei angekommen und zu Recht
+        // abgelehnt wurde. Sie unterscheidet nicht, ob die Freigabe ankam.
+        var navigationen = new List<string>();
+        page.FrameNavigated += (_, frame) =>
+        {
+            if (frame == page.MainFrame) navigationen.Add(frame.Url);
+        };
+
         // Ein JSON mit .pdf-Namen: früher landete es im Design-Parkplatz, der
         // Reader bekam nichts — und beim nächsten Wechsel in den Designer
         // ersetzte es dessen Dokument, ohne dass jemand es gewählt hatte.
         await ShareAsync(page, "daten.pdf", Encoding.UTF8.GetBytes("{\"version\":1,\"elements\":[]}"));
         await page.WaitForURLAsync(u => new Uri(u).AbsolutePath == "/reader", new PageWaitForURLOptions { Timeout = 30_000 });
+
+        var ziel = navigationen.FirstOrDefault(u => new Uri(u).AbsolutePath == "/reader");
+        ziel.ShouldNotBeNull("keine Navigation auf /reader beobachtet");
+        new Uri(ziel).Query.ShouldBeEmpty(
+            $"der Service Worker hat die Freigabe nicht übernommen: umgeleitet auf {ziel}");
 
         await page.WaitForFunctionAsync(
             "async () => (await pageboundBoot.pendingFileName()) === null",

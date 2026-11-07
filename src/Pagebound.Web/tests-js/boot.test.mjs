@@ -33,7 +33,37 @@ const DESIGN = JSON.stringify({ version: 1, elements: [] });
  * `shared`: Einträge, die der Service Worker im Parkplatz hinterlassen hat.
  * `path` / `search`: die Route, unter der die App startet.
  */
-function loadBoot({ shared = [], path = "/", search = "", lang = "de" } = {}) {
+/** Ein Element mit genau dem, was boot.js daran anfasst. */
+function fakeEl(onText) {
+  const klassen = new Set();
+  const e = {
+    hidden: true,
+    classList: {
+      add: (c) => klassen.add(c),
+      remove: (c) => klassen.delete(c),
+      contains: (c) => klassen.has(c),
+      toggle: (c, on) => (on ? klassen.add(c) : klassen.delete(c)),
+    },
+    setAttribute: () => {},
+    addEventListener: () => {},
+    files: null,
+    _klassen: klassen,
+  };
+  let text = "";
+  Object.defineProperty(e, "textContent", {
+    get: () => text,
+    set: (v) => { text = v; if (onText) onText(v); },
+  });
+  return e;
+}
+
+/**
+ * `withZone` (Vorgabe) baut das Boot-Markup nach, sodass boot.js wire()
+ * synchron aufruft — wie im Browser, wo das Markup in index.html VOR dem
+ * Skript steht. Ohne das meidet der Test genau den Pfad, der eine Meldung
+ * überschreiben kann.
+ */
+function loadBoot({ shared = [], path = "/", search = "", lang = "de", withZone = true } = {}) {
   const stores = new Map();
   if (shared.length) {
     const store = new Map();
@@ -44,14 +74,17 @@ function loadBoot({ shared = [], path = "/", search = "", lang = "de" } = {}) {
     });
     stores.set("pb-share", store);
   }
-  const status = []; // was die Drop-Zone gemeldet hat
+  const status = []; // was die Drop-Zone gemeldet hat, in der Reihenfolge
   const routed = []; // Aufrufe von history.replaceState
   let consumer = null;
 
-  const sub = {
-    textContent: "",
-    classList: { toggle: () => {} },
-  };
+  const sub = fakeEl((v) => status.push(v));
+  const elemente = { "pb-boot-drop-sub": sub };
+  if (withZone) {
+    for (const id of ["pb-boot", "pb-boot-drop", "pb-boot-file", "pb-boot-drop-title", "pb-boot-status", "pb-boot-progress"]) {
+      elemente[id] = fakeEl();
+    }
+  }
 
   const ctx = {
     console: { info() {}, warn() {}, error() {} },
@@ -80,21 +113,14 @@ function loadBoot({ shared = [], path = "/", search = "", lang = "de" } = {}) {
   ctx.window = ctx;
   ctx.globalThis = ctx;
   ctx.self = ctx;
-  // Nur das Statusfeld existiert. Damit bleibt die Drop-Zone (pb-boot-drop)
-  // null, boot.js ruft wire() nicht auf — und die Meldungen sind trotzdem
-  // lesbar, statt im Nichts zu verschwinden.
   ctx.document = {
     documentElement: { getAttribute: (a) => (a === "lang" ? lang : null) },
-    getElementById: (id) => (id === "pb-boot-drop-sub" ? sub : null),
+    getElementById: (id) => elemente[id] ?? null,
     querySelectorAll: () => [],
     addEventListener: () => {},
   };
   ctx.addEventListener = () => {};
   ctx.launchQueue = { setConsumer: (fn) => { consumer = fn; } };
-  Object.defineProperty(sub, "textContent", {
-    get: () => status[status.length - 1] ?? "",
-    set: (v) => { status.push(v); },
-  });
 
   vm.createContext(ctx);
   vm.runInContext(source, ctx, { filename: "boot.js" });
@@ -103,6 +129,7 @@ function loadBoot({ shared = [], path = "/", search = "", lang = "de" } = {}) {
     boot: ctx.window.pageboundBoot,
     status,
     routed,
+    sub,
     shareStore: () => stores.get("pb-share"),
     /** Feuert den launchQueue-Empfänger, wie der Browser es beim Start tut. */
     launch(...files) {
@@ -193,11 +220,39 @@ test("Freigabe: ein JSON wird NICHT als Entwurf geparkt", async () => {
   assert.equal(await boot.takePendingDesign(), null, "ein geteiltes JSON landete im Design-Parkplatz");
 });
 
-test("Freigabe: ?share=failed wird gemeldet", async () => {
-  // Ohne Meldung käme der Reader leer hoch und die Freigabe sähe auf Android
-  // einfach kaputt aus.
-  const { status } = loadBoot({ path: "/reader", search: "?share=failed" });
-  assert.ok(status.some((s) => /nicht übernommen|could not be taken/i.test(s)), `Meldungen: ${status.join(" | ")}`);
+test("Freigabe: eine Fehlermeldung bleibt stehen und wird nicht von wire() überschrieben", async () => {
+  // Der eigentliche Fehler: index.html hat das Boot-Markup VOR dem Skript,
+  // also läuft wire() noch im selben Task hinter der Abholung — und setzte
+  // seinen Begrüßungstext über die Fehlermeldung. Der Nutzer sah nie, dass
+  // seine Freigabe gescheitert ist. Deshalb prüft dieser Test den ENDZUSTAND
+  // des Feldes, nicht nur, dass die Meldung einmal gesetzt wurde.
+  const { sub, status } = loadBoot({ path: "/reader", search: "?share=failed" });
+  assert.match(sub.textContent, /nicht übernommen|could not be taken/i, `Meldungen der Reihe nach: ${status.join(" | ")}`);
+  assert.ok(sub.classList.contains("is-error"), "nicht als Fehler markiert");
+});
+
+test("Freigabe: jede Kennung hat ihre eigene Meldung", () => {
+  const faelle = [
+    ["?share=failed", /nicht übernommen/i],
+    ["?share=rejected", /nicht von Ihrem Gerät/i],
+    ["?share=toobig", /größer als 100 MB/i],
+  ];
+  for (const [such, muster] of faelle) {
+    const { sub } = loadBoot({ path: "/reader", search: such });
+    assert.match(sub.textContent, muster, `für ${such}`);
+  }
+});
+
+test("Freigabe: die Kennung verschwindet aus der Adresse", () => {
+  // Sonst erscheint die Meldung bei jedem Neuladen wieder, auch Tage später.
+  const { routed } = loadBoot({ path: "/reader", search: "?share=failed" });
+  assert.deepEqual(routed, ["/reader"], `Adressänderungen: ${JSON.stringify(routed)}`);
+});
+
+test("ohne Freigabe-Problem steht der Begrüßungstext", () => {
+  const { sub } = loadBoot({ path: "/" });
+  assert.match(sub.textContent, /Öffnet sich|opens as soon/i);
+  assert.equal(sub.classList.contains("is-error"), false);
 });
 
 // --- Dateihandler (file_handlers) -------------------------------------------
@@ -228,6 +283,30 @@ test("Dateihandler: ein Entwurf auf /reader wird abgewiesen", async () => {
   launch(new File([DESIGN], "verwechselt.pdf", { type: "application/pdf" }));
   assert.equal(await boot.pendingFileName(), null);
   assert.equal(await boot.takePendingDesign(), null, "geparkt, obwohl niemand ihn abholt");
+});
+
+test("Dateihandler: ein Entwurf, in dem %PDF- im Text steht, bleibt ein Entwurf", async () => {
+  // looksLikePdf sucht %PDF- IRGENDWO in den ersten 1024 Bytes (so verlangt es
+  // die Spezifikation für PDFs mit Vorsatz). Ein Entwurf mit dieser Zeichenfolge
+  // in einem Textblock wurde dadurch als PDF geparkt, die Route sprang auf
+  // /reader, und PDF.js scheiterte. Jetzt entscheidet das erste Zeichen.
+  const heimtueckisch = JSON.stringify({ version: 1, elements: [{ text: "siehe %PDF-1.7 Spezifikation" }] });
+  const { boot, launch, routed } = loadBoot({ path: "/editor" });
+  launch(new File([heimtueckisch], "zitat.pbdesign.json", { type: "application/json" }));
+  assert.equal(await boot.takePendingDesign(), heimtueckisch);
+  assert.equal(await boot.pendingFileName(), null, "als PDF geparkt");
+  assert.deepEqual(routed, [], "die Route wurde auf /reader gerissen");
+});
+
+test("ein geparkter Entwurf wird fallengelassen, wenn accept() auf /reader umstellt", async () => {
+  // Sonst bleibt er als Waise liegen: der Designer wird in diesem Start nicht
+  // mehr gemountet, und beim späteren Wechsel dorthin ersetzte er dessen
+  // Dokument, ohne dass jemand ihn gewählt hat.
+  const { boot, launch } = loadBoot({ path: "/editor" });
+  launch(new File([DESIGN], "karte.pbdesign.json", { type: "application/json" }));
+  await boot.pendingFileName(); // Abholung abwarten, Entwurf ist geparkt
+  assert.equal(await boot.offer(pdfFile("dazwischen.pdf")), true);
+  assert.equal(await boot.takePendingDesign(), null, "der Entwurf blieb als Waise liegen");
 });
 
 test("Dateihandler: eine PDF mit .json-Endung wird nach Inhalt erkannt", async () => {

@@ -31,10 +31,14 @@ function localVoices(): SpeechSynthesisVoice[] {
 
 export function isSupported(): boolean {
   if (!synth || typeof SpeechSynthesisUtterance === "undefined") return false;
-  // getVoices() ist beim ersten Aufruf oft noch leer (die Liste kommt
-  // asynchron). Dann gilt die Funktion als unterstützt; speak() entscheidet
-  // später erneut, und ohne lokale Stimme liest es nicht vor.
-  return true;
+  const alle = synth.getVoices();
+  // Beim ersten Aufruf ist die Liste oft noch leer (sie kommt asynchron) —
+  // dann gilt es als unterstützt, speak() entscheidet später erneut.
+  if (alle.length === 0) return true;
+  // Liste da, aber keine lokale Stimme: speak() würde false liefern und der
+  // Knopf wäre wirkungslos, ohne dass der Nutzer erfährt warum. Dann lieber
+  // nein sagen, damit die Oberfläche ihn gar nicht anbietet.
+  return alle.some((v) => v.localService === true);
 }
 
 export function listVoices(): VoiceDto[] {
@@ -74,10 +78,20 @@ export function speak(text: string, rate?: number, voiceUri?: string | null): bo
   const lokal = localVoices();
   if (lokal.length === 0) return false;
   const gewuenscht = voiceUri ? lokal.find((v) => v.voiceURI === voiceUri) : undefined;
-  const voice = gewuenscht ?? lokal.find((v) => v.default) ?? lokal[0];
+  // Ohne ausdrückliche Wahl die Sprache des Dokuments bevorzugen: die
+  // „default"-Stimme des Systems ist die des Systems, nicht die des Textes —
+  // ein deutsches Dokument wurde sonst mit englischer Stimme vorgelesen.
+  const wunschLang = (typeof document !== "undefined" ? document.documentElement.lang : "") || "";
+  const passend = wunschLang
+    ? lokal.find((v) => v.lang && v.lang.toLowerCase().startsWith(wunschLang.toLowerCase().slice(0, 2)))
+    : undefined;
+  const voice = gewuenscht ?? passend ?? lokal.find((v) => v.default) ?? lokal[0];
   for (const c of chunks) {
     const u = new SpeechSynthesisUtterance(c);
     u.voice = voice;
+    // lang mitgeben: manche Engines ignorieren voice.lang und nehmen sonst die
+    // Systemsprache für die Aussprache.
+    u.lang = voice.lang;
     if (rate && rate > 0) u.rate = Math.min(2, Math.max(0.5, rate));
     synth.speak(u);
   }

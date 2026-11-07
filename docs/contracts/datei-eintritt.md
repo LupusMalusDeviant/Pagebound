@@ -28,9 +28,15 @@ der WASM-Start gekommen ist.
 
 ## Schnittstelle `window.pageboundBoot`
 
-Bestehend, unverändert:
+> **Rückgabeform geändert durch Nachtrag 1.** Die beiden Tabellen unten nennen
+> die Bedeutung der Mitglieder; die *Rückgaben* stehen so nur im Ursprungsstand.
+> Verbindlich ist Nachtrag 1: `pendingFileName()`, `takePendingFile()` und
+> `takePendingDesign()` liefern **Promises** und warten intern auf die einmalige
+> Abholung der Freigaben.
 
-| Mitglied | Rückgabe | Bedeutung |
+Bestehend:
+
+| Mitglied | Rückgabe (vor Nachtrag 1) | Bedeutung |
 |---|---|---|
 | `pendingFileName()` | `string \| null` | Name der geparkten PDF, ohne sie zu verbrauchen |
 | `takePendingFile()` | `Uint8Array \| null` (in .NET `byte[]`) | geparkte PDF, **einmalig**; danach leer |
@@ -38,7 +44,7 @@ Bestehend, unverändert:
 
 Neu:
 
-| Mitglied | Rückgabe | Bedeutung |
+| Mitglied | Rückgabe (vor Nachtrag 1) | Bedeutung |
 |---|---|---|
 | `takePendingDesign()` | `string \| null` | geparkter Inhalt einer `.pbdesign.json`, **einmalig** |
 
@@ -71,6 +77,12 @@ und für die Drop-Zone ändert sich nichts.
 beginnt sie mit `%PDF` → `offer()`; ist sie JSON → Design-Parkplatz. Nicht
 Zuordenbares wird verworfen, mit derselben Meldung wie eine abgelehnte Drop-Datei.
 
+> **Eingeschränkt durch Nachtrag 2.** Der Inhalt entscheidet, *was* die Datei
+> ist; ob ein Entwurf überhaupt geparkt wird, entscheidet zusätzlich die Route:
+> nur auf `/editor`. Ein JSON, das über das Teilen-Menü hereinkommt, wird
+> verworfen. Erkannt wird JSON vor PDF (ein Entwurf darf `%PDF-` im Text
+> enthalten).
+
 ## `share_target`
 
 Manifest:
@@ -89,10 +101,13 @@ Ablauf im Service Worker (`service-worker.published.js`):
 1. `onFetch` behandelt `POST /share-target` **vor** der bestehenden Zeile
    `if (event.request.method !== 'GET') return fetch(...)` — sonst geht die
    Freigabe ins Netz und ist verloren.
-2. Die Datei aus `formData` wird im eigenen Cache `pb-share` unter
-   `/__pb-share` abgelegt (`cache.put`), Dateiname im Header
-   `X-Pagebound-Filename` (prozentkodiert).
-3. Antwort: `Response.redirect('/reader', 303)`.
+2. Die Datei aus `formData` wird im eigenen Cache `pb-share` abgelegt
+   (`cache.put`), Dateiname im Header `X-Pagebound-Filename` (prozentkodiert).
+   Der Schlüssel ist `/__pb-share/<n>` mit einer je Freigabe eigenen Nummer
+   (Nachtrag 2 — der Ursprungsstand nannte hier den festen Schlüssel
+   `/__pb-share`, bei dem die zweite Freigabe die erste überschrieb).
+3. Antwort: `Response.redirect('/reader', 303)`, bei einem Fehlschlag mit einer
+   Kennung (`?share=failed`, `?share=rejected`, `?share=toobig` — Nachtrag 2).
 
 Dieser Redirect ist unbedenklich und berührt die Härtung aus `c4b7bfb` nicht: er
 beantwortet eine **POST**-Anfrage und wird nicht gecacht. Gecacht wird nur die
@@ -238,12 +253,17 @@ beantwortet `try_files` den POST mit 405 und der Nutzer sieht eine Fehlerseite.
 
 ## Offen, nicht entschieden
 
-1. **Eine Datei, die SPÄTER in derselben Sitzung gestartet wird**, erreicht die
-   Seite nicht. `boot.js` hält den Start einen Makrotask an, damit gestapelte
-   Startparameter sicher im `ready`-Gatter liegen; ein zweites „Öffnen mit" ohne
-   neuen Tab kommt danach und wird erst beim nächsten Mount abgeholt. Die
-   saubere Lösung ist eine Benachrichtigung an die Seite — das ändert
-   `ReaderPage.razor` und braucht deshalb einen eigenen Nachtrag.
+1. **Eine Datei, die erst nach dem `ready`-Gatter zugestellt wird**, erreicht die
+   Seite nicht. `boot.js` hält den Start eine Makrotask-Runde an
+   (`setTimeout(…, 0)`), damit gestapelte Startparameter im `ready`-Gatter
+   liegen. Das ist ausdrücklich **keine Zusicherung**: die Spezifikation sagt
+   nur, dass die Zustellung „in einer Aufgabe" nach `setConsumer` erfolgt, nicht
+   in der nächsten, und das Lesen der Datei (`getFile()`) braucht selbst weitere
+   Runden. Das übliche Fenster ist damit geschlossen, der Wettlauf nicht
+   beseitigt. Fällt die Zustellung dahinter — ebenso ein zweites „Öffnen mit"
+   ohne neuen Tab —, liegt die Datei geparkt da und wird erst beim nächsten
+   Mount abgeholt. Beides schließt nur eine Benachrichtigung an die Seite; das
+   ändert `ReaderPage.razor` und braucht deshalb einen eigenen Nachtrag.
 2. **Eine Rückfrage vor dem Öffnen einer geteilten Datei** („Geteilte Datei ‚x'
    öffnen?"). Sie würde die Lücke schließen, die die Herkunftsprüfung offen
    lässt, kostet aber einen Klick bei jeder Freigabe — eine

@@ -59,8 +59,13 @@ real Docker deployment, since the `dotnet run` dev server does not use nginx.
 
 No analytics, no error reporting, no fonts/CDN at load (fonts are self-hosted).
 Tesseract.js — worker, WASM core and the `deu`/`eng` language models — is served
-from this origin as well, so OCR works offline and makes no third-party request
-either. Reading aloud uses device-local voices only (see the threat model).
+from this origin as well, so OCR makes no third-party request either. It is not
+precached: `deu.traineddata.gz` and `eng.traineddata.gz` are 1.3 MB and 2.9 MB
+and match no pattern in `offlineAssetsInclude`, so the first OCR run fetches
+them from this origin (Tesseract then keeps them in IndexedDB). OCR therefore
+works offline only after it has run online once — deliberately, so that every
+install does not carry 4.3 MB nobody may ever use. Reading aloud uses
+device-local voices only (see the threat model).
 
 There is no request to any **other host**, at any time. Requests to this origin
 do happen and are not hidden: on every start the service worker re-checks

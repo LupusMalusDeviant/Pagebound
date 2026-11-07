@@ -70,10 +70,17 @@ ok "Landingpage /pdf-schwaerzen/"
 # und Microsoft Store verlangen sie). Fehlen sie im Abbild, liefert der
 # SPA-Fallback die App mit HTTP 200 — der Prüfer sähe statt der Erklärung den
 # Reader. Darum auf die Überschrift prüfen, nicht auf den Status.
-for pfad in /datenschutz/ /en/privacy/; do
+#
+# Und zwar JEDE auf IHRE Überschrift: eine Prüfung auf „Datenschutz ODER
+# Privacy" bleibt grün, wenn der Generator beide Sprachen auf dieselbe Seite
+# legt (ein Slug-Fehler genügt) — dann steht der Play-Prüfer vor einer
+# deutschen Seite, und die Prüfung hat nichts gesagt.
+for paar in "/datenschutz/:Datenschutz:de" "/en/privacy/:Privacy:en"; do
+  pfad=${paar%%:*}; rest=${paar#*:}; h1=${rest%%:*}; sprache=${rest#*:}
   seite=$("${CURL[@]}" "$BASE$pfad")
-  grep -qE '<h1>(Datenschutz|Privacy)</h1>' <<<"$seite" || fail "Datenschutzseite $pfad fehlt (SPA-Fallback liefert die App)"
-  ok "Datenschutzseite $pfad"
+  grep -q "<h1>$h1</h1>" <<<"$seite" || fail "Datenschutzseite $pfad ohne <h1>$h1</h1> (SPA-Fallback oder falsche Sprache)"
+  grep -q "<html lang=\"$sprache\"" <<<"$seite" || fail "Datenschutzseite $pfad ist nicht als lang=\"$sprache\" ausgewiesen"
+  ok "Datenschutzseite $pfad ($sprache)"
 done
 
 # Der Service Worker: Quelle ist service-worker.published.js, ausgeliefert wird
@@ -91,9 +98,18 @@ ok "/service-worker.js mit Teilen-Ziel"
 # Ohne Service Worker landet POST /share-target beim Server. try_files auf eine
 # statische Datei antwortet einem POST mit 405 — der Nutzer sähe eine
 # Fehlerseite statt der App. Der Server muss selbst umleiten.
-code=$("${CURL[@]}" -o /dev/null -X POST -w '%{http_code}' "$BASE/share-target")
+#
+# Der Status allein genügt nicht: eine 303 irgendwohin (auf / etwa, oder auf
+# eine 404) sieht hier genauso aus und landet den Nutzer woanders. Geprüft wird
+# deshalb das Ziel — und dass es die Fehlerkennung trägt, denn ohne Service
+# Worker ist die Datei wirklich nicht angekommen und die App muss das sagen.
+antwort=$("${CURL[@]}" -o /dev/null -X POST -w '%{http_code} %{redirect_url}' "$BASE/share-target")
+code=${antwort%% *}; ziel=${antwort#* }
 [ "$code" = 303 ] || fail "POST /share-target: HTTP $code statt 303 (ohne Service Worker antwortet nginx sonst 405)"
-ok "POST /share-target → 303 (Server-Rückfall)"
+case "$ziel" in
+  */reader\?share=failed) ok "POST /share-target → 303 $ziel (Server-Rückfall)" ;;
+  *) fail "POST /share-target leitet auf '$ziel' statt auf /reader?share=failed" ;;
+esac
 
 # ---------------------------------------------------------------------------
 # Jedes <script src> aus index.html muss auch JavaScript sein.

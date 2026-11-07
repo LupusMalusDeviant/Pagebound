@@ -33,6 +33,9 @@ const offlineAssetsExclude = [ /^service-worker\.js$/, /(^|\/)screenshots\// ];
 const shareCacheName = 'pb-share';
 const shareEntryPrefix = '/__pb-share/';
 const shareFilenameHeader = 'X-Pagebound-Filename';
+// = ReaderPane.MaxFileSize und MAX_BYTES in boot.js. Hier noch einmal, weil es
+// vor dem Ablegen greifen muss und nicht erst bei der Abholung.
+const shareMaxBytes = 100 * 1024 * 1024;
 
 // Replace with your base path if you are hosting on a subfolder. Ensure there is a trailing '/'.
 const base = "/";
@@ -148,54 +151,87 @@ async function onActivate(event) {
 function shareFromElsewhere(request) {
     const ref = request.referrer;
     if (!ref || ref === 'about:client') return false; // kein Verweis: Betriebssystem
+    let url;
     try {
-        return new URL(ref).origin !== self.origin;
+        url = new URL(ref);
     } catch {
-        return true; // unlesbarer Verweis: nicht vertrauen
+        return false; // unlesbarer Verweis: kein Browser-Tab, also keine fremde Seite
     }
+    // NUR ein http(s)-Verweis mit fremder Origin ist fremd.
+    //
+    // Die installierte Android-Fassung (Trusted Web Activity) bekommt von Chrome
+    // den Verweis `android-app://<paket>/`. Dessen `origin` ist "null" und wäre
+    // damit immer ungleich der eigenen: eine Prüfung auf `origin !== self.origin`
+    // allein weist in genau dem Build JEDE Freigabe ab — dem Build, um den es in
+    // diesem Meilenstein geht. Dasselbe gilt für jedes andere Schema, über das
+    // ein Betriebssystem eine Freigabe hereingibt.
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
+    return url.origin !== self.origin;
+}
+
+// Nummernvergabe und Ablegen müssen zusammen laufen. Zwei Fetch-Events wechseln
+// sich an jedem await ab: beide lesen sonst dieselbe höchste Nummer, beide
+// schreiben denselben Schlüssel, und eine Freigabe ist weg. Die Kette hält sie
+// hintereinander.
+let shareLock = Promise.resolve();
+function withShareLock(fn) {
+    const lauf = shareLock.then(fn, fn);
+    shareLock = lauf.then(() => {}, () => {});
+    return lauf;
 }
 
 async function onShareTarget(request) {
+    const zuReader = (such) => Response.redirect(new URL('/reader' + (such || ''), self.origin).href, 303);
+
     if (shareFromElsewhere(request)) {
         console.warn('Service worker: Freigabe von fremder Herkunft abgewiesen', request.referrer);
-        return Response.redirect(new URL('/reader', self.origin).href, 303);
+        // Eigene Kennung: der Nutzer soll erfahren, warum nichts aufgeht.
+        return zuReader('?share=rejected');
     }
-    let ok = false;
+    let problem = 'failed';
     try {
         const form = await request.formData();
         // Der Manifest-Parameter heißt "file"; getAll, weil manche Plattformen
         // mehrere schicken — die erste echte Datei genügt.
         const file = form.getAll('file').find(v => typeof v !== 'string' && v);
         if (file) {
-            const cache = await caches.open(shareCacheName);
-            // Eigener Schlüssel je Freigabe: zwei kurz hintereinander dürfen
-            // sich nicht überschreiben, und boot.js darf keine löschen, die es
-            // nicht gelesen hat. Die Zahl kommt aus dem Cache selbst — keine
-            // Systemuhr, keine Zufalls-Id.
-            let n = 0;
-            for (const key of await cache.keys()) {
-                const m = /\/__pb-share\/(\d+)$/.exec(new URL(key.url).pathname);
-                if (m) n = Math.max(n, Number(m[1]));
+            // Grenze VOR dem Ablegen. Sonst wandert eine 1-GB-Datei vollständig
+            // in den Cache Storage, nur damit boot.js sie danach wegen
+            // Übergröße ablehnt — auf einem schwachen Telefon kostet das
+            // Speicher, Kontingent und Zeit.
+            if (file.size > shareMaxBytes) {
+                console.warn('Service worker: Freigabe zu groß', file.size);
+                return zuReader('?share=toobig');
             }
-            await cache.put(shareEntryPrefix + (n + 1), new Response(file, {
-                headers: {
-                    'Content-Type': file.type || 'application/pdf',
-                    // Prozentkodiert: ein Dateiname darf Zeichen enthalten, die
-                    // in einem HTTP-Header nicht erlaubt sind (Umlaute, Komma).
-                    [shareFilenameHeader]: encodeURIComponent(file.name || 'geteilt.pdf'),
-                },
-            }));
-            ok = true;
+            await withShareLock(async () => {
+                const cache = await caches.open(shareCacheName);
+                // Eigener Schlüssel je Freigabe: zwei kurz hintereinander dürfen
+                // sich nicht überschreiben, und boot.js darf keine löschen, die es
+                // nicht gelesen hat. Die Zahl kommt aus dem Cache selbst — keine
+                // Systemuhr, keine Zufalls-Id.
+                let n = 0;
+                for (const key of await cache.keys()) {
+                    const m = /\/__pb-share\/(\d+)$/.exec(new URL(key.url).pathname);
+                    if (m) n = Math.max(n, Number(m[1]));
+                }
+                await cache.put(shareEntryPrefix + (n + 1), new Response(file, {
+                    headers: {
+                        'Content-Type': file.type || 'application/pdf',
+                        // Prozentkodiert: ein Dateiname darf Zeichen enthalten, die
+                        // in einem HTTP-Header nicht erlaubt sind (Umlaute, Komma).
+                        [shareFilenameHeader]: encodeURIComponent(file.name || 'geteilt.pdf'),
+                    },
+                }));
+            });
+            problem = null;
         }
     } catch (err) {
         // Nicht lesbar oder Speicher voll.
         console.warn('Service worker: Freigabe nicht übernommen', err);
     }
-    // Absolute URL: Response.redirect verlangt sie, relativ wirft es.
-    // Bei einem Fehlschlag sagt ?share=failed der App, dass sie das melden
-    // soll — sonst käme der Reader leer hoch und die Freigabe sähe kaputt aus.
-    const ziel = ok ? '/reader' : '/reader?share=failed';
-    return Response.redirect(new URL(ziel, self.origin).href, 303);
+    // Bei einem Fehlschlag sagt die Kennung der App, dass sie das melden soll —
+    // sonst käme der Reader leer hoch und die Freigabe sähe kaputt aus.
+    return zuReader(problem ? '?share=' + problem : '');
 }
 
 async function onFetch(event) {

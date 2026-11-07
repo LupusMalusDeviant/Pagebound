@@ -28,7 +28,7 @@ const LOKAL2 = { name: "Markus", voiceURI: "lokal-de-2", lang: "de-DE", default:
 // Eine alte Engine ohne die Eigenschaft: unbekannt heißt „nicht benutzen".
 const UNBEKANNT = { name: "Alt", voiceURI: "alt", lang: "de-DE", default: false };
 
-function loadTts(voices) {
+function loadTts(voices, lang = "de") {
   assert.ok(
     existsSync(built),
     "wwwroot/js/tts-bridge.js fehlt — ohne `npm run build:js` prüft dieser Test nichts (CI baut vorher)",
@@ -44,6 +44,7 @@ function loadTts(voices) {
   ctx.window = ctx;
   ctx.globalThis = ctx;
   ctx.self = ctx;
+  ctx.document = { documentElement: { lang } };
   ctx.window.speechSynthesis = {
     getVoices: () => voices,
     cancel() {},
@@ -95,4 +96,23 @@ test("leerer Text spricht nicht", () => {
   const { tts, spoken } = loadTts([LOKAL]);
   assert.equal(tts.speak("   "), false);
   assert.deepEqual(spoken, []);
+});
+
+test("die Stimme folgt der Sprache des Dokuments, nicht der des Systems", () => {
+  // Die „default"-Stimme ist die des Systems. Ein deutsches Dokument wurde
+  // damit englisch vorgelesen, obwohl eine deutsche lokale Stimme da war.
+  const ENGLISCH = { name: "Daniel", voiceURI: "lokal-en", lang: "en-GB", default: true, localService: true };
+  const { tts, spoken } = loadTts([ENGLISCH, LOKAL], "de");
+  assert.equal(tts.speak("Ein deutscher Satz."), true);
+  assert.equal(spoken[0].voice.voiceURI, "lokal-de", `genommen: ${spoken[0].voice.name}`);
+  assert.equal(spoken[0].lang, "de-DE", "u.lang nicht gesetzt — manche Engines sprechen dann systemsprachlich");
+});
+
+test("isSupported sagt nein, wenn es nur Netz-Stimmen gibt", () => {
+  // Sonst zeigt die Oberflaeche den Knopf, speak() liefert false, und der
+  // Nutzer erfaehrt nicht, warum nichts passiert.
+  assert.equal(loadTts([NETZ, UNBEKANNT]).tts.isSupported(), false);
+  assert.equal(loadTts([NETZ, LOKAL]).tts.isSupported(), true);
+  // Liste noch nicht geladen: nicht vorschnell nein sagen.
+  assert.equal(loadTts([]).tts.isSupported(), true);
 });
