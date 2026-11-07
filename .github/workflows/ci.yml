@@ -146,7 +146,16 @@ jobs:
 
   e2e-tests:
     name: E2E Tests (Playwright)
-    runs-on: ubuntu-latest
+    # FESTGENAGELT, nicht ubuntu-latest: GitHub hat ubuntu-latest am 2026-11-07
+    # von 24.04 auf 26.04 gedreht, und `playwright install --with-deps chromium`
+    # bricht dort ab ("Playwright does not support chromium on ubuntu26.04-x64",
+    # Playwright 1.59). Derselbe Commit-Stand war Stunden vorher auf 24.04 grün
+    # (Lauf 42280468821), rot wurde erst 42373837058 — die Ursache liegt im
+    # Runner-Abbild, nicht im Projekt. Übersprungen werden darf die Suite nicht
+    # (PAGEBOUND_REQUIRE_SERVER), also muss die Umgebung reproduzierbar sein.
+    # Zurück auf ubuntu-latest erst mit einer Playwright-Fassung, die 26.04
+    # kennt (hier 1.59.0, aktuell wäre 1.64.x) — und erst nach einem grünen Lauf.
+    runs-on: ubuntu-24.04
     needs: build-and-test
     # Die Tests laufen gegen das ECHTE Auslieferungs-Image (nginx + Brotli aus
     # infra/docker/nginx.conf), nicht gegen einen Wegwerf-Server.
@@ -229,8 +238,12 @@ jobs:
 
       - name: Container logs
         if: always()
+        # Beide mit || true: dieser Schritt läuft auch, wenn ein früherer Schritt
+        # vor dem Start der Container abgebrochen ist. Ohne das meldet er dann
+        # „No such container" als zweiten, irreführenden Fehler (so geschehen in
+        # Lauf 42373837058, wo schon die Playwright-Installation scheiterte).
         run: |
-          docker logs pb-e2e
+          docker logs pb-e2e || true
           echo "--- pb-redirect"
           docker logs pb-redirect || true
 
