@@ -3,7 +3,10 @@
 //
 // Ausführen (Repo-Wurzel):  node tools/gen-landing.mjs src/Pagebound.Web/wwwroot
 // Die erzeugten Dateien werden eingecheckt; Texte hier pflegen, nicht im HTML.
-// Die CI prüft, dass die eingecheckten Dateien dem Stand dieses Skripts entsprechen.
+// Auf die Standardausgabe kommt jeder geschriebene Pfad, einer pro Zeile: die CI
+// prüft damit beide Richtungen — Inhalt gleich UND keine eingecheckte Seite übrig,
+// die dieses Skript nicht mehr schreibt (ein umbenannter Slug lässt die alte
+// Seite sonst liegen, der Generator löscht nichts).
 //
 // DE liegt unter /<slug>/, EN unter /en/<slug>/. Jede Seite verweist per hreflang auf
 // ihr Gegenstück (und x-default = DE). EN-Seiten verlinken die App mit ?lang=en —
@@ -217,8 +220,62 @@ const PAGES = [
 const nl = "\n";
 const LANGS = ["de", "en"];
 
+// ---------------------------------------------------------------------------
+// Fehlende oder falsch geschriebene Texte sollen den Lauf abbrechen, nicht als
+// Wort „undefined" in einer Überschrift landen. Das Python-Skript tat das von
+// selbst (KeyError), JavaScript setzt stillschweigend „undefined" ein.
+// Zwei Netze: validate() prüft die Datenstruktur vor dem Rendern, und jede
+// erzeugte Datei wird danach auf „undefined" geprüft (fängt auch einen Tippfehler
+// in der Vorlage selbst, den validate() nicht sehen kann).
+// ---------------------------------------------------------------------------
+const UI_KEYS = ["locale", "home", "nav", "ogimg", "cta_note", "how", "faq", "more", "lang_other", "suffix", "footer", "source"];
+const PAGE_KEYS = ["slug", "title", "desc", "h1", "lead"];
+
+function str(value, what) {
+  if (typeof value !== "string" || value === "") throw new Error(`${what}: fehlender oder leerer Text (${typeof value})`);
+  return value;
+}
+
+function pairs(value, what) {
+  if (!Array.isArray(value) || value.length === 0) throw new Error(`${what}: leere oder fehlende Liste`);
+  value.forEach((pair, i) => {
+    if (!Array.isArray(pair) || pair.length !== 2) throw new Error(`${what}[${i}]: kein Paar`);
+    pair.forEach((s, j) => str(s, `${what}[${i}][${j}]`));
+  });
+}
+
+function validate() {
+  for (const lang of LANGS) {
+    const ui = UI[lang];
+    if (!ui) throw new Error(`UI.${lang} fehlt`);
+    for (const k of UI_KEYS) str(ui[k], `UI.${lang}.${k}`);
+    pairs(ui.facts, `UI.${lang}.facts`);
+    for (const k of Object.keys(ui)) if (!UI_KEYS.includes(k) && k !== "facts") throw new Error(`UI.${lang}.${k}: unbekannter Schlüssel (Tippfehler?)`);
+  }
+  PAGES.forEach((group, n) => {
+    for (const lang of LANGS) {
+      const p = group[lang];
+      if (!p) throw new Error(`PAGES[${n}].${lang} fehlt`);
+      const where = `PAGES[${n}].${lang}`;
+      for (const k of PAGE_KEYS) str(p[k], `${where}.${k}`);
+      if (!Array.isArray(p.cta) || p.cta.length !== 2) throw new Error(`${where}.cta: kein Paar`);
+      p.cta.forEach((s, i) => str(s, `${where}.cta[${i}]`));
+      if (!Array.isArray(p.steps) || p.steps.length === 0) throw new Error(`${where}.steps: leer`);
+      p.steps.forEach((s, i) => str(s, `${where}.steps[${i}]`));
+      pairs(p.faq, `${where}.faq`);
+      if ("note" in p) str(p.note, `${where}.note`);
+      for (const k of Object.keys(p)) if (![...PAGE_KEYS, "cta", "steps", "faq", "note"].includes(k)) throw new Error(`${where}.${k}: unbekannter Schlüssel (Tippfehler?)`);
+    }
+    for (const lang of LANGS) {
+      if (PAGES.filter((g) => g[lang].slug === group[lang].slug).length !== 1)
+        throw new Error(`Slug doppelt: ${lang}/${group[lang].slug}`);
+    }
+  });
+}
+
 // Wie Pythons html.escape(s, quote=True).
-function esc(s) {
+function esc(s, what = "Text") {
+  str(s, what);
   return s
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
@@ -227,21 +284,50 @@ function esc(s) {
     .replaceAll("'", "&#x27;");
 }
 
-// Wie Pythons json.dumps(v, ensure_ascii=False): Trenner ", " und ": ".
-// Zeichenketten kodiert JSON.stringify gleich (Nicht-ASCII bleibt, "/" bleibt).
-function pyJson(v) {
-  if (Array.isArray(v)) return "[" + v.map(pyJson).join(", ") + "]";
+// JSON im Ausgabeformat von Pythons json.dumps(v, ensure_ascii=False):
+// Trenner ", " und ": ". Abgedeckt sind Zeichenketten, true/false, null, ganze
+// Zahlen, Listen und Objekte — mehr braucht das JSON-LD hier nicht. Alles andere
+// (undefined, Kommazahlen, NaN, Infinity, Funktionen) bricht ab, statt sich von
+// Python zu unterscheiden (0.0 -> "0" statt "0.0") oder das Wort undefined in
+// die Seite zu schreiben. Zeichenketten kodiert JSON.stringify gleich wie Python
+// (Nicht-ASCII bleibt, "/" bleibt).
+function pyJson(v, what = "JSON") {
+  if (Array.isArray(v)) return "[" + v.map((x, i) => pyJson(x, `${what}[${i}]`)).join(", ") + "]";
   if (v !== null && typeof v === "object")
-    return "{" + Object.entries(v).map(([k, x]) => JSON.stringify(k) + ": " + pyJson(x)).join(", ") + "}";
-  return JSON.stringify(v);
+    return "{" + Object.entries(v).map(([k, x]) => JSON.stringify(k) + ": " + pyJson(x, `${what}.${k}`)).join(", ") + "}";
+  if (typeof v === "string" || typeof v === "boolean" || v === null) return JSON.stringify(v);
+  if (typeof v === "number") {
+    if (!Number.isInteger(v)) throw new Error(`${what}: nur ganze Zahlen (Python schreibt 1.0, JavaScript 1)`);
+    return JSON.stringify(v);
+  }
+  throw new Error(`${what}: ${typeof v} ist in JSON-LD nicht vorgesehen`);
+}
+
+// Dasselbe JSON, aber für ein <script>-Element: "<" wird zu <, damit ein
+// "</script" oder "<!--" in einem Text das Element nicht beendet und den
+// HTML-Parser nicht umschaltet (derselbe Grund, aus dem smoke.sh das ablehnt).
+// JSON kennt "<" nur in Zeichenketten, deshalb ist das global sicher. An den
+// heutigen Texten ändert es nichts — keiner enthält ein "<".
+function jsonForScript(v, what) {
+  return pyJson(v, what).replaceAll("<", "\\u003c");
 }
 
 function pathOf(lang, slug) {
+  str(slug, "slug");
   return lang === "de" ? `/${slug}/` : `/en/${slug}/`;
 }
 
+// Jede erzeugte Datei: Pfad relativ zu ROOT, immer mit Schrägstrichen, damit die
+// CI die Liste gegen `git ls-files` halten kann (Waisen-Prüfung).
+const written = [];
+
 function write(rel, text) {
+  const path = rel.replaceAll("\\", "/");
+  const at = text.search(/\bundefined\b/);
+  if (at >= 0)
+    throw new Error(`${path}: enthält das Wort "undefined" — fehlender Text in der Vorlage? …${text.slice(Math.max(0, at - 60), at + 20)}…`);
   writeFileSync(join(ROOT, rel), text, { encoding: "utf8" });
+  written.push(path);
 }
 
 function render(group, lang) {
@@ -303,8 +389,8 @@ function render(group, lang) {
     <link rel="icon" href="/favicon.ico" sizes="any" />
     <link rel="icon" type="image/png" href="/favicon.png" />
     <link rel="stylesheet" href="/landing/landing.css" />
-    <script type="application/ld+json">${pyJson(ld)}</script>
-    <script type="application/ld+json">${pyJson(faqLd)}</script>
+    <script type="application/ld+json">${jsonForScript(ld, "ld")}</script>
+    <script type="application/ld+json">${jsonForScript(faqLd, "faqLd")}</script>
 </head>
 <body>
     <div class="wrap">
@@ -344,6 +430,7 @@ ${others.map((o) => `                <li><a href="${pathOf(lang, o.slug)}">${esc
   write(join(dir, "index.html"), out);
 }
 
+validate();
 for (const g of PAGES) for (const lang of LANGS) render(g, lang);
 
 // sitemap.xml mit lastmod und Sprachalternativen (xhtml:link)
@@ -378,4 +465,6 @@ ${PAGES.map((g) => `- [${g.en.h1}](${ORIGIN}${pathOf("en", g.en.slug)}): ${g.en.
 - [MCP server](${REPO}/tree/main/mcp): tokenless MCP server, stdio or Streamable HTTP (hosted at ${ORIGIN}/mcp)
 `);
 
-console.log("ok", PAGES.flatMap((g) => LANGS.map((l) => g[l].slug)));
+// Nur die erzeugten Pfade, einer pro Zeile: so kann die CI prüfen, dass keine
+// eingecheckte Landingpage übrig ist, die dieses Skript nicht mehr schreibt.
+console.log(written.join(nl));

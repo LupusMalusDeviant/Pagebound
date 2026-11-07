@@ -43,16 +43,35 @@ jobs:
       # Ausgabe von tools/gen-landing.mjs. Wer die Texte im Skript ändert und das
       # Neu-Erzeugen vergisst (oder das HTML von Hand ändert), wird hier rot.
       # Läuft vor jedem Build-Schritt, der wwwroot anfasst.
+      #
+      # Geprüft wird in BEIDEN Richtungen. Der Inhaltsvergleich allein genügt
+      # nicht: Wird ein Slug umbenannt und alles neu erzeugt und eingecheckt,
+      # bleibt die ALTE Seite im Repo liegen (der Generator löscht nichts). Sie
+      # wäre aus sitemap.xml und den Querverweisen verschwunden, würde aber
+      # weiter ausgeliefert — und landing.test.mjs hielte sie für eine gültige
+      # Seite. Deshalb zusätzlich: jede eingecheckte …/index.html unterhalb von
+      # wwwroot muss eine sein, die der Generator geschrieben hat.
+      # LASTMOD im Generator bleibt von Hand gepflegt (Reproduzierbarkeit, keine
+      # Systemuhr) — dass es zum Inhalt passt, prüft hier nichts.
       - name: Landing pages up to date (gen-landing.mjs)
         run: |
-          node tools/gen-landing.mjs src/Pagebound.Web/wwwroot
-          # Inhalt vergleichen (git diff normalisiert Zeilenenden) und neue,
-          # nicht eingecheckte Dateien eigens suchen — git diff sieht sie nicht.
+          node tools/gen-landing.mjs src/Pagebound.Web/wwwroot | sort > /tmp/landing-written
+          # Jede eingecheckte Seite unterhalb von wwwroot (die App-eigene
+          # wwwroot/index.html hat nach dem Abschneiden des Präfixes keinen
+          # Schrägstrich und fällt damit heraus).
+          git ls-files --full-name -- src/Pagebound.Web/wwwroot \
+            | sed 's|^src/Pagebound\.Web/wwwroot/||' \
+            | grep -E '^.+/index\.html$' | sort > /tmp/landing-tracked
+          orphans=$(comm -13 /tmp/landing-written /tmp/landing-tracked)
+          # Inhalt vergleichen: git diff normalisiert die Zeilenenden über
+          # „* text=auto" in .gitattributes. Neue, nicht eingecheckte Dateien
+          # eigens suchen — git diff sieht sie nicht.
           new=$(git ls-files --others --exclude-standard -- src/Pagebound.Web/wwwroot)
-          if ! git diff --quiet -- src/Pagebound.Web/wwwroot || [ -n "$new" ]; then
+          if ! git diff --quiet -- src/Pagebound.Web/wwwroot || [ -n "$new" ] || [ -n "$orphans" ]; then
             echo "Eingecheckte Landingpages weichen von tools/gen-landing.mjs ab:"
             git diff --stat -- src/Pagebound.Web/wwwroot
             [ -z "$new" ] || echo "Neu, nicht eingecheckt: $new"
+            [ -z "$orphans" ] || echo "Eingecheckt, aber nicht mehr erzeugt (löschen): $orphans"
             git diff -- src/Pagebound.Web/wwwroot | head -50
             exit 1
           fi
