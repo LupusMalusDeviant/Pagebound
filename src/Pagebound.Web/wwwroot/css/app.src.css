@@ -511,6 +511,38 @@ input[type="file"]:hover::-webkit-file-upload-button {
   .pb-reader .pb-reader-toolbar .pb-toolbtn { min-height: 44px; }
 }
 
+/* --- Designer-Werkzeugleiste auf dem Telefon -------------------------------
+   Gemessen am 2026-11-08 bei 375x812: die Leiste brach auf vier Zeilen um und
+   belegte 173 px, bevor die Bühne anfing; 36 von 37 Bedienflächen lagen unter
+   44 px. Eine Zeile, die waagerecht scrollt, kostet eine.
+   Anders als im Reader ist das hier gefahrlos: diese Leiste hat keine
+   `absolute` positionierten Klappmenüs, nur Knöpfe, ein natives `select` und
+   zwei Farbwähler — deren Aufklapper zeichnet der Browser außerhalb des
+   Clipping-Kontextes.
+   Plan: docs/plans/2026-11-08-smartphone-layout.md */
+@media (max-width: 640px) {
+  .pb-editor-toolbar {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+    /* Muss mit: als Scroll-Container fällt `min-height: auto` auf 0, und der
+       Spalten-Flex darüber drückte die Leiste auf 16 px zusammen (gemessen). */
+    flex: none;
+  }
+  .pb-editor-toolbar::-webkit-scrollbar { display: none; }
+  .pb-editor-toolbar > * { flex: none; }
+
+  .pb-editor-toolbar .btn-fmt { min-width: 44px; min-height: 44px; }
+  .pb-editor-toolbar select { min-height: 44px; }
+
+  /* Die dreizehn festen Farbfelder wären auf 44 px rund 570 px Scrollweg nur
+     für Farben. Auf dem Telefon bleiben die beiden Farbwähler — sie können
+     ohnehin jede Farbe, nicht nur die Voreinstellungen. */
+  .pb-editor-toolbar .pb-swatch { display: none; }
+  .pb-editor-toolbar input[type="color"] { width: 44px; height: 44px; }
+}
+
 /* Tastenkürzel nur dort, wo es Tasten gibt. */
 @media (hover: none) and (pointer: coarse) {
   .pb-reader-keyhint { display: none; }

@@ -553,7 +553,7 @@
             @foreach (var col in TextColors)
             {
                 var c = col;
-                <button class="h-5 w-5 rounded-full border border-pb-border" style="background:@c" title="@L.T("editor.fmt.textColor")"
+                <button class="pb-swatch h-5 w-5 rounded-full border border-pb-border" style="background:@c" title="@L.T("editor.fmt.textColor")"
                         @onmousedown:preventDefault="true" @onclick="@(() => Format("foreColor", c))"></button>
             }
             <input type="color" class="h-5 w-5 cursor-pointer rounded-full border border-pb-border bg-transparent p-0" title="@L.T("editor.fmt.textColorPick")"
@@ -562,7 +562,7 @@
             @foreach (var col in HiliteColors)
             {
                 var c = col;
-                <button class="h-5 w-5 rounded border border-pb-border" style="background:@c" title="@L.T("editor.fmt.highlight")"
+                <button class="pb-swatch h-5 w-5 rounded border border-pb-border" style="background:@c" title="@L.T("editor.fmt.highlight")"
                         @onmousedown:preventDefault="true" @onclick="@(() => Format("hiliteColor", c))"></button>
             }
             <input type="color" class="h-5 w-5 cursor-pointer rounded border border-pb-border bg-transparent p-0" title="@L.T("editor.fmt.highlightPick")"

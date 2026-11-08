@@ -713,7 +713,7 @@
   "editor.ph.heading": "Enter heading …",
   "editor.ph.paragraph": "Enter text …",
   "editor.image.empty": "Insert image here",
-  "editor.emptyDoc": "Empty document — add blocks on the left or pick a template.",
+  "editor.emptyDoc": "Empty document — add blocks from the tools panel or pick a template.",
   "editor.layout.dinlong": "DL portrait (flyer)",
   "editor.layout.a6l": "A6 landscape (postcard)",
   "editor.theme.label": "Design (theme)",
