@@ -543,6 +543,36 @@ input[type="file"]:hover::-webkit-file-upload-button {
   .pb-editor-toolbar input[type="color"] { width: 44px; height: 44px; }
 }
 
+/* --- Split-View auf schmalen Schirmen --------------------------------------
+   Gemessen am 2026-11-08 bei 375x812: 188 px links, 6 px Trenner, 182 px
+   rechts — zwei PDF-Seiten nebeneinander, von denen keine lesbar ist. Unter
+   860 px ist darum nur eine Pane sichtbar; der Umschalter im Kopf wählt sie.
+   Beide bleiben im DOM, damit Dokument, Seite, Zoom und Annotationen beim
+   Umschalten stehen bleiben.
+   Plan: docs/plans/2026-11-08-smartphone-layout.md */
+@media (min-width: 861px) {
+  .pb-split-switch { display: none !important; }
+}
+
+@media (max-width: 860px) {
+  /* Die Breiten des Ziehbalkens stehen als Inline-Stil am linken Pane
+     (split-bridge.ts setzt flex-basis/grow/shrink beim Ziehen) — darum
+     !important, sonst bliebe die gezogene Breite kleben. */
+  .pb-split .pb-split-pane {
+    flex: 1 1 auto !important;
+    width: 100%;
+  }
+  .pb-split .pb-split-pane-b { display: none; }
+  .pb-split.pb-show-b .pb-split-pane-a { display: none; }
+  .pb-split.pb-show-b .pb-split-pane-b { display: block; }
+
+  /* Ziehbalken und Synchron-Scrollen setzen zwei sichtbare Panes voraus. */
+  .pb-split .pb-split-gutter { display: none; }
+  .pb-split .pb-split-sync { display: none; }
+
+  .pb-split .pb-split-switch button { min-height: 44px; }
+}
+
 /* Tastenkürzel nur dort, wo es Tasten gibt. */
 @media (hover: none) and (pointer: coarse) {
   .pb-reader-keyhint { display: none; }

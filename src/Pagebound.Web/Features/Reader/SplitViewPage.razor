@@ -21,19 +21,43 @@
 
 <PageTitle>@L.T("split.pageTitle")</PageTitle>
 
-<div class="flex flex-col h-full min-h-0">
+@* pb-split steuert das Schmalschirm-Layout (app.src.css, max-width 860px):
+   unter dieser Breite liegen die Panes nicht nebeneinander, sondern eine ist
+   sichtbar und der Umschalter wählt sie. Beide bleiben im DOM, damit
+   Dokument, Seite und Zoom beim Umschalten stehen bleiben. *@
+<div class="pb-split flex flex-col h-full min-h-0 @(_narrowPaneB ? "pb-show-b" : null)">
     <header class="border-b border-pb-border px-4 py-2 flex items-center justify-between gap-3">
         <div class="min-w-0">
             <div class="font-medium text-sm">@L.T("split.heading")</div>
             <div class="text-xs text-pb-fg-muted truncate">@L.T("split.hint")</div>
         </div>
         <div class="flex items-center gap-3 shrink-0">
+            @* Nur auf schmalen Schirmen: wählt, welche der beiden Panes zu
+               sehen ist. Nebeneinander blieben von 375 px je 188 und 182 px. *@
+            <div class="pb-split-switch flex items-center gap-1" role="group" aria-label="@L.T("split.narrow.switch")">
+                <button type="button"
+                        class="@($"rounded border px-3 py-1 text-xs {(_narrowPaneB ? "pb-toolbtn" : "pb-toolbtn is-on")}")"
+                        aria-pressed="@((!_narrowPaneB).ToString().ToLowerInvariant())"
+                        title="@L.T("split.narrow.switch")"
+                        @onclick="@(() => _narrowPaneB = false)">
+                    @L.T("split.narrow.paneA")
+                </button>
+                <button type="button"
+                        class="@($"rounded border px-3 py-1 text-xs {(_narrowPaneB ? "pb-toolbtn is-on" : "pb-toolbtn")}")"
+                        aria-pressed="@(_narrowPaneB.ToString().ToLowerInvariant())"
+                        title="@L.T("split.narrow.switch")"
+                        @onclick="@(() => _narrowPaneB = true)">
+                    @L.T("split.narrow.paneB")
+                </button>
+            </div>
             <button type="button"
                     class="rounded border border-pb-border px-2.5 py-1 text-xs text-pb-fg-muted hover:text-pb-fg disabled:opacity-40"
                     disabled="@_diffBusy" @onclick="CompareAsync" title="@L.T("split.compare.title")">
                 @(_diffBusy ? L.T("compare.running") : L.T("split.compare.button"))
             </button>
-            <label class="flex items-center gap-1.5 text-xs text-pb-fg-muted cursor-pointer select-none whitespace-nowrap"
+            @* Synchron-Scrollen setzt zwei sichtbare Panes voraus — auf
+               schmalen Schirmen gibt es nur eine, darum dort aus. *@
+            <label class="pb-split-sync flex items-center gap-1.5 text-xs text-pb-fg-muted cursor-pointer select-none whitespace-nowrap"
                    title="@L.T("split.sync.title")">
                 <input type="checkbox" class="accent-pb-accent" @bind="_syncScroll" @bind:after="ApplySyncScrollAsync" />
                 @L.T("split.sync.label")
@@ -47,15 +71,15 @@
             <span class="block">@L.T("compare.hint")</span>
         </div>
     }
-    <div @ref="_container" class="flex-1 min-h-0 flex">
-        <div @ref="_leftPane" class="overflow-auto min-w-0 basis-1/2" aria-label="@L.T("split.pane.left")">
+    <div @ref="_container" class="pb-split-stage flex-1 min-h-0 flex">
+        <div @ref="_leftPane" class="pb-split-pane pb-split-pane-a overflow-auto min-w-0 basis-1/2" aria-label="@L.T("split.pane.left")">
             <ReaderPane @ref="_leftReader" />
         </div>
         <div @ref="_gutter"
-             class="w-1.5 shrink-0 cursor-col-resize bg-pb-border hover:bg-pb-accent/60 active:bg-pb-accent transition-colors touch-none"
+             class="pb-split-gutter w-1.5 shrink-0 cursor-col-resize bg-pb-border hover:bg-pb-accent/60 active:bg-pb-accent transition-colors touch-none"
              role="separator" aria-orientation="vertical"
              aria-label="@L.T("split.resize.aria")" title="@L.T("split.resize.title")"></div>
-        <div @ref="_rightPane" class="flex-1 overflow-auto min-w-0" aria-label="@L.T("split.pane.right")">
+        <div @ref="_rightPane" class="pb-split-pane pb-split-pane-b flex-1 overflow-auto min-w-0" aria-label="@L.T("split.pane.right")">
             <ReaderPane @ref="_rightReader" />
         </div>
     </div>
@@ -88,6 +112,10 @@
     private ElementReference _gutter;
     private ElementReference _rightPane;
     private bool _syncScroll;
+
+    // Schmaler Schirm: welche der beiden Panes zu sehen ist. Auf breiten
+    // Schirmen ohne Wirkung, dort stehen beide nebeneinander.
+    private bool _narrowPaneB;
 
     private ReaderPane? _leftReader;
     private ReaderPane? _rightReader;
