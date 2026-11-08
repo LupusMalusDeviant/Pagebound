@@ -4,7 +4,15 @@ Alle nennenswerten Änderungen an Pagebound werden in dieser Datei dokumentiert.
 Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/de/1.1.0/),
 die Versionierung folgt [Semantic Versioning](https://semver.org/lang/de/).
 
-## [Unreleased]
+## [0.16.0-beta] — 2026-11-08
+
+Eintritts-Release: Eine PDF kommt jetzt auch von außerhalb des Browsers in
+Pagebound — „Öffnen mit" unter Windows und „Teilen → Pagebound" unter Android,
+beide durch dieselbe Prüfung wie die Drop-Zone, sortiert nach Inhalt statt nach
+Endung. Dazu das Vorlesen in der Sprache des Dokuments und die Voraussetzungen
+für Microsoft Store und Google Play. Zwei Datenschutzbefunde sind mit drin, die
+beide keine Prüfung des Projekts strukturell sehen konnte: das Vorlesen schickte
+Text an Google, und `/share-target` nahm Dateien von fremden Seiten an.
 
 ### Hinzugefügt
 - **PDF-Dateihandler und Teilen-Ziel — ein Eintritt für Dateien.** „Öffnen mit Pagebound" unter Windows (`file_handlers`) und „Teilen → Pagebound" unter Android (`share_target`). Beide Wege laufen durch dieselbe Prüfung wie Drop-Zone und Dateiauswahl, und sortiert wird nach **Inhalt**, nicht nach Endung oder Route: `%PDF-` öffnet, gültiges JSON wird zum Designer-Entwurf, alles andere wird mit derselben Meldung verworfen wie eine abgelehnte Drop-Datei. `boot.js` ist die einzige Stelle, die `window.launchQueue` entgegennimmt — der nimmt genau **einen** Empfänger, ein zweiter in `wysiwyg-editor.ts` hätte ihn still überschrieben, und welcher gewinnt, hätte die Ladereihenfolge der Bundles entschieden. Bei einem Dateihandler und erst recht bei einer Freigabe ist der MIME-Typ eine Behauptung des Betriebssystems (Android meldet für eine PDF regelmäßig `application/octet-stream`), deshalb bekommt die Prüfung den **geprüften** Typ statt des behaupteten; ohne das ist das Teilen auf Android schlicht kaputt. Eine Freigabe parkt der Service Worker im Cache `pb-share` und leitet auf `/reader?share=<Kennung>` um; `pb-share` trägt bewusst nicht das Präfix des Offline-Caches, deshalb übersteht eine Freigabe einen Fassungswechsel. Die Kennung wird **gezogen, nicht gezählt** (`crypto.randomUUID()`, Rückfall 16 Zufallsbytes als Hex): eine laufende Nummer fing nach jeder Abholung wieder bei 1 an, und weil Nummern vergleichbar sind, löschte ein Verweis auf `?share=999` jede Freigabe mit kleinerer Nummer. Ein liegengebliebener Eintrag wird nur gelöscht, wenn er **älter als fünf Minuten** ist — das Manifest hat kein `launch_handler`, also öffnet jede Freigabe ihren eigenen Client, und vorher räumte ein Start ohne Kennung alles weg, auch die Freigabe, auf die ein anderes Fenster gerade wartete. Ein Entwurf wird nur auf der Designer-Route geparkt und hat seine eigene Grenze (5 MB, weil er als Zeichenkette gelesen und als zweite Kopie nach .NET gereicht wird), PDFs 100 MB. Geprüft mit zwei Prüfständen, die es vorher nicht gab — `boot.js` und der Service Worker waren beide ungetestet: `boot.test.mjs` (47 Prüfungen), `service-worker.test.mjs` (26), `manifest.test.mjs` (Manifest gegen den Code, damit Pagebound nicht im Teilen-Menü steht und die Freigabe ins Leere läuft) und drei E2E-Tests mit echter Formular-Navigation auf `/share-target`
