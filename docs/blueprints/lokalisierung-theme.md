@@ -1,37 +1,35 @@
-# Lokalisierung, Theme & UI-Shell
+# Lokalisierung & Theme
 
 ## Zweck
 
-Zweisprachige UI (Deutsch/Englisch) über JSON-Ressourcen-Bundles mit einer schlanken `L.T(key, args)`-API inkl. Platzhalter-Interpolation (FA-102, NFA-050 bis NFA-052). Dazu Theme-Verwaltung (hell/dunkel plus Akzentfarben, FA-100/FA-101) auf Basis von CSS-Variablen und Tailwind v4. Ein Pre-Boot-Skript in `index.html` liest Sprache/Theme aus localStorage, bevor Blazor startet — damit gibt es keinen Flash of Unstyled/Untranslated Content (FOUC). Die UI-Shell (`MainLayout`, `SettingsPanel`, `Icon`) bindet beides zusammen.
+Zweisprachige Oberfläche (Deutsch und Englisch) über JSON-Textbündel mit einer schmalen `L.T(key, args)`-API samt Platzhaltern, plus Theme (hell und dunkel) und Akzentfarben über CSS-Variablen. Das Vor-Boot-Skript in `index.html` liest Sprache und Theme aus localStorage, bevor Blazor startet — damit blitzt kein ungestylter oder unübersetzter Zustand auf. Fast jedes andere Feature hängt hier dran.
 
 ## Dateien
 
 | Pfad | Rolle |
 |------|-------|
-| `src/Pagebound.Core/Abstractions/ILocalizationService.cs` | Interface: `T()`, `CurrentLanguage`, `LanguageChanged` |
-| `src/Pagebound.Core/Abstractions/IThemeService.cs` | Interface: `CurrentTheme`, `SetThemeAsync`, `ThemeChanged` |
-| `src/Pagebound.Core/Domain/ThemeName.cs` | Theme-Enum (Light/Dark/…) |
-| `src/Pagebound.Infrastructure/Localization/LocalizationService.cs` | Lädt JSON-Bundles, Key→String-Mapping + Interpolation |
-| `src/Pagebound.Infrastructure/Theme/ThemeService.cs` | Setzt Theme-Klasse/CSS-Variablen, persistiert Auswahl |
-| `src/Pagebound.Web/wwwroot/resources/de.json` | Deutsches Sprach-Bundle |
-| `src/Pagebound.Web/wwwroot/resources/en.json` | Englisches Sprach-Bundle |
-| `src/Pagebound.Web/Layout/MainLayout.razor` | App-Shell: Navigation, Seitenrahmen |
-| `src/Pagebound.Web/Layout/SettingsPanel.razor` | Einstellungen: Sprache, Theme, Akzentfarbe |
-| `src/Pagebound.Web/Layout/Icon.razor` | Zentrale Icon-Komponente |
-| `src/Pagebound.Web/wwwroot/css/app.src.css` | Tailwind-v4-Quelle + CSS-Variablen (Themes/Akzentfarben) |
-| `src/Pagebound.Web/wwwroot/index.html` | Pre-Boot-Skript gegen FOUC (Theme/Sprache vor Blazor-Start) |
+| `src/Pagebound.Core/Abstractions/ILocalizationService.cs` | Vertrag: `T()`, `CurrentLanguage`, `LanguageChanged` (`:8`) |
+| `src/Pagebound.Core/Abstractions/IThemeService.cs` | Vertrag: `CurrentTheme`, `SetThemeAsync`, `ThemeChanged` (`:9`) |
+| `src/Pagebound.Core/Domain/ThemeName.cs` | Die zugelassenen Themes |
+| `src/Pagebound.Infrastructure/Localization/LocalizationService.cs` | Lädt die Bündel, bildet Schlüssel auf Text ab, interpoliert; greift über die Interop-Brücke auf localStorage und Theme zu (`:48`) |
+| `src/Pagebound.Infrastructure/Theme/ThemeService.cs` | Setzt Theme-Attribut und CSS-Variablen, sichert die Auswahl |
+| `src/Pagebound.Web/wwwroot/resources/de.json` | Deutsches Textbündel |
+| `src/Pagebound.Web/wwwroot/resources/en.json` | Englisches Textbündel |
+
+Die Shell-Komponenten (`MainLayout`, `SettingsPanel`, `Icon`) gehören zu [App-Shell & Start](./app-shell.md); das Vor-Boot-Skript und `app.src.css` ebenfalls.
 
 ## Abhängigkeiten
 
 ### Intern (andere Features dieses Repos)
 
-- **Storage & Persistenz** — Sprach- und Theme-Auswahl werden in localStorage persistiert (Pre-Boot-lesbar). Siehe [`./storage-persistenz.md`](./storage-persistenz.md).
+- **Interop-Hilfen (UI)** (Querschnitt, via `getStorage`, `setStorage`, `reload`, `applyTheme`): localStorage lesen und schreiben, Theme am `<html>`-Element setzen, nach einem Sprachwechsel neu laden — `src/Pagebound.Infrastructure/Localization/LocalizationService.cs:48`. Siehe [`./interop-hilfen.md`](./interop-hilfen.md).
 
-*(Umgekehrt konsumieren praktisch alle Features `L.T()` und die Theme-CSS-Variablen — dieses Feature ist die Basis-Schicht der UI.)*
+Das ist die einzige ausgehende Kante. Umgekehrt binden **zwölf** Features `ILocalizationService` ein — dieses Feature ist die Grundschicht der Oberfläche.
 
 ### Extern (Packages)
 
-- `tailwindcss` v4 — Utility-CSS, kompiliert `app.src.css` → `app.css`
+- `tailwindcss` v4 — kompiliert `app.src.css` nach `app.css`; die Theme- und Akzent-Variablen stehen dort, nicht im C#-Code
+- Der HttpClient aus `Program.cs:25` lädt die Bündel aus `wwwroot/resources/` — eine Anfrage an die eigene Herkunft, kein externer Dienst
 
 ## Öffentliche API / Interface
 
@@ -54,9 +52,17 @@ public interface IThemeService
 }
 ```
 
+`T()` ist **synchron** und liefert immer eine Zeichenkette. Fehlt ein Schlüssel, kommt der Schlüssel selbst zurück statt einer Ausnahme — eine fehlende Übersetzung zeigt sich damit in der Oberfläche, bricht aber keine Seite.
+
 ## Datenfluss / Call-Flow
 
-1. **Boot:** Pre-Boot-Skript in `index.html` liest Theme + Sprache aus localStorage und setzt die Theme-Klasse/CSS-Variablen am `<html>`-Element, bevor Blazor lädt (kein FOUC).
-2. **Blazor-Start:** `LocalizationService` lädt das passende Bundle aus `wwwroot/resources/{lang}.json`; Komponenten rendern Texte über `L.T("key")` mit optionaler `{Platzhalter}`-Interpolation.
-3. **Sprachwechsel:** `SettingsPanel` → `SetLanguageAsync` → Bundle nachladen, persistieren, `LanguageChanged` feuern → Komponenten re-rendern.
-4. **Theme-Wechsel:** `SettingsPanel` → `SetThemeAsync` → CSS-Klasse/Variablen umschalten, persistieren, `ThemeChanged` feuern; Akzentfarben laufen als CSS-Variablen durch `app.src.css`.
+1. **Vor dem Start:** das Skript in `index.html` liest `?lang=de|en` und `pb.lang` aus localStorage und setzt `lang` am `<html>`-Element, dann Theme und Akzent als Attribute (`index.html:46`–`61`). Das passiert vor dem Laden der WASM-Laufzeit.
+2. **Blazor-Start:** `Program.cs` holt Theme und Sprache in den C#-Zustand, **bevor** `RunAsync` läuft, damit der erste Render stimmt (`Program.cs:64` ff.).
+3. `LocalizationService` lädt das Bündel `wwwroot/resources/{lang}.json`; Komponenten rendern über `L.T("key")` mit optionalen `{Platzhaltern}`.
+4. **Sprachwechsel:** `SettingsPanel` → `SetLanguageAsync` → Bündel nachladen, in localStorage sichern (`getStorage`/`setStorage`, `LocalizationService.cs:48`), `LanguageChanged` auslösen; wo ein Neuaufbau nötig ist, löst `reload` das aus.
+5. **Themewechsel:** `SetThemeAsync` → Attribut und Variablen umschalten (`applyTheme`), sichern, `ThemeChanged` auslösen. Akzentfarben laufen rein über CSS-Variablen in `app.src.css`.
+
+## Offene Fragen / TODOs
+
+- Zwei Bündel müssen von Hand synchron gehalten werden. Eine Prüfung, dass `de.json` und `en.json` dieselben Schlüssel haben, gibt es nicht; ein fehlender Schlüssel fällt erst in der Oberfläche auf.
+- Ein Sprachwechsel kann ein Neuladen auslösen (`reload`, `shortcuts-bridge.ts:679`). Welche Fälle das genau sind, ist aus dem Dienst nicht abzulesen — im Code zu verifizieren.

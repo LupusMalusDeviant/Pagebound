@@ -67,3 +67,21 @@ Quell-Lessons stehen als Pointer in `.claude/lessons-learned.md`.
   schreiben und über den Pfad ausführen — `node -e`, Heredocs und Browser-eval
   verändern den Inhalt still. Vor scripted Edits die Zeilenenden der Zieldatei
   ermitteln, Pfade an native Tools mit Laufwerksbuchstaben übergeben.
+
+<!-- codebase-map:start -->
+## Codebase-Blueprint
+
+`docs/blueprints/INDEX.md` beschreibt den Feature-Schnitt dieser Codebase. Damit nur den Code lesen, den eine Aufgabe betrifft:
+
+- Zuerst `INDEX.md` lesen. Über die Pfade im Abschnitt „Zuordnung“ das Ziel-Feature bestimmen und nur dessen `docs/blueprints/<feature>.md` lesen, keine weiteren Feature-Dateien.
+- Folgen einer Änderung über die Tabelle „Kanten (geprüft)“ bestimmen: eingehende Kanten zum Ziel-Feature verfolgen, eine zweite Stufe nur über Kanten, deren Spalte „via“ ein geändertes Symbol oder eine geänderte Route nennt. Statt fremder Feature-Dateien die Beleg-Stellen der Kanten öffnen.
+- Code nur unter den Pfaden der betroffenen Features öffnen. Breit suchen nur, wenn dort nichts passt.
+- „Unberührt“ nur melden, wenn keine Kante irgendeiner Art zum Ziel führt, auch keine HTTP-Kante. Wer eine API über HTTP anspricht (CLI, Web-Client, Partner), ist betroffen, sobald sich das Verhalten hinter dieser API ändert.
+- Aussagen darüber, wer etwas aufruft („die UI nutzt Endpoint X“), erst nach einer Suche nach den Aufrufern im Code treffen; dass eine Methode existiert, heißt nicht, dass sie genutzt wird.
+- Die Kanten sind maschinell aus dem Code ermittelt. Verhaltensaussagen im Fließtext sind Hinweise; für Verhalten ist der Code maßgeblich, Abweichungen nennen.
+- Fehlen „Zuordnung“ oder „Kanten (geprüft)“ (älterer Blueprint), den Blueprint nur zur Orientierung nutzen und Abhängigkeiten im Code prüfen.
+- Subagenten, die den Code erkunden, diese Hinweise mitgeben.
+- Den Blueprint pflegt der Mod `codebase-map` („aktualisiere den Blueprint“ oder `/codebase-map update`). Dokumentationssprache des Blueprints: Deutsch.
+
+_Dieser Block wird vom Mod `codebase-map` gepflegt und entfernt, sobald dessen CLAUDE.md-Pflege abgeschaltet wird._
+<!-- codebase-map:end -->

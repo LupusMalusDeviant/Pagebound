@@ -2,31 +2,35 @@
 
 ## Zweck
 
-Texterkennung auf gescannten/bildbasierten PDF-Seiten (FA-050) — vollständig lokal im Browser über Tesseract.js, **self-hosted ohne CDN** (Datenschutz/Offline-PWA). Unterstützte Sprachen: Englisch und Deutsch (`eng`, `deu`, `eng+deu`). Die Erkennung läuft in einem Web Worker; das Ergebnis liefert neben dem Text auch Wort-Bounding-Boxen, aus denen der Reader einen OCR-Text-Layer für Selektion und Suche baut.
+Texterkennung auf gescannten, bildbasierten Seiten — vollständig lokal über Tesseract.js, mit **mitgeliefertem** WASM-Kern, Worker und Sprachmodellen. Kein CDN, kein Dienst, kein Byte nach draußen; das ist hier nicht Bequemlichkeit, sondern die Kernzusage des Produkts. Das Ergebnis liefert neben dem Text auch Wortkästen, aus denen der Reader einen unsichtbaren Textlayer über die Seite legt — damit sind Auswahl und Suche auf einem Scan möglich.
 
 ## Dateien
 
 | Pfad | Rolle |
 |------|-------|
-| `src/Pagebound.Core/Abstractions/IOcrService.cs` | Interface: `RecognizePageAsync(imageDataUrl, languages, ct)` → `OcrPageResult` |
-| `src/Pagebound.Core/Domain/OcrTypes.cs` | `OcrWord(Text, X, Y, Width, Height, Confidence)` + `OcrPageResult(Text, Confidence, Words, ImageWidth, ImageHeight)` |
-| `src/Pagebound.Infrastructure/Ocr/TesseractOcrService.cs` | `IOcrService`-Implementierung — delegiert per JS-Interop an die OCR-Bridge |
-| `src/Pagebound.Web/wwwroot/js/ocr-bridge.ts` | JS-Bridge: initialisiert den Tesseract.js-Worker (self-hosted Pfade), führt `recognize` aus, mappt Wörter |
-| `src/Pagebound.Web/wwwroot/tesseract/` | Self-hosted Tesseract-Assets: `tesseract-core-simd-lstm.wasm(.js)`, `worker.min.js` |
-| `src/Pagebound.Web/wwwroot/tessdata/` | Sprachmodelle: `eng.traineddata.gz`, `deu.traineddata.gz` |
-| `src/Pagebound.Web/Features/Reader/ReaderPane.razor` | OCR-Integration im Reader: Seite als Bild an OCR geben, Text-Layer aus `OcrWord`-Boxen legen |
+| `src/Pagebound.Core/Abstractions/IOcrService.cs` | Vertrag `RecognizePageAsync(imageDataUrl, languages, ct)` → `OcrPageResult` (`:10`) |
+| `src/Pagebound.Core/Domain/OcrTypes.cs` | `OcrWord(Text, X, Y, Width, Height, Confidence)`, `OcrPageResult(Text, Confidence, Words, ImageWidth, ImageHeight)` |
+| `src/Pagebound.Infrastructure/Ocr/TesseractOcrService.cs` | `IOcrService` über die OCR-Brücke |
+| `src/Pagebound.Web/wwwroot/js/ocr-bridge.ts` | Startet den Worker mit mitgelieferten Pfaden, `recognizePage` (`:80`), `terminate` (`:144`) |
+| `src/Pagebound.Web/wwwroot/tesseract/` | Mitgelieferte Tesseract-Teile: tesseract-core-simd-lstm.wasm, der zugehörige JS-Lader und worker.min.js |
+| `src/Pagebound.Web/wwwroot/tessdata/` | Sprachmodelle `eng.traineddata.gz`, `deu.traineddata.gz` |
 
 ## Abhängigkeiten
 
 ### Intern (andere Features dieses Repos)
-- **PDF-Reader** — genutzt für das gerenderte Seitenbild (Data-URL als OCR-Input) und den Text-Layer, in den die erkannten Wörter für Selektion/Suche gemappt werden. Siehe [`./pdf-reader.md`](./pdf-reader.md).
+
+Dieses Feature hat **keine ausgehende Kante** im geprüften Graph: es hängt an nichts anderem im Repo, nur an seinen eigenen Dateien und am Browser.
+
+Eingehend (zur Orientierung, keine ausgehende Abhängigkeit): „PDF-Reader & Rendering" bindet `IOcrService` ein (`src/Pagebound.Web/Features/Reader/ReaderPane.razor:16`) und liefert das Seitenbild.
 
 ### Extern (Packages)
-- **Tesseract.js** (self-hosted, kein CDN) — WASM-Core (`tesseract-core-simd-lstm`), Worker, LSTM-Sprachmodelle `eng`/`deu` als gzip-komprimierte traineddata.
+
+- **Tesseract.js** (mitgeliefert, kein CDN) — WASM-Kern `tesseract-core-simd-lstm`, Worker, LSTM-Sprachmodelle `eng` und `deu` als gzip-komprimierte traineddata
 
 ## Öffentliche API / Interface
 
 ```csharp
+// src/Pagebound.Core/Abstractions/IOcrService.cs:10
 public interface IOcrService
 {
     // imageDataUrl: vollständige data:image/...;base64,...-URL des Seitenbildes.
@@ -35,17 +39,21 @@ public interface IOcrService
 }
 ```
 
-Koordinaten-Kontrakt: `OcrWord`-Boxen sind **Pixel relativ zum Eingabebild**; das Mapping zurück in PDF-Page-Punkte macht der Aufrufer über `OcrPageResult.ImageWidth`/`ImageHeight` (Skalierungsfaktor Bild → Seite). `Confidence` gibt es pro Wort und aggregiert pro Seite.
+**Koordinaten-Vertrag:** `OcrWord`-Kästen sind **Pixel relativ zum Eingabebild**, nicht Seitenanteile. Die Rückrechnung in Seitenpunkte macht der Aufrufer über `OcrPageResult.ImageWidth` und `ImageHeight`. Das ist der einzige Ort im Projekt, an dem Geometrie nicht in 0..1 übergeben wird — begründet darin, dass Tesseract das Bild sieht, nicht die Seite.
+
+`Confidence` gibt es je Wort und aggregiert je Seite.
 
 ## Datenfluss / Call-Flow
 
-1. Reader (`ReaderPane.razor`) rendert die Seite via PDF.js auf ein Canvas und exportiert sie als Data-URL.
-2. `TesseractOcrService.RecognizePageAsync` ruft per JS-Interop die `ocr-bridge.ts`.
-3. Die Bridge startet (einmalig) den Tesseract.js-Worker mit self-hosted Pfaden (`wwwroot/tesseract/` für Core/Worker, `wwwroot/tessdata/` für die Sprachmodelle) — es geht kein Byte an ein CDN.
-4. Der Worker erkennt den Text (LSTM, `eng+deu` möglich) und liefert Text, Konfidenzen und Wort-Boxen.
-5. Der Reader legt aus den Boxen einen unsichtbaren Text-Layer über die Seite — der erkannte Text ist damit selektier- und durchsuchbar wie nativer PDF-Text.
+1. Der Reader rendert die Seite über PDF.js auf ein Canvas und exportiert sie als Data-URL.
+2. `TesseractOcrService.RecognizePageAsync` ruft per JS-Interop `recognizePage` (`ocr-bridge.ts:80`).
+3. Die Brücke startet einmalig den Worker mit den **mitgelieferten** Pfaden — `wwwroot/tesseract/` für Kern und Worker, `wwwroot/tessdata/` für die Modelle.
+4. Der Worker erkennt den Text und liefert Text, Konfidenzen und Wortkästen.
+5. Der Reader legt aus den Kästen einen unsichtbaren Textlayer über die Seite; der erkannte Text verhält sich dann wie nativer PDF-Text.
+6. `terminate` (`ocr-bridge.ts:144`) beendet den Worker. Das ist Pflicht und keine Kür: ein nicht beendeter Tesseract-Worker hält seinen WASM-Speicher, und davon gibt es in WASM wenig.
 
 ## Offene Fragen / TODOs
 
-- Persistierung der OCR-Ergebnisse pro PDF (statt Erkennung pro Sitzung) ist laut `IOcrService`-Kommentar für Release 0.9 vorgesehen, sobald die Library-Storage gehärtet ist.
-- Weitere Sprachen wären nur ein zusätzliches `*.traineddata.gz` in `wwwroot/tessdata/` plus UI-Auswahl.
+- OCR-Ergebnisse werden **nicht** pro PDF gespeichert; jede Sitzung erkennt neu. Der Kommentar in `IOcrService.cs` nennt das als Vorhaben, sobald die Bibliotheks-Speicherung gehärtet ist.
+- Weitere Sprachen wären nur eine weitere `*.traineddata.gz` plus Auswahl in der Oberfläche — und mehr ausgelieferte Bytes.
+- Die beiden minifizierten Tesseract-Bündel unter `wwwroot/tesseract/` sind im Blueprint **absichtlich keinem Feature zugeordnet**: als minifizierter Fremdcode ziehen sie Namenskollisionen mit halber Codebase an und würden den Kantengraph verfälschen. Siehe „Bewusste Reste" in [`./INDEX.md`](./INDEX.md).

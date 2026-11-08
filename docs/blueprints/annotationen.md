@@ -2,72 +2,56 @@
 
 ## Zweck
 
-Nicht-destruktive Anmerkungen auf PDF-Seiten: Text-Highlights, Sticky Notes (mit Markdown-Inhalt), Ink/Freihand sowie Formen (Stift, Rechteck, Pfeil, Linie). Neu hinzugekommen ist das **Freitext-Werkzeug** (`AnnotationType.FreeText`): Text wird direkt auf der Seite platziert — wie im Text-Modus des Edge-PDF-Readers. Der **Datum-Stempel** ist ein Spezialfall davon: ein Freitext, vorbefüllt mit dem lokalen PC-Datum. Annotationen liegen als generische `Annotation`-Records mit typspezifischem Payload-Dictionary vor; die Original-PDF bleibt unverändert (Persistenz separat, Export optional per Flatten).
+Highlights, Notizen, Freihand (Ink), Formen und Freitext als Domain-Objekte, die getrennt vom PDF gespeichert werden. Das Original-PDF bleibt unangetastet — Annotationen liegen im Sidecar bzw. in IndexedDB und können jederzeit gelöscht oder exportiert werden. Erst „Einbrennen" über die Werkzeuge schreibt sie ins PDF.
 
 ## Dateien
 
 | Pfad | Rolle |
 |------|-------|
-| `src/Pagebound.Core/Domain/AnnotationTypes.cs` | Basis-Typen: `AnnotationId`, `PdfId`, `AnnotationType` (Highlight, StickyNote, Ink, Shape, Signature, FreeText), `Annotation`, `NewAnnotation`, `AnnotationChange` |
-| `src/Pagebound.Core/Domain/HighlightAnnotation.cs` | Payload-Helfer für Text-Highlights |
-| `src/Pagebound.Core/Domain/StickyNoteAnnotation.cs` | Payload-Helfer für Sticky Notes (Markdown) |
-| `src/Pagebound.Core/Domain/InkAnnotation.cs` | Payload-Helfer für Freihand-/Stift-Striche |
-| `src/Pagebound.Core/Domain/ShapeAnnotation.cs` | Payload-Helfer für Formen (Rechteck, Pfeil, Linie) |
-| `src/Pagebound.Core/Domain/FreeTextAnnotation.cs` | NEU: Payload-Helfer für Freitext (Keys `text`, `x`, `y`, `fontSize`, `color`; Fractions 0..1, zoom-unabhängig via `cqh`) |
-| `src/Pagebound.Core/Abstractions/IAnnotationService.cs` | CRUD + Change-Stream für Annotationen |
-| `src/Pagebound.Infrastructure/Annotations/AnnotationService.cs` | Implementierung; Persistenz über Storage/Sidecar |
-| `src/Pagebound.Web/Features/Reader/ReaderPane.razor` | Toolbar (Werkzeugauswahl), Platzierung per Klick, Editor-Popover, Overlay-Rendering |
-| `src/Pagebound.Web/wwwroot/js/shortcuts-bridge.ts` | Tastatur-Shortcuts und Drag-Unterstützung (Annotation verschieben) |
-| `src/Pagebound.Infrastructure/Pdf/JsPdfLibManipulator.cs` | Flatten-Export: Annotationen fest ins PDF einbrennen |
-| `src/Pagebound.Web/wwwroot/js/pdf-manipulator-bridge.ts` | JS-Seite des Flatten-Exports (`flattenAnnotations`) |
+| `src/Pagebound.Infrastructure/Annotations/AnnotationService.cs` | `IAnnotationService` über den Key-Value-Speicher; Schlüsselpräfix `annotations:` (`:18`), Änderungs-Strom (`ObserveChanges`, `:122`) |
+| `src/Pagebound.Core/Domain/AnnotationTypes.cs` | `AnnotationId`, `AnnotationType`, `Annotation`, `NewAnnotation`, `AnnotationChange` |
+| `src/Pagebound.Core/Domain/AnnotationPayload.cs` | Basis der typisierten Nutzlast; jede Annotationsart serialisiert in dieselbe Hülle |
+| `src/Pagebound.Core/Domain/HighlightAnnotation.cs` | Markierung: Rechtecke in Seitenanteilen plus Farbe |
+| `src/Pagebound.Core/Domain/StickyNoteAnnotation.cs` | Notiz: Position plus Text |
+| `src/Pagebound.Core/Domain/InkAnnotation.cs` | Freihand: Linienzüge in Seitenanteilen |
+| `src/Pagebound.Core/Domain/ShapeAnnotation.cs` | Formen: Rechteck, Ellipse, Linie, Pfeil |
+| `src/Pagebound.Core/Domain/FreeTextAnnotation.cs` | Freitext und Datum, direkt auf der Seite |
 
 ## Abhängigkeiten
 
 ### Intern (andere Features dieses Repos)
-- **PDF-Reader & Viewer** — liefert Seiten-Canvas und Koordinatensystem, auf dem Annotationen gezeichnet und platziert werden. Siehe [`./pdf-reader.md`](./pdf-reader.md).
-- **Storage & Persistenz** — Persistenz in IndexedDB (Key `annotations:{pdfId}`) plus Sidecar-JSON neben der Datei. Siehe [`./storage-persistenz.md`](./storage-persistenz.md).
-- **Signatur & Integrität** — Signaturen sind ein eigener `AnnotationType.Signature` auf derselben Infrastruktur; das Annotation-Set fließt in den Integritäts-Hash ein. Siehe [`./signatur-integritaet.md`](./signatur-integritaet.md).
-- **PDF-Werkzeuge** — Flatten-Export nutzt den gemeinsamen `JsPdfLibManipulator` / `pdf-manipulator-bridge.ts`. Siehe [`./pdf-werkzeuge.md`](./pdf-werkzeuge.md).
+
+- **Storage & Persistenz** (Querschnitt, via `IStorageService`): die einzige Abhängigkeit — Annotationen liegen als JSON unter `annotations:<pdfId>` in IndexedDB — `src/Pagebound.Infrastructure/Annotations/AnnotationService.cs:20`. Siehe [`./storage-persistenz.md`](./storage-persistenz.md).
+
+Eingehend (nicht in dieser Liste, zur Orientierung): Reader, Markdown-Export, PDF-Werkzeuge, Signatur und Library & Workspace nutzen diese Typen.
 
 ### Extern (Packages)
-- `pdf-lib` (via `pdf-manipulator-bridge.ts`) — Flatten-Export der Annotationen ins PDF
+
+- Keine. Reines C# mit `System.Text.Json`.
 
 ## Öffentliche API / Interface
 
 ```csharp
 public interface IAnnotationService
 {
-    Task<Annotation> CreateAsync(NewAnnotation input, CancellationToken cancellationToken);
-    Task<Annotation> UpdateAsync(Annotation annotation, CancellationToken cancellationToken);
-    Task DeleteAsync(AnnotationId id, CancellationToken cancellationToken);
-    Task<IReadOnlyList<Annotation>> GetForDocumentAsync(PdfId pdfId, CancellationToken cancellationToken);
+    Task<Annotation> CreateAsync(NewAnnotation input, CancellationToken ct);
+    Task<Annotation> UpdateAsync(Annotation annotation, CancellationToken ct);
+    Task DeleteAsync(AnnotationId id, CancellationToken ct);
+    Task<IReadOnlyList<Annotation>> GetForDocumentAsync(PdfId pdfId, CancellationToken ct);
     IAsyncEnumerable<AnnotationChange> ObserveChanges(PdfId pdfId);
 }
 ```
 
-Freitext-Helfer (Auszug):
-
-```csharp
-public static class FreeTextAnnotation
-{
-    public static NewAnnotation Create(PdfId pdfId, int pageNumber, double x, double y,
-        string text, double? fontSize = null, string? color = null);
-    public static Annotation WithText(Annotation existing, string newText);
-    public static Annotation WithPosition(Annotation existing, double x, double y);
-    public static Annotation WithStyle(Annotation existing, double fontSize, string color);
-    // Getter: GetX, GetY, GetText, GetFontSize, GetColor
-}
-```
-
-- Position `x`/`y`: Top-Left als 0..1-Fraction der Seite; `fontSize` als Fraction der Seitenhöhe (Default 2 % ≈ 17 pt auf A4); `color` als Hex `#rrggbb`. Text mehrzeilig via `\n`, **kein** Markdown (im Gegensatz zur Sticky Note).
-- Datum-Stempel: `FreeTextAnnotation.Create(...)` mit dem lokal formatierten PC-Datum als `text`.
+Koordinaten-Vertrag: alle Geometrien sind **Anteile von 0 bis 1** relativ zur Seite, Ursprung oben links. Damit bleiben sie bei jedem Zoom und jeder Fenstergröße gültig und müssen beim Rendern nur skaliert werden.
 
 ## Datenfluss / Call-Flow
 
-1. **Anlegen:** Toolbar in `ReaderPane.razor` → Werkzeug wählen → Klick auf Seite liefert Fraction-Koordinaten → `IAnnotationService.CreateAsync(NewAnnotation)` → `AnnotationService` persistiert (IndexedDB `annotations:{pdfId}` + Sidecar-JSON) → `ObserveChanges` pusht `AnnotationChange(Created)` → Overlay rendert neu.
-2. **Bearbeiten:** Editor-Popover (Text/Farbe/Größe) bzw. Drag via `shortcuts-bridge.ts` → `WithText`/`WithPosition`/`WithStyle` erzeugen aktualisierten Record → `UpdateAsync`.
-3. **Flatten-Export:** `JsPdfLibManipulator` übergibt PDF-Bytes + Annotation-Daten an `pdf-manipulator-bridge.ts` (`flattenAnnotations`) → pdf-lib zeichnet die Annotationen fest in die Seiten → neues PDF als Download/Datei.
+1. Der Reader legt eine Annotation an → `CreateAsync` (`AnnotationService.cs:29`) vergibt Id und Zeitstempel und schreibt die Liste des Dokuments zurück.
+2. Gelesen wird pro Dokument: `GetForDocumentAsync` (`:108`) holt den ganzen Eintrag `annotations:<pdfId>` und gibt die Liste zurück — kein Index je Annotation.
+3. `ObserveChanges` (`:122`) liefert Änderungen als Strom, damit zwei Panes derselben Datei in der Split-View nicht auseinanderlaufen.
+4. Beim Speichern eines Sidecars wandern die Annotationen in die Sidecar-JSON (siehe [`./library-workspace.md`](./library-workspace.md)); beim Einbrennen in das PDF übernimmt `JsPdfLibManipulator` die Typen (`src/Pagebound.Infrastructure/Pdf/JsPdfLibManipulator.cs:220`).
 
 ## Offene Fragen / TODOs
 
-- Einheitliche Undo/Redo-Semantik über alle Annotationstypen hinweg ist im Code zu prüfen.
+- Jede Änderung schreibt die **ganze** Liste eines Dokuments neu (`AnnotationService.cs:29` ff.). Bei sehr vielen Annotationen pro PDF ist das ein unnötiger Schreibaufwand; für die bisherigen Größen ist es unkritisch.
+- `FreeTextAnnotation` wird vom Markdown-Export nicht ausgegeben (dort als offener Punkt vermerkt).

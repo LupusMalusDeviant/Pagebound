@@ -1,77 +1,85 @@
-# PDF-Werkzeuge (Manipulation)
+# PDF-Werkzeuge & Manipulation
 
 ## Zweck
 
-Alle PDF-Manipulationen ohne erneutes Rendering: Merge, Split, Reorder, Seiten löschen, Rotieren, Komprimieren, Verschlüsseln (AES-256), Stempel/Wasserzeichen/Seitenzahlen (Bates) sowie Lesen/Setzen von Dokument-Metadaten. Alles läuft zu 100 % im Browser (Blazor WASM), kein Server. Die UI bündelt die Werkzeuge auf einer Seite mit Kategorie-Tabs.
+Alles, was ein PDF verändert: Zusammenfügen, Teilen, Seiten ordnen, drehen, löschen, Stempel und Wasserzeichen, Metadaten, Kompression, AES-256-Verschlüsselung, Annotationen einbrennen, Schwärzen, Text bearbeiten und Formularfelder anlegen. Alle Operationen laufen über **eine** Brücke zu pdf-lib — PdfSharpCore ist bewusst draußen, weil sein Speicherpfad unter WASM an `MD5.Create()` abbricht (ADR-004, begründet in `src/Pagebound.Web/Program.cs:38`–`41`).
 
 ## Dateien
 
 | Pfad | Rolle |
 |------|-------|
-| `src/Pagebound.Core/Abstractions/IPdfManipulator.cs` | Zentrales Interface: Merge/Split/Reorder/Delete/Rotate/Compress/Encrypt, `StampAsync`, `EmbedSignaturesAsync`, `FlattenAnnotationsAsync`, `RedactAsync`, `CreateFormFieldsAsync`, `Get/SetMetadataAsync`; plus Records `RedactionRegion`, `FormFieldRegion`, `PdfMetadata`, `EmbeddedSignature` |
-| `src/Pagebound.Core/Abstractions/IPdfEncryptor.cs` | Interface für Passwort-Verschlüsselung (FA-027), Web-Implementierung rein managed (AES-256, kein MD5) |
-| `src/Pagebound.Core/Domain/PdfManipulatorTypes.cs` | Options-Typen (u. a. `CompressionOptions`, `EncryptionOptions`) |
-| `src/Pagebound.Core/Domain/StampTypes.cs` | `StampOptions` für Wasserzeichen/Seitenzahlen |
-| `src/Pagebound.Infrastructure/Pdf/JsPdfLibManipulator.cs` | `IPdfManipulator`-Implementierung für WASM — vollständig über die pdf-lib-JS-Bridge; Verschlüsselung delegiert an `IPdfEncryptor` |
-| `src/Pagebound.Infrastructure/Pdf/JsPdfEncryptor.cs` | Encryptor-Implementierung im Web-Pfad |
-| `src/Pagebound.Web/wwwroot/js/pdf-manipulator-bridge.ts` | JS-Bridge (`pageboundPdfManipulator.*`): ruft pdf-lib-Funktionen wie `mergePdfs`, `copyPages`, `setRotation`, Draw-API auf |
-| `src/Pagebound.Web/Features/PdfTools/PdfToolsPage.razor` | UI-Seite mit Kategorie-Tabs, die alle Werkzeuge gruppiert |
-| `src/Pagebound.Web/Features/PdfTools/PdfToolsPanel.razor` | Werkzeug-Panel-Komponente |
+| `src/Pagebound.Web/Features/PdfTools/PdfToolsPage.razor` | Seite `/tools` (`:1`) mit Kategorien |
+| `src/Pagebound.Web/Features/PdfTools/PdfToolsPanel.razor` | Die eigentliche Werkzeug-Oberfläche, auch im Reader eingebettet |
+| `src/Pagebound.Infrastructure/Pdf/JsPdfLibManipulator.cs` | `IPdfManipulator` über die pdf-lib-Brücke; mappt die Annotationstypen (`:220`) und die Signatur (`:305`) |
+| `src/Pagebound.Infrastructure/Pdf/JsPdfEncryptor.cs` | `IPdfEncryptor`: Verschlüsselung als eigener Dienst |
+| `src/Pagebound.Infrastructure/Pdf/Encryption/AesR6.cs` | AES-256 nach Revision 6 (managed, kein WASM-inkompatibler Fremdcode) |
+| `src/Pagebound.Core/Domain/PdfManipulatorTypes.cs` | `CompressionOptions`, `EncryptionOptions`, `PageOp`, `PdfMetadata`, `FormFieldRegion`, `TextEditRegion`, `RedactionRegion` |
+| `src/Pagebound.Core/Domain/StampTypes.cs` | Stempel und Wasserzeichen: Text, Position, Deckkraft, Seitenzahlen |
+| `src/Pagebound.Web/wwwroot/js/pdf-manipulator-bridge.ts` | pdf-lib-Seite: `embedSignatures` (`:62`), `compressPdf` (`:147`), `redactPdf` (`:212`), `getFormFields` (`:361`), `fillForm` (`:421`), `imagesToPdf` (`:500`), `normalizePdf` (`:561`), `mergePdfs` (`:566`) |
+| `src/Pagebound.Web/wwwroot/js/page-geometry.ts` | Seitengeometrie: Rotation normalisieren (`:39`), Anzeigeraum betreten und verlassen (`:93`, `:100`), `withDisplaySpace` (`:109`) |
+| `src/Pagebound.Web/tests-js/geometry.test.mjs` | Prüft die Geometrie gegen gedrehte und beschnittene Seiten |
 
 ## Abhängigkeiten
 
 ### Intern (andere Features dieses Repos)
-- **PDF-Reader** — genutzt für die PDF.js-Rasterung im Compress-Pfad (Seiten werden neu gerastert). Siehe [`./pdf-reader.md`](./pdf-reader.md).
-- **Signatur & Integrität** — `EmbedSignaturesAsync` bettet Signatur-PNGs samt Signer-Metadaten ins PDF ein (FA-015). Siehe [`./signatur-integritaet.md`](./signatur-integritaet.md).
-- **Annotationen** — `FlattenAnnotationsAsync` brennt Sidecar-Annotationen dauerhaft in die PDF-Bytes. Siehe [`./annotationen.md`](./annotationen.md).
-- **Redaktion** — `RedactAsync` ist die technische Basis für echtes Schwärzen (Rasterung + Inhalts-Entfernung). Siehe [`./redaktion.md`](./redaktion.md).
-- **Formulare** — `CreateFormFieldsAsync` legt AcroForm-Felder für den Form-Builder an. Siehe [`./formulare.md`](./formulare.md).
+
+- **Annotationen** (Typ, via `Annotation`, `AnnotationType`, `HighlightAnnotation`, `InkAnnotation`, `ShapeAnnotation`): Einbrennen in das PDF — `src/Pagebound.Infrastructure/Pdf/JsPdfLibManipulator.cs:220`. Siehe [`./annotationen.md`](./annotationen.md).
+- **Signatur & Integrität** (Typ, Laufzeit, via `SignatureAnnotation`, `IPdfSignService`): Signaturen einbetten — `…/JsPdfLibManipulator.cs:305`. Siehe [`./signatur-integritaet.md`](./signatur-integritaet.md).
+- **Konvertierung & Standards** (Typ, Laufzeit, via `IImageToPdfConverter`, `IPdfConverter`, `IPdfArchiveService`, `ConversionFormat`, `PdfPageSizeMode`): die Werkzeugleiste bietet Konvertierungen mit an — `src/Pagebound.Web/Features/PdfTools/PdfToolsPanel.razor:6`. Siehe [`./konvertierung.md`](./konvertierung.md).
+- **PDF-Reader & Rendering** (Typ, Laufzeit, via `IPdfRenderer`, `PdfDocumentHandle`, `LoadOptions`, `RenderOptions`): Vorschau der Seiten im Werkzeug-Panel — `…/PdfToolsPanel.razor:4`. Siehe [`./pdf-reader.md`](./pdf-reader.md).
+- **Library & Workspace** (Typ, via `ByteSizeFormatter`): Dateigrößen anzeigen — `…/PdfToolsPanel.razor:1136`. Siehe [`./library-workspace.md`](./library-workspace.md).
+- **Lokalisierung & Theme** (Querschnitt, via `ILocalizationService`): Texte — `…/PdfToolsPanel.razor:9`. Siehe [`./lokalisierung-theme.md`](./lokalisierung-theme.md).
+- **Interop-Hilfen (UI)** (Querschnitt, via `init`, `save`, `apply`, `load`, `downloadBytes`): Download der Ergebnisse, Feineinstellungen — `…/JsPdfLibManipulator.cs:522`. Siehe [`./interop-hilfen.md`](./interop-hilfen.md).
+- **MCP-Server** (Typ, via `catalog`): **Namensgleichheit, keine Abhängigkeit.** `src/Pagebound.Web/wwwroot/js/pdf-manipulator-bridge.ts:1032` ist eine lokale Variable auf `doc.catalog` von pdf-lib. Siehe die Anmerkung in [`./INDEX.md`](./INDEX.md).
 
 ### Extern (Packages)
-- **pdf-lib** (JS, self-hosted) — sämtliche Seiten-Operationen, Draw-API, Form-Feld-Erzeugung.
-- **PDF.js** — Rasterung im Compress- und Redact-Pfad (über den Reader).
+
+- `pdf-lib` (self-hosted) — die gesamte Manipulation. Bewusst statt PdfSharpCore (ADR-004).
+- `@pdf-lib/fontkit` — Font-Einbettung für Stempel und eingebrannten Text
+- `fflate` — ZIP für Sammel-Ergebnisse
 
 ## Öffentliche API / Interface
 
-`IPdfManipulator` (Auszug, alle Methoden nehmen `CancellationToken`):
-
 ```csharp
-Task<byte[]> MergeAsync(IReadOnlyList<Stream> pdfs, ...);
-Task<IReadOnlyList<byte[]>> SplitAsync(Stream pdf, IReadOnlyList<int> splitAfterPages, ...);
-Task<byte[]> ReorderAsync(Stream pdf, IReadOnlyList<int> newOrder, ...);
-Task<byte[]> DeletePagesAsync(Stream pdf, IReadOnlyList<int> pageIndices, ...);
-Task<byte[]> RotateAsync(Stream pdf, IReadOnlyDictionary<int, int> rotationDegrees, ...);
-Task<byte[]> CompressAsync(Stream pdf, CompressionOptions options, IProgress<int>? progress, ...);
-Task<byte[]> EncryptAsync(Stream pdf, EncryptionOptions options, ...);
-Task<byte[]> StampAsync(Stream pdf, StampOptions options, ...);
-Task<byte[]> SetMetadataAsync(Stream pdf, PdfMetadata metadata, ...);
-Task<PdfMetadata> GetMetadataAsync(Stream pdf, ...);
+public interface IPdfManipulator
+{
+    Task<byte[]> MergeAsync(IReadOnlyList<Stream> pdfs, CancellationToken ct);                      // :16
+    Task<IReadOnlyList<byte[]>> SplitAsync(Stream pdf, IReadOnlyList<int> splitAfterPages, …);      // :20
+    Task<byte[]> ReorderAsync(Stream pdf, IReadOnlyList<int> newOrder, …);                          // :25
+    Task<byte[]> DeletePagesAsync(Stream pdf, IReadOnlyList<int> pageIndices, …);                   // :30
+    Task<byte[]> RotateAsync(Stream pdf, IReadOnlyDictionary<int, int> rotationDegrees, …);         // :35
+    Task<byte[]> CompressAsync(…);                                                                  // :40
+    Task<byte[]> EncryptAsync(…);                                                                   // :46
+    Task<byte[]> EmbedSignaturesAsync(…);                                                           // :58
+    Task<byte[]> StampAsync(…);                                                                     // :67
+    Task<byte[]> FlattenAnnotationsAsync(…);                                                        // :79
+    Task<byte[]> RedactAsync(…);                                                                    // :91
+    Task<byte[]> ApplyTextEditsAsync(…);                                                            // :104
+    Task<byte[]> CreateFormFieldsAsync(…);                                                          // :114
+    Task<byte[]> CreateBlankAsync(double widthPt, double heightPt, int pageCount, …);               // :124
+    Task<byte[]> AppendBlankPageAsync(Stream pdf, double widthPt, double heightPt, …);              // :127
+    Task<byte[]> OrganizePagesAsync(Stream pdf, IReadOnlyList<PageOp> ops, …);                      // :135
+    Task<byte[]> SetMetadataAsync(Stream pdf, PdfMetadata metadata, …);                             // :138
+    Task<PdfMetadata> GetMetadataAsync(Stream pdf, …);                                              // :141
+}
+
+public interface IPdfEncryptor
+{
+    Task<byte[]> EncryptAsync(Stream pdf, EncryptionOptions options, CancellationToken ct);
+}
 ```
 
-`IPdfEncryptor.EncryptAsync(Stream pdf, EncryptionOptions options, CancellationToken)` — Owner-Passwort Pflicht, User-Passwort optional; Stärke im Web-Pfad fix **AES-256 nach ISO 32000-2 (`/V 5 /R 6`)**, Schlüsselableitung rein managed über SHA-256/384/512 (WebCrypto-kompatibel, kein MD5).
-
-**Architektur-Entscheidung gegen PdfSharpCore** (dokumentiert im Kopf-Kommentar von `JsPdfLibManipulator.cs`): PdfSharpCores Save-Pfad ruft — auch bei plainem Save — im Konstruktor des `PdfStandardSecurityHandler` `MD5.Create()` auf, was unter Blazor WASM mit `TargetInvocationException` crasht (CryptoConfig-Reflection kennt MD5 nicht). pdf-lib hat diese Abhängigkeit nicht (Browser-Smoke-Test, 2026-05). Aus demselben Grund sind RC4 und AES-128 (`/V < 5`) im Web-Pfad bewusst nicht enthalten.
+Zeilenangaben beziehen sich auf `src/Pagebound.Core/Abstractions/IPdfManipulator.cs` bzw. `IPdfEncryptor.cs:14`.
 
 ## Datenfluss / Call-Flow
 
-```mermaid
-sequenceDiagram
-    participant UI as PdfToolsPage.razor
-    participant M as JsPdfLibManipulator (C#)
-    participant B as pdf-manipulator-bridge.ts
-    participant L as pdf-lib
-
-    UI->>M: MergeAsync(streams)
-    M->>M: Streams → byte[] → Base64
-    M->>B: IJSRuntime.Invoke("mergePdfs", base64[])
-    B->>L: PDFDocument.load / copyPages / save
-    L-->>B: Uint8Array
-    B-->>M: Base64
-    M-->>UI: byte[] → Download
-```
-
-Sonderfälle: `CompressAsync` rastert Seiten via PDF.js und baut das PDF neu; `EncryptAsync` delegiert an den managed `IPdfEncryptor` (kein JS nötig).
+1. Die Oberfläche (`PdfToolsPanel.razor`) sammelt Eingabedateien und Optionen.
+2. Der passende Aufruf geht an `JsPdfLibManipulator`, der die Bytes per JS-Interop an `pdf-manipulator-bridge.ts` gibt.
+3. Die Brücke arbeitet mit pdf-lib und gibt neue Bytes zurück. Geometrie läuft immer über `page-geometry.ts`, damit gedrehte und beschnittene Seiten (`/Rotate`, `/CropBox`) richtig behandelt werden (`withDisplaySpace`, `page-geometry.ts:109`).
+4. Das Ergebnis wird über die Interop-Brücke als Download angeboten (`downloadBytes`), nie hochgeladen.
+5. Verschlüsselung geht **nicht** durch pdf-lib, sondern durch `AesR6.cs` — managed AES-256 nach Revision 6. Dieser Pfad ist off-limits für Änderungen ohne ausdrückliche Freigabe.
 
 ## Offene Fragen / TODOs
 
-- Der Interface-Kommentar in `IPdfManipulator.cs` erwähnt noch eine Delegation der Seiten-Operationen an `PdfSharpManipulator` — laut `JsPdfLibManipulator.cs` läuft inzwischen alles über pdf-lib; der XML-Doc-Kommentar ist vermutlich veraltet.
+- `PdfToolsPanel.razor` ist mit über 1100 Zeilen die zweite große Sammelkomponente; sie hat acht ausgehende Kanten.
+- Mehrere Operationen reichen vollständige Byte-Arrays durch mehrere Schichten. Bei großen PDFs ist das der Hauptverdächtige für Speicherdruck; die Leitplanke verlangt `ArrayBuffer`/`Blob` statt base64-Umwege.

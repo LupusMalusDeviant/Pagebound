@@ -2,39 +2,43 @@
 
 ## Zweck
 
-Eine Operation (z. B. Komprimieren, Verschlüsseln, Export) auf mehrere PDFs gleichzeitig anwenden (FA-052). Ergebnisse werden gesammelt als ZIP ausgeliefert. Häufig genutzte Konfigurationen lassen sich als benannte Stapel-Regeln lokal speichern und wiederverwenden — 100 % lokal in IndexedDB, kein Server.
+Eine Operation auf viele PDFs anwenden — komprimieren, verschlüsseln, exportieren — und die Ergebnisse als ZIP ausliefern. Häufige Zusammenstellungen lassen sich als benannte Regel lokal speichern und wiederverwenden. Ohne das Feature müsste man jede Datei einzeln durch das Werkzeug-Panel schicken.
 
 ## Dateien
 
 | Pfad | Rolle |
 |------|-------|
-| `src/Pagebound.Core/Domain/BatchRule.cs` | Domain: benanntes Preset einer Batch-Operation (`Id`, `Name`, `Operation` als Enum-Name-String, `UpdatedAt`) — bewusst **ohne Passwort** (Secrets werden nie persistiert) |
-| `src/Pagebound.Core/Abstractions/IBatchRuleStore.cs` | Interface: `ListAsync` / `SaveAsync` / `DeleteAsync` für Stapel-Regeln |
-| `src/Pagebound.Infrastructure/Pdf/BatchRuleStore.cs` | Implementierung — Persistenz über `IStorageService` (IndexedDB) |
-| `src/Pagebound.Web/Features/PdfTools/BatchPage.razor` | UI: Dateien wählen, Operation/Regel wählen, Lauf starten, ZIP herunterladen |
+| `src/Pagebound.Web/Features/PdfTools/BatchPage.razor` | Seite `/batch` (`:1`): Dateien wählen, Operation oder Regel wählen, Lauf starten, ZIP holen |
+| `src/Pagebound.Core/Abstractions/IBatchRuleStore.cs` | Vertrag: Regeln auflisten, speichern, löschen (`:9`) |
+| `src/Pagebound.Core/Domain/BatchRule.cs` | Die Regel: `Id`, `Name`, `Operation` als Enum-Name, `UpdatedAt` — **ohne Kennwort** |
+| `src/Pagebound.Infrastructure/Pdf/BatchRuleStore.cs` | Umsetzung über den Key-Value-Speicher (`:16` nimmt `IStorageService`) |
 
 ## Abhängigkeiten
 
 ### Intern (andere Features dieses Repos)
-- **PDF-Werkzeuge** — genutzt für die eigentlichen Operationen pro Datei (Compress via `IPdfManipulator.CompressAsync`, Encrypt via `EncryptAsync`/`IPdfEncryptor`). Siehe [`./pdf-werkzeuge.md`](./pdf-werkzeuge.md).
-- **Konvertierung** — genutzt für Export-Operationen (z. B. PDF→Bild/Text) im Stapel. Siehe [`./konvertierung.md`](./konvertierung.md).
-- **Storage & Persistenz** — genutzt für die Regel-Persistenz (`IBatchRuleStore` → `IStorageService` → IndexedDB). Siehe [`./storage-persistenz.md`](./storage-persistenz.md).
+
+- **PDF-Werkzeuge & Manipulation** (Typ, Laufzeit, via `IPdfManipulator`, `CompressionOptions`, `EncryptionOptions`): die Operationen je Datei — `src/Pagebound.Web/Features/PdfTools/BatchPage.razor:3`. Siehe [`./pdf-werkzeuge.md`](./pdf-werkzeuge.md).
+- **Konvertierung & Standards** (Typ, Laufzeit, via `IPdfConverter`, `ConversionFormat`): Export-Operationen im Stapel — `…/BatchPage.razor:4`. Siehe [`./konvertierung.md`](./konvertierung.md).
+- **Library & Workspace** (Typ, via `ByteSizeFormatter`): Dateigrößen in der Liste — `…/BatchPage.razor:304`. Siehe [`./library-workspace.md`](./library-workspace.md).
+- **Lokalisierung & Theme** (Querschnitt, via `ILocalizationService`): Texte — `…/BatchPage.razor:6`. Siehe [`./lokalisierung-theme.md`](./lokalisierung-theme.md).
+- **Interop-Hilfen (UI)** (Querschnitt, via `save`): Download des ZIP — `…/BatchPage.razor:101`. Siehe [`./interop-hilfen.md`](./interop-hilfen.md).
+- **Storage & Persistenz** (Querschnitt, via `IStorageService`): die Regeln liegen in IndexedDB — `src/Pagebound.Infrastructure/Pdf/BatchRuleStore.cs:16`. Siehe [`./storage-persistenz.md`](./storage-persistenz.md).
 
 ### Extern (Packages)
-- ZIP-Erzeugung im Browser (Sammel-Download der Ergebnisse).
+
+- `fflate` (über die Brücken) — ZIP der Ergebnisse
 
 ## Öffentliche API / Interface
 
 ```csharp
+// src/Pagebound.Core/Abstractions/IBatchRuleStore.cs:9
 public interface IBatchRuleStore
 {
     Task<IReadOnlyList<BatchRule>> ListAsync(CancellationToken ct);   // neueste zuerst
     Task SaveAsync(BatchRule rule, CancellationToken ct);             // setzt Id (falls leer) + UpdatedAt
     Task DeleteAsync(string id, CancellationToken ct);
 }
-```
 
-```csharp
 public sealed class BatchRule
 {
     public string Id { get; set; }
@@ -44,12 +48,17 @@ public sealed class BatchRule
 }
 ```
 
-Sicherheits-Invariante: Verschlüsselungs-Passwörter sind **nie** Teil einer gespeicherten Regel — der Nutzer gibt sie bei jedem Lauf neu ein.
+**Sicherheits-Invariante:** ein Verschlüsselungs-Kennwort ist **nie** Teil einer gespeicherten Regel. `BatchRule` hat kein Feld dafür — der Nutzer gibt es bei jedem Lauf neu ein. Das ist der Grund, warum die Regel nur den Namen der Operation speichert und nicht ihre vollständigen Optionen.
 
 ## Datenfluss / Call-Flow
 
-1. Nutzer wählt in `BatchPage.razor` mehrere PDFs und eine Operation (oder lädt eine gespeicherte Regel via `IBatchRuleStore.ListAsync`).
-2. Bei Encrypt: Passwort-Eingabe pro Lauf (nicht persistiert).
-3. Pro Datei wird die passende Operation ausgeführt (`IPdfManipulator` bzw. `IPdfConverter`), Fortschritt wird angezeigt.
-4. Alle Ergebnis-Dateien werden zu einem ZIP gepackt und als Download angeboten.
-5. Optional: Konfiguration als `BatchRule` benennen und via `SaveAsync` in IndexedDB ablegen.
+1. Der Nutzer wählt in `BatchPage.razor` mehrere PDFs und eine Operation, oder lädt eine Regel über `ListAsync`.
+2. Bei Verschlüsselung: Kennwort-Eingabe pro Lauf, nicht persistiert.
+3. Je Datei läuft die passende Operation — `IPdfManipulator` oder `IPdfConverter` (`BatchPage.razor:3`, `:4`) — mit Fortschrittsanzeige.
+4. Alle Ergebnisse werden zu einem ZIP gepackt und über `save` zum Download angeboten (`…/BatchPage.razor:101`).
+5. Optional wird die Zusammenstellung als `BatchRule` benannt und über `SaveAsync` in IndexedDB abgelegt.
+
+## Offene Fragen / TODOs
+
+- `Operation` ist ein Enum-**Name** als Zeichenkette. Wird ein Enum-Wert umbenannt, zeigen gespeicherte Regeln auf nichts mehr; der Kommentar in `ConversionTypes.cs:11` („nur anhängen") ist genau deshalb da, aber eine Migration gespeicherter Regeln gibt es nicht.
+- Der Stapellauf hält die Ergebnisse bis zum ZIP im Speicher. Bei vielen großen Dateien ist das der erwartbare Engpass.

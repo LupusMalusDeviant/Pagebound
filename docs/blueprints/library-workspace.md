@@ -2,91 +2,86 @@
 
 ## Zweck
 
-Persistente PDF-Bibliothek mit Metadaten, Tags, Suche und Sortierung (FA-060 bis FA-064). Ein Library-Eintrag wird über den SHA-256-Hash der PDF identifiziert, sodass Annotationen beim Wiederöffnen zuverlässig matchen. Für One-Click-Wiederöffnen werden File-Handles der File-System-Access-API persistiert (Chromium); als Fallback dienen in IndexedDB gecachte PDF-Bytes bzw. der klassische File-Picker.
-
-Ergänzend verwaltet der Workspace einen optionalen zentralen Ordner für Sidecar-Dateien (FA-070 bis FA-074): Annotationen & Metadaten liegen als `{pdfHash}.pagebound.json` neben der PDF oder im Workspace-Ordner und werden beim Öffnen automatisch gefunden (FA-073). Auf Browsern ohne File-System-Access-API (Firefox/Safari) fällt alles auf einen Download/Upload-Flow zurück.
+Die Bibliothek: Dokumente werden über ihren SHA-256 identifiziert, nicht über ihren Pfad — dieselbe Datei an zwei Orten ist ein Eintrag, und eine umbenannte Datei verliert ihre Annotationen nicht. Dazu Tags, Suche, Lesefortschritt und optional ein **Workspace-Ordner** im Dateisystem, in dem die Sidecar-Dateien als sichtbares JSON neben den PDFs liegen. Ohne Workspace bleibt alles in IndexedDB; mit Workspace kann der Nutzer seine Annotationen mitnehmen und sichern.
 
 ## Dateien
 
 | Pfad | Rolle |
 |------|-------|
-| `src/Pagebound.Core/Abstractions/ILibraryService.cs` | Interface der Bibliothek (Add/Update, Query, Tag-Liste, TouchLastOpened) |
-| `src/Pagebound.Core/Domain/LibraryQuery.cs` | Filter-/Sortier-Parameter (`LibraryQuery`, `LibrarySort`) |
-| `src/Pagebound.Core/Abstractions/ISidecarService.cs` | Sidecar-Persistenz inkl. Schema-Migration (`ISidecarMigration`) |
-| `src/Pagebound.Core/Domain/SidecarTypes.cs` | Sidecar-Domänentypen (`Sidecar`, `PdfMeta`, …) |
-| `src/Pagebound.Core/Abstractions/IWorkspaceService.cs` | Interface für den zentralen Sidecar-Workspace-Ordner |
-| `src/Pagebound.Infrastructure/Library/LibraryService.cs` | Library-Implementierung über `IStorageService` |
-| `src/Pagebound.Infrastructure/Sidecars/JsonSidecarService.cs` | JSON-Serialisierung/Parsing/Migration der Sidecars |
-| `src/Pagebound.Infrastructure/Workspace/BrowserWorkspaceService.cs` | Workspace via `showDirectoryPicker` + persistiertem Directory-Handle |
-| `src/Pagebound.Infrastructure/Storage/FileSystemAccessHandleService.cs` | Persistente File-Handles (`pdf:handle:{hash}`) für Reopen ohne Picker |
-| `src/Pagebound.Web/Features/Library/LibraryPage.razor` | Bibliotheks-UI (Liste, Suche, Tags, Sortierung, Reopen) |
-| `src/Pagebound.Web/wwwroot/js/workspace-bridge.ts` | JS-Bridge: Directory-Picker, Sidecar-Lesen/Schreiben im Workspace |
-| `src/Pagebound.Web/wwwroot/js/file-handle-bridge.ts` | JS-Bridge: File-Picker, Handle-Persistenz, Permission-Re-Prompt |
+| `src/Pagebound.Web/Features/Library/LibraryPage.razor` | Seite `/library` (`:1`): Liste, Suche, Tags, Sortierung |
+| `src/Pagebound.Infrastructure/Library/LibraryService.cs` | `ILibraryService`; Index unter `library:_index` (`:24`), Einträge unter `library:entry:` (`:25`); Suche (`QueryAsync`, `:151`), Tags (`:197`), Zuletzt-geöffnet (`:217`) |
+| `src/Pagebound.Infrastructure/Sidecars/JsonSidecarService.cs` | Sidecar lesen und schreiben (`SerializeAsync` `:24`, `ParseAsync` `:32`), Neuanlage (`:70`), Migration (`:101`) |
+| `src/Pagebound.Infrastructure/Workspace/BrowserWorkspaceService.cs` | Workspace-Ordner über die File-System-Access-Brücke; Modul `pageboundWorkspace` (`:13`) |
+| `src/Pagebound.Core/Domain/SidecarTypes.cs` | `LibraryEntryId`, `PdfMeta` (`:9`), `ReadingProgress` (`:15`), `LibraryEntry` (`:19`), `IntegrityRecord` (`:37`), `Sidecar` (`:57`) mit `CurrentSchemaVersion = "1.0"` (`:67`) |
+| `src/Pagebound.Core/Domain/LibraryQuery.cs` | `LibrarySort` (`:6`) und `LibraryQuery` (`:26`), Vorgabe `LastOpenedDesc` (`:29`) |
+| `src/Pagebound.Core/Text/ByteSizeFormatter.cs` | Dateigrößen sprachrichtig (Dezimalkomma je Sprache, `:31`) |
+| `src/Pagebound.Core/Text/TitleComparer.cs` | Sortierung von Titeln mit Umlaut-Faltung (`Fold`, `:33`) — damit „Ärger" bei A einsortiert |
+| `src/Pagebound.Web/wwwroot/js/workspace-bridge.ts` | Ordner wählen (`:100`), Sidecar schreiben (`:117`) und lesen (`:132`) |
 
 ## Abhängigkeiten
 
 ### Intern (andere Features dieses Repos)
 
-- **Storage & Persistenz** — Library-Einträge, PDF-Bytes-Cache (`pdf:bytes:{hash}`) und File-/Directory-Handles landen in IndexedDB. Siehe [`./storage-persistenz.md`](./storage-persistenz.md).
-- **PDF-Reader** — feuert `TouchLastOpenedAsync` bei jedem Öffnen und nutzt `IFileHandleService` zur Auswahl zwischen FSA-Picker und Standard-InputFile. Siehe [`./pdf-reader.md`](./pdf-reader.md).
-- **Annotationen** — Sidecars transportieren die Annotationsdaten; das Hash-Matching der Library stellt die Zuordnung sicher. Siehe [`./annotationen.md`](./annotationen.md).
-- **Signatur & Integrität** — SHA-256-Hashing (`IHashService`) identifiziert PDFs eindeutig. Siehe [`./signatur-integritaet.md`](./signatur-integritaet.md).
-- **Lokalisierung, Theme & UI-Shell** — sämtliche UI-Texte der LibraryPage via `L.T()`. Siehe [`./lokalisierung-theme.md`](./lokalisierung-theme.md).
+- **Annotationen** (Typ, via `Annotation`): das Sidecar trägt die Annotationen des Dokuments — `src/Pagebound.Core/Domain/SidecarTypes.cs:64`. Siehe [`./annotationen.md`](./annotationen.md).
+- **Signatur & Integrität** (Typ, via `HashAlgorithm`): der Integritätssatz im Sidecar nennt sein Verfahren — `…/SidecarTypes.cs:38`. Siehe [`./signatur-integritaet.md`](./signatur-integritaet.md).
+- **Storage & Persistenz** (Querschnitt, via `IStorageService`, `IFileHandleService`): Index, Einträge und Datei-Handles — `src/Pagebound.Infrastructure/Library/LibraryService.cs:27`. Siehe [`./storage-persistenz.md`](./storage-persistenz.md).
+- **Lokalisierung & Theme** (Querschnitt, via `ILocalizationService`): Texte — `src/Pagebound.Web/Features/Library/LibraryPage.razor:6`. Siehe [`./lokalisierung-theme.md`](./lokalisierung-theme.md).
 
 ### Extern (Packages)
 
-- File System Access API (Browser, Chromium-only für Picker/Handles — kein npm-Paket)
+- Keine. File System Access und IndexedDB sind Browser-APIs.
 
 ## Öffentliche API / Interface
 
 ```csharp
 public interface ILibraryService
 {
-    Task<LibraryEntry> AddOrUpdateAsync(LibraryEntry entry, CancellationToken ct); // Merge per Id ODER Hash
+    Task<LibraryEntry> AddOrUpdateAsync(LibraryEntry entry, CancellationToken ct);
     Task RemoveAsync(LibraryEntryId id, CancellationToken ct);
     Task<LibraryEntry?> GetAsync(LibraryEntryId id, CancellationToken ct);
-    Task<LibraryEntry?> FindByHashAsync(string sha256, CancellationToken ct);
+    Task<LibraryEntry?> FindByHashAsync(string sha256, CancellationToken ct);   // Identität = Hash
     Task<IReadOnlyList<LibraryEntry>> QueryAsync(LibraryQuery query, CancellationToken ct);
     Task<IReadOnlyList<string>> GetAllTagsAsync(CancellationToken ct);
     Task TouchLastOpenedAsync(LibraryEntryId id, CancellationToken ct);
 }
 
-public sealed record LibraryQuery(
-    string? FullTextSearch = null,          // matcht Title + Filename + Tags + Author
-    IReadOnlyList<string>? Tags = null,
-    LibrarySort Sort = LibrarySort.LastOpenedDesc,
-    int? Skip = null, int? Take = null);
+public interface ISidecarService
+{
+    Task<string> SerializeAsync(Sidecar sidecar, CancellationToken ct);
+    Task<SidecarParseResult> ParseAsync(Stream json, CancellationToken ct);
+    Task<Sidecar?> TryLoadAsync(string pdfPath, CancellationToken ct);
+    Task SaveAsync(Sidecar sidecar, string pdfPath, CancellationToken ct);
+    Task<Sidecar> CreateNewAsync(string pdfPath, PdfMeta meta, CancellationToken ct);
+    Task<MigrationResult> MigrateAsync(Sidecar sidecar, CancellationToken ct);
+}
 
 public interface IWorkspaceService
 {
-    Task<bool> IsSupportedAsync(CancellationToken ct);      // showDirectoryPicker verfügbar?
+    Task<bool> IsSupportedAsync(CancellationToken ct);
     Task<string?> GetWorkspaceNameAsync(CancellationToken ct);
     Task<string?> PickWorkspaceAsync(CancellationToken ct);
     Task ClearWorkspaceAsync(CancellationToken ct);
     Task<bool> SaveSidecarAsync(string pdfHash, string json, CancellationToken ct);
     Task<string?> LoadSidecarAsync(string pdfHash, CancellationToken ct);
 }
-
-public interface ISidecarService
-{
-    Task<string> SerializeAsync(Sidecar sidecar, CancellationToken ct);
-    Task<Sidecar?> ParseAsync(Stream json, CancellationToken ct);
-    Task<Sidecar?> TryLoadAsync(string pdfPath, CancellationToken ct);   // Desktop-Hosts
-    Task SaveAsync(Sidecar sidecar, string pdfPath, CancellationToken ct);
-    Task<Sidecar> CreateNewAsync(string pdfPath, PdfMeta meta, CancellationToken ct);
-    Task<MigrationResult> MigrateAsync(Sidecar sidecar, CancellationToken ct);
-}
 ```
+
+Zwei Verträge, die leicht übersehen werden:
+
+- `SidecarParseResult(Sidecar?, int UnknownAnnotationCount)` — ein Sidecar aus einer **neueren** Pagebound-Fassung wird gelesen, nicht abgelehnt; unbekannte Annotationen werden gezählt und gemeldet, damit die Oberfläche warnen kann, statt sie stillschweigend zu verlieren.
+- `ISidecarMigration` (`ISidecarService.cs:64`) — Migrationen von einer Schemafassung zur nächsten, mit `CurrentSchemaVersion = "1.0"` als Ziel.
 
 ## Datenfluss / Call-Flow
 
-1. **PDF öffnen:** Reader hasht die Bytes (SHA-256) → `FindByHashAsync` → Treffer: `TouchLastOpenedAsync` + Fortschritt/Annotationen wiederherstellen; kein Treffer: `AddOrUpdateAsync` legt neuen Eintrag an.
-2. **Reopen aus der Library:** `LibraryPage` → `IFileHandleService.TryReopenAsync(hash)` (`file-handle-bridge.ts` reaktiviert das persistierte `FileSystemFileHandle`, schmaler Permission-Dialog) → Fallback: `IStorageService.GetBytesAsync("pdf:bytes:{hash}")` → letzter Fallback: File-Picker.
-3. **Sidecar speichern:** Annotationsänderung → `ISidecarService.SerializeAsync` → bei gesetztem Workspace `IWorkspaceService.SaveSidecarAsync(hash, json)` (`workspace-bridge.ts` schreibt `{pdfHash}.pagebound.json`); sonst Download-Flow.
-4. **Sidecar laden:** Beim Öffnen `LoadSidecarAsync(hash)` → `ParseAsync` → bei Schema-Abweichung `MigrateAsync` über registrierte `ISidecarMigration`s.
-5. **Suche/Filter:** `LibraryPage` baut `LibraryQuery` (Suchtext, Tags, Sortierung, Paging) → `QueryAsync`.
+1. Eine Datei kommt herein; der Reader bildet SHA-256 über die Bytes (`IHashService`) und fragt `FindByHashAsync` (`LibraryService.cs:136`).
+2. Bekannt: der Eintrag wird geholt, `TouchLastOpenedAsync` (`:217`) setzt den Zeitpunkt, der Lesefortschritt stellt die Seite wieder her.
+3. Unbekannt: `AddOrUpdateAsync` (`:36`) legt den Eintrag an und schreibt ihn zusammen mit dem Index zurück.
+4. Annotationen und Integritätssätze gehen in das Sidecar (`JsonSidecarService.SerializeAsync`, `:24`).
+5. Ist ein Workspace gewählt, schreibt `BrowserWorkspaceService.SaveSidecarAsync` (`:53`) die JSON über `workspace-bridge.ts:117` in den Ordner; ohne Workspace bleibt sie in IndexedDB.
+6. Die Bibliotheks-Seite fragt `QueryAsync` (`:151`) mit Suchtext, Tags und Sortierung; Titel vergleicht `TitleComparer` mit Umlaut-Faltung (`TitleComparer.cs:33`), Größen formatiert `ByteSizeFormatter` sprachrichtig (`ByteSizeFormatter.cs:16`).
 
 ## Offene Fragen / TODOs
 
-- Volltextsuche über PDF-*Inhalt* (FA-063) folgt mit der OCR-Iteration; aktuell matcht `FullTextSearch` nur Title/Filename/Tags/Author.
-- Firefox/Safari: keine persistenten Handles und kein Workspace — dauerhafter Fallback auf Bytes-Cache bzw. Download/Upload dokumentieren.
+- Index und Einträge liegen getrennt (`library:_index` plus `library:entry:*`, `LibraryService.cs:24`–`25`). Bricht ein Schreibvorgang zwischen beiden ab, kann der Index auf einen fehlenden Eintrag zeigen; eine Reparatur beim Start gibt es nicht.
+- `QueryAsync` lädt alle Einträge und filtert im Speicher. Bei einer sehr großen Bibliothek wird das langsam, bevor es falsch wird.
+- Der Hash wird über die **ganze** Datei gebildet. Bei großen PDFs ist das ein Durchlauf über alle Bytes vor dem ersten Rendern — spürbar, aber nötig für die Identität.

@@ -1,42 +1,43 @@
-# Format-Konvertierung & Standards
+# Konvertierung & Standards
 
 ## Zweck
 
-Konvertiert PDFs in andere Formate — PNG/JPG (FA-030), Text (FA-031), HTML (FA-032), CSV, **DOCX** (Word, Best-Effort-Textfluss) — und Bilder (PNG/JPG) zurück in PDFs (FA-025). Dazu Standards-Aufbereitung als **Best Effort ohne Konformitätsgarantie**: PDF/A-2b-Nähe (Archivierung) und PDF/UA-1-Vorbereitung (Barrierefreiheit) mit ehrlichem Prüfbericht. Alles clientseitig im Browser.
+PDF in andere Formate umwandeln — PNG, JPG, Text, HTML, CSV, DOCX, XLSX, PPTX und SVG — und Bilder zurück in PDF. Dazu die Aufbereitung für zwei Standards: PDF/A-2b (Archivierung) und PDF/UA-1 (Barrierefreiheit), beides als **Best Effort ohne Konformitätsgarantie** und mit einem Prüfbericht, der benennt, was nicht erreicht ist. Alles im Browser; nichts wird hochgeladen.
 
 ## Dateien
 
 | Pfad | Rolle |
 |------|-------|
-| `src/Pagebound.Core/Abstractions/IPdfConverter.cs` | Interface: `ConvertAsync(byte[] pdf, ConversionFormat, ct)` → `ConversionResult` |
-| `src/Pagebound.Core/Abstractions/IImageToPdfConverter.cs` | Interface: Bilder (PNG/JPG) → PDF, je Bild eine Seite in Reihenfolge |
-| `src/Pagebound.Core/Abstractions/IPdfArchiveService.cs` | Interface: `ConvertToPdfAAsync` (PDF/A-2b Best Effort) + `PreparePdfUaAsync` (PDF/UA-1-Kennzeichnung + Bericht) |
-| `src/Pagebound.Core/Domain/ConversionTypes.cs` | `ConversionFormat` (Png, Jpg, Text, Html, Csv, Docx, Xlsx, Pptx) + `ConversionResult(Bytes, FileExtension, MimeType)` |
-| `src/Pagebound.Core/Domain/ImageToPdfTypes.cs` | `PdfImageInput` + `ImageToPdfOptions` |
-| `src/Pagebound.Infrastructure/Pdf/JsPdfConverter.cs` | PDF→X über die PDF.js-Bridge (Seiten-Rendering bzw. Text-Extraktion) |
-| `src/Pagebound.Infrastructure/Pdf/JsImageToPdfConverter.cs` | Bilder→PDF über die pdf-lib-Bridge (`pageboundPdfManipulator.imagesToPdf`) |
-| `src/Pagebound.Infrastructure/Pdf/JsPdfArchiveService.cs` | PDF/A- und PDF/UA-Aufbereitung über die pdf-lib-Bridge (`convertToPdfA` / `preparePdfUa`) |
-| `src/Pagebound.Web/Features/PdfTools/PdfToolsPage.razor` | UI-Einstieg (Kategorie-Tabs, u. a. Konvertierung/Standards) |
+| `src/Pagebound.Core/Abstractions/IPdfConverter.cs` | Vertrag `ConvertAsync(byte[] pdf, ConversionFormat, ct)` → `ConversionResult` (`:9`) |
+| `src/Pagebound.Core/Abstractions/IImageToPdfConverter.cs` | Vertrag Bilder → PDF, je Bild eine Seite in Reihenfolge (`:13`) |
+| `src/Pagebound.Core/Abstractions/IPdfArchiveService.cs` | Vertrag PDF/A-2b und PDF/UA-1 samt Warnungen (`:20`) |
+| `src/Pagebound.Core/Domain/ConversionTypes.cs` | `ConversionFormat` mit neun Werten: Png, Jpg, Text, Html, Csv, Docx, Xlsx, Pptx, Svg (`:4`–`:18`) plus `ConversionResult(Bytes, FileExtension, MimeType)` |
+| `src/Pagebound.Core/Domain/ImageToPdfTypes.cs` | `PdfImageInput`, `ImageToPdfOptions` |
+| `src/Pagebound.Infrastructure/Pdf/JsPdfConverter.cs` | PDF → X über die PDF.js-Brücke |
+| `src/Pagebound.Infrastructure/Pdf/JsImageToPdfConverter.cs` | Bilder → PDF über die pdf-lib-Brücke (`imagesToPdf`) |
+| `src/Pagebound.Infrastructure/Pdf/JsPdfArchiveService.cs` | PDF/A und PDF/UA über die pdf-lib-Brücke |
 
 ## Abhängigkeiten
 
 ### Intern (andere Features dieses Repos)
-- **PDF-Reader** — genutzt für die PDF.js-Bridge (Seiten-Rasterung für PNG/JPG, Text-Extraktion für Text/HTML/CSV). Siehe [`./pdf-reader.md`](./pdf-reader.md).
-- **PDF-Werkzeuge** — genutzt für die gemeinsame pdf-lib-Bridge (Bilder→PDF, PDF/A-/PDF/UA-Umbau, Form-Flatten vor PDF/A). Siehe [`./pdf-werkzeuge.md`](./pdf-werkzeuge.md).
-- **Batch** — Konvertierungen sind als Export-Operation im Stapellauf nutzbar. Siehe [`./batch.md`](./batch.md).
-- **MCP-Server** — Paritäts-Tools `pdf_to_pdfa` und `pdf_ua_prepare`. Siehe [`./mcp-server.md`](./mcp-server.md).
+
+- **Interop-Hilfen (UI)** (Querschnitt, via `init`): Feineinstellungen beim Start des Bild-Konverters — `src/Pagebound.Infrastructure/Pdf/JsImageToPdfConverter.cs:62`. Siehe [`./interop-hilfen.md`](./interop-hilfen.md).
+
+Das ist die einzige ausgehende Kante im geprüften Graph. Die Brücken, die dieses Feature nutzt (`pdfjs-bridge.ts`, `pdf-manipulator-bridge.ts`), gehören zu „PDF-Reader & Rendering" bzw. „PDF-Werkzeuge & Manipulation"; die Kanten dorthin laufen umgekehrt — beide Features binden `IPdfConverter` bzw. `IPdfArchiveService` ein (`PdfToolsPanel.razor:6`, `BatchPage.razor:4`).
 
 ### Extern (Packages)
-- **PDF.js** — Rendering + Text-Extraktion.
-- **pdf-lib** — Bild-Einbettung, XMP/OutputIntent/Trailer-Umbauten für PDF/A/UA.
-- **Liberation Fonts** (SIL OFL 1.1) — metrisch kompatible Ersatz-Fonts für nicht eingebettete Standard-14-Schriften im PDF/A-Pfad.
+
+- `pdfjs-dist` — Seiten rastern (PNG, JPG, PPTX-Folien), Text mit Geometrie extrahieren (Text, HTML, CSV, DOCX, XLSX), Operatorliste für SVG
+- `pdf-lib` — Bilder einbetten, XMP, OutputIntent und Trailer für PDF/A und PDF/UA umbauen
+- `fflate` — ZIP für Mehrdatei-Ergebnisse und die OOXML-Pakete
+- **Liberation Fonts** (SIL OFL 1.1, mitgeliefert) — metrisch kompatible Ersatzschriften für nicht eingebettete Standard-14-Schriften im PDF/A-Pfad
 
 ## Öffentliche API / Interface
 
 ```csharp
 public interface IPdfConverter
 {
-    // PNG/JPG liefern ein ZIP (eine Bilddatei je Seite), Text/HTML die Textdatei.
+    // PNG/JPG/SVG liefern ein ZIP (eine Datei je Seite), Text/HTML/CSV eine Datei.
     Task<ConversionResult> ConvertAsync(byte[] pdf, ConversionFormat format, CancellationToken ct);
 }
 
@@ -54,16 +55,22 @@ public interface IPdfArchiveService
 // PdfArchiveResult(byte[] Bytes, IReadOnlyList<string> Warnings)
 ```
 
-Was PDF/A (Best Effort) konkret tut: XMP-Metadaten (`pdfaid:part=2`, `conformance=B`), sRGB-OutputIntent (GTS_PDFA1), Entfernen aktiver Inhalte (`/OpenAction`, Dokument-JavaScript, Additional Actions), optional AcroForm-Flatten, Trailer-ID; nicht eingebettete Standard-14-Fonts werden optional durch eingebettete Liberation-Fonts ersetzt, andere fehlende Fonts nur als Warnung gemeldet. Externes Prüfen (z. B. veraPDF) wird empfohlen. PDF/A verlangt unverschlüsselte Eingaben.
+**Was PDF/A konkret tut:** XMP-Metadaten (`pdfaid:part=2`, `conformance=B`), sRGB-OutputIntent, Entfernen aktiver Inhalte (`/OpenAction`, Dokument-JavaScript, Additional Actions), auf Wunsch AcroForm flatten, Trailer-Id. Nicht eingebettete Standard-14-Schriften werden optional durch eingebettete Liberation-Fonts ersetzt; andere fehlende Schriften gibt es nur als Warnung. Externes Prüfen (etwa veraPDF) ist empfohlen, weil die eigene Umsetzung ihre eigene Konformität nicht beweisen kann. PDF/A verlangt unverschlüsselte Eingaben.
 
-PDF/UA: setzt nur die Kennzeichnung (`/MarkInfo`, `/Lang` als BCP-47, `/DisplayDocTitle`, XMP `pdfuaid:part=1`) und liefert einen ehrlichen Prüfbericht (fehlendes Tagging, fehlender Titel, Bilder ohne Alternativtext, Fonts ohne ToUnicode) — **echtes Tagging wird nicht synthetisiert**.
+**Was PDF/UA konkret tut:** nur die Kennzeichnung — `/MarkInfo`, `/Lang` als BCP-47, `/DisplayDocTitle`, XMP `pdfuaid:part=1` — plus einen ehrlichen Bericht (fehlendes Tagging, fehlender Titel, Bilder ohne Alternativtext, Schriften ohne ToUnicode). **Echtes Tagging wird nicht erfunden.**
 
 ## Datenfluss / Call-Flow
 
-- **PDF→PNG/JPG:** `PdfToolsPage` → `JsPdfConverter.ConvertAsync` → PDF.js rendert jede Seite auf Canvas → Bilddateien → ZIP → `ConversionResult`.
-- **PDF→Text/HTML/CSV:** PDF.js-Text-Extraktion pro Seite → Aufbereitung ins Zielformat → Textdatei als `ConversionResult`.
-- **PDF→DOCX:** Bridge `convertToDocx` (pdfjs-bridge.ts) — PDF.js-Text-Items je Seite in Zeilen (y-Cluster) → Absätze (vertikale Lücke) rekonstruieren, Schriftgröße aus Median-Item-Höhe, Seitenumbruch je PDF-Seite; ein minimal-gültiges .docx wird **von Hand als OOXML-ZIP (fflate) gebaut** — keine docx-Lib, keine neue Laufzeit-Dependency. **Best-Effort-Textfluss, keine 1:1-Layout-Treue** (für Pixel-Treue HTML/PNG nutzen).
-- **PDF→XLSX:** Bridge `convertToXlsx` — dieselbe Tabellen-Heuristik wie CSV (`pageItemsToRows`), je Seite ein Blatt (SpreadsheetML, inline strings, Zahlen als Number). Von Hand als OOXML-ZIP.
-- **PDF→PPTX:** Bridge `convertToPptx` — je Seite `renderPageToCanvas` → PNG, eine Folie mit dem Bild vollflächig (PresentationML mit minimalem Master/Layout/Theme). Reine Bild-Folien, kein Text-Layer.
-- **Bilder→PDF:** `JsImageToPdfConverter` → Bridge `imagesToPdf` → pdf-lib bettet PNG/JPG nativ ein (kein MD5 nötig) → PDF-Bytes.
-- **PDF/A / PDF/UA:** `JsPdfArchiveService` → Bridge `convertToPdfA` / `preparePdfUa` → pdf-lib-Umbau → `PdfArchiveResult` mit Bytes + Warnungen, die die UI anzeigt.
+1. **PDF → PNG/JPG:** `JsPdfConverter.ConvertAsync` → PDF.js rendert je Seite auf Canvas → `convertToImagesZip` (`pdfjs-bridge.ts:823`) → ZIP.
+2. **PDF → Text/HTML/CSV:** Text je Seite extrahieren (`convertToText`, `pdfjs-bridge.ts:600`) → ins Zielformat aufbereiten → eine Datei.
+3. **PDF → DOCX:** Text-Items je Seite zu Zeilen gruppieren (y-Cluster), daraus Absätze über die vertikale Lücke, Schriftgröße aus der Median-Item-Höhe, Seitenumbruch je PDF-Seite. Das `.docx` wird **von Hand als OOXML-ZIP** gebaut (fflate) — keine DOCX-Bibliothek, keine neue Laufzeit-Abhängigkeit. Best-Effort-Textfluss, **keine Layout-Treue**; für Pixeltreue sind HTML oder PNG da.
+4. **PDF → XLSX:** dieselbe Tabellen-Heuristik wie CSV, je Seite ein Blatt (SpreadsheetML, Inline-Strings, Zahlen als Zahl), ebenfalls von Hand als OOXML-ZIP.
+5. **PDF → PPTX:** je Seite ein PNG, eine Folie mit dem Bild vollflächig. Reine Bildfolien, kein Textlayer.
+6. **PDF → SVG:** die Operatorliste von PDF.js wird in SVG übersetzt, Schriften eingebettet; ein SVG je Seite, als ZIP (Hilfsfunktionen ab `pdfjs-bridge.ts:853`).
+7. **Bilder → PDF:** `imagesToPdf` (`pdf-manipulator-bridge.ts:500`) bettet PNG und JPG nativ ein.
+8. **PDF/A und PDF/UA:** `JsPdfArchiveService` → Brücke → pdf-lib-Umbau → `PdfArchiveResult` mit Bytes und Warnungen, die die Oberfläche anzeigt.
+
+## Offene Fragen / TODOs
+
+- Drei OOXML-Formate werden von Hand erzeugt. Ob das Ergebnis in jeder Office-Version öffnet, ist nicht gegen echte Zielprogramme geprüft — eine Prüfung mit dem eigenen Leser würde den eigenen Fehler wiederholen.
+- Der frühere Stand dieser Datei kannte `Svg` nicht. Der Enum-Kommentar verlangt, neue Formate **nur anzuhängen** (`ConversionTypes.cs:11`), weil die Werte serialisiert in Stapel-Regeln landen.

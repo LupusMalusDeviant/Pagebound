@@ -1,71 +1,93 @@
-# PDF-Reader & Viewer
+# PDF-Reader & Rendering
 
 ## Zweck
 
-Kern-Anzeigefunktion von Pagebound: PDFs vollständig im Browser rendern (PDF.js via JS-Interop), ohne Server-Roundtrip. Umfasst Zoom, Volltextsuche, Dokument-Outline (Lesezeichen), Seiten-Thumbnails, Nachtmodus, fortlaufende (kontinuierliche) Seitenansicht und **Vorlesen** (TTS des Seiten-Texts über die Web Speech API / `tts-bridge.ts`, lokale Stimmen, kein Netz). Der Renderer ist hinter `IPdfRenderer` abstrahiert, sodass die PDF.js-Implementierung später (z. B. für eine MAUI-Variante) durch eine native Implementierung ersetzt werden kann. Erfüllt laut Interface-Doku FA-001, FA-003 bis FA-008.
+Das Herzstück: PDF.js rendert Seiten auf Canvas, dazu Zoom, Suche, Outline, Thumbnails, fortlaufende Ansicht und Vorlesen. `ReaderPane.razor` ist die eine Komponente, in der fast alle Werkzeuge zusammenlaufen (Annotationen, Formulare, OCR, Signatur, Schwärzung, Text bearbeiten) — deshalb ist sie mit 4397 Zeilen die größte Datei der Codebase und der Ort, an dem Änderungen am ehesten andere Features berühren.
 
 ## Dateien
 
 | Pfad | Rolle |
 |------|-------|
-| `src/Pagebound.Core/Abstractions/IPdfRenderer.cs` | Renderer-Abstraktion: Laden, Seiten-Rendering, Text-Extraktion, Suche, Outline |
-| `src/Pagebound.Core/Domain/PdfDocumentTypes.cs` | Domain-Typen des Readers (u. a. `PdfDocumentHandle`, `RenderedPage`, `TextItem`, `SearchHit`, `PdfOutline`, Load-/Render-/Search-Options) |
-| `src/Pagebound.Infrastructure/Pdf/PdfJsRenderer.cs` | Default-Implementierung von `IPdfRenderer`, kapselt PDF.js über JS-Interop |
-| `src/Pagebound.Web/wwwroot/js/pdfjs-bridge.ts` | TypeScript-Brücke zu `pdfjs-dist` (Worker, Canvas-Rendering, TextLayer, Suche, Outline) |
-| `src/Pagebound.Web/Features/Reader/ReaderPage.razor` | Reader-Seite: Datei öffnen, Toolbar, Seitenzustand, Sidebar (Outline/Thumbnails) |
-| `src/Pagebound.Web/Features/Reader/ReaderPane.razor` | Wiederverwendbare Anzeige-Komponente: Seiten-Canvas, Zoom, fortlaufendes Scrollen, Annotation-Overlays |
-| `src/Pagebound.Web/Features/Reader/OutlineNode.razor` | Rekursive Darstellung eines Outline-/Lesezeichen-Knotens |
+| `src/Pagebound.Web/Features/Reader/ReaderPage.razor` | Seite `/reader` (`:1`); hält nur den Rahmen, die Logik liegt in `ReaderPane`, weil die Split-View zwei Panes nebeneinander braucht |
+| `src/Pagebound.Web/Features/Reader/ReaderPane.razor` | Die Reader-Logik: Rendering, Zoom, Suche, Outline, Thumbnails, Modi für alle Werkzeuge (4397 Zeilen) |
+| `src/Pagebound.Web/Features/Reader/OutlineNode.razor` | Ein Knoten des Inhaltsverzeichnisses, rekursiv |
+| `src/Pagebound.Web/Features/Reader/ToolbarMenu.razor` | Werkzeugleiste des Readers |
+| `src/Pagebound.Web/Features/Reader/FreeTextEditorPopover.razor` | Popover für Freitext; auch von „Text bearbeiten" wiederverwendet |
+| `src/Pagebound.Infrastructure/Pdf/PdfJsRenderer.cs` | `IPdfRenderer` über die PDF.js-Brücke; `LoadDto` trägt Id, Seitenzahl, Titel und Sprache |
+| `src/Pagebound.Core/Domain/PdfDocumentTypes.cs` | `PdfDocumentHandle(Id, PageCount, Title?, Language?)`, `LoadOptions`, `RenderOptions`, `TextItem`, `SearchHit`, `PdfOutline` |
+| `src/Pagebound.Web/wwwroot/js/pdfjs-bridge.ts` | PDF.js-Brücke: `loadPdf` (`:70`), `renderPage` (`:103`), `getOutline` (`:160`), `unload` (`:194`), `extractText` (`:317`), `pageText` (`:335`), `findTextBlockAt` (`:358`) |
+| `src/Pagebound.Web/wwwroot/js/pdfjs-worker-shim.mjs` | Setzt `workerSrc` auf den mitgelieferten Worker (kein CDN) |
+| `src/Pagebound.Web/wwwroot/js/tts-bridge.ts` | Vorlesen: `speak` (`:91`), `pause` (`:125`), `resume` (`:129`), `cancel` (`:133`), `listVoices` (`:48`) |
+| `src/Pagebound.Web/tests-js/pdfjs-bridge.test.mjs` | Prüft gegen **echtes** PDF.js an einem echten PDF, dass `/Lang` als `info.Language` ankommt |
+| `src/Pagebound.Web/tests-js/tts.test.mjs` | 11 Prüfungen zum Vorlesen, darunter die Weitergabe der Dokumentsprache |
 
 ## Abhängigkeiten
 
 ### Intern (andere Features dieses Repos)
-- **Storage & Persistenz** — genutzt zum Ablegen/Wiederöffnen von Dokumenten und Zuständen (IndexedDB, File-Handles). Siehe [`./storage-persistenz.md`](./storage-persistenz.md).
-- **Annotationen** — der Reader rendert die Annotation-Overlays in `ReaderPane.razor`. Siehe [`./annotationen.md`](./annotationen.md).
-- **Lokalisierung & Theme** — Nachtmodus/Theming und deutsche UI-Texte. Siehe [`./lokalisierung-theme.md`](./lokalisierung-theme.md).
+
+- **Annotationen** (Typ, Laufzeit, via `IAnnotationService`, `AnnotationType`, `HighlightAnnotation`, `InkAnnotation`, `ShapeAnnotation`): Zeichnen und Anzeigen der Annotationen über der Seite — `src/Pagebound.Web/Features/Reader/ReaderPane.razor:9`. Siehe [`./annotationen.md`](./annotationen.md).
+- **Formulare (AcroForms)** (Typ, Laufzeit, via `IPdfFormService`, `PdfFormFieldType`, `PdfFormField`, `FillFormOptions`, `FormSaveMode`): Formular-Panel im Reader — `…/ReaderPane.razor:18`. Siehe [`./formulare.md`](./formulare.md).
+- **Library & Workspace** (Typ, Laufzeit, via `ISidecarService`, `Sidecar`, `IWorkspaceService`, `ILibraryService`, `PdfMeta`): Sidecar laden und speichern, Bibliothekseintrag berühren — `…/ReaderPane.razor:13`. Siehe [`./library-workspace.md`](./library-workspace.md).
+- **Markdown-Export** (Typ, Laufzeit, via `IMarkdownExporter`, `MarkdownExporter`): Export der Annotationen aus dem Reader — `…/ReaderPane.razor:10`. Siehe [`./markdown-export.md`](./markdown-export.md).
+- **OCR** (Laufzeit, via `IOcrService`): Seite als Bild erkennen, Textlayer legen — `…/ReaderPane.razor:16`. Siehe [`./ocr.md`](./ocr.md).
+- **PDF-Werkzeuge & Manipulation** (Laufzeit, via `IPdfManipulator`): Schwärzen, Text bearbeiten, Annotationen einbrennen — `…/ReaderPane.razor:7`. Siehe [`./pdf-werkzeuge.md`](./pdf-werkzeuge.md).
+- **Signatur & Integrität** (Typ, Laufzeit, via `IHashService`, `IIntegrityService`, `SignatureAnnotation`, `SignatureIntegrityStatus`, `HashAlgorithm`): Signatur setzen und prüfen — `…/ReaderPane.razor:8`. Siehe [`./signatur-integritaet.md`](./signatur-integritaet.md).
+- **Storage & Persistenz** (Querschnitt, via `IStorageService`, `IFileHandleService`): Bytes-Cache und Datei-Handles — `…/ReaderPane.razor:12`. Siehe [`./storage-persistenz.md`](./storage-persistenz.md).
+- **Lokalisierung & Theme** (Querschnitt, via `ILocalizationService`): Texte — `src/Pagebound.Web/Features/Reader/FreeTextEditorPopover.razor:1`. Siehe [`./lokalisierung-theme.md`](./lokalisierung-theme.md).
+- **Interop-Hilfen (UI)** (Querschnitt, via `save`, `registerDownloadObserver`, `unregisterDownloadObserver`, `load`, `apply`): Klickposition in Seitenanteile umrechnen, Textauswahl lesen, Downloads beobachten — `…/FreeTextEditorPopover.razor:66`. Siehe [`./interop-hilfen.md`](./interop-hilfen.md).
 
 ### Extern (Packages)
-- `pdfjs-dist` (PDF.js) — Rendering, Textlayer, Suche, Outline im Browser
+
+- `pdfjs-dist` (self-hosted, Legacy-Build) — Rendering, Text- und Struktur-Extraktion, Outline. Der Worker liegt im Repo; es geht kein Byte an ein CDN.
+- Web Speech API (Browser) — Vorlesen; keine Bibliothek.
 
 ## Öffentliche API / Interface
 
 ```csharp
 public interface IPdfRenderer
 {
-    Task<PdfDocumentHandle> LoadAsync(Stream pdf, LoadOptions options, CancellationToken cancellationToken);
-    Task<RenderedPage> RenderPageAsync(PdfDocumentHandle handle, int pageNumber, RenderOptions options, CancellationToken cancellationToken);
-    Task<IReadOnlyList<TextItem>> ExtractTextAsync(PdfDocumentHandle handle, int pageNumber, CancellationToken cancellationToken);
-    Task<IReadOnlyList<SearchHit>> SearchAsync(PdfDocumentHandle handle, string query, SearchOptions options, CancellationToken cancellationToken);
-    Task<PdfOutline?> GetOutlineAsync(PdfDocumentHandle handle, CancellationToken cancellationToken);
-    Task UnloadAsync(PdfDocumentHandle handle);
+    Task<PdfDocumentHandle> LoadAsync(Stream pdf, LoadOptions options, CancellationToken ct);
+    Task<RenderedPage> RenderPageAsync(PdfDocumentHandle handle, int pageNumber, RenderOptions options, CancellationToken ct);
+    Task<IReadOnlyList<TextItem>> ExtractTextAsync(PdfDocumentHandle handle, int pageNumber, CancellationToken ct);
+    Task<IReadOnlyList<SearchHit>> SearchAsync(PdfDocumentHandle handle, string query, SearchOptions options, CancellationToken ct);
+    Task<PdfOutline?> GetOutlineAsync(PdfDocumentHandle handle, CancellationToken ct);
+    // …
 }
+
+// Domain, src/Pagebound.Core/Domain/PdfDocumentTypes.cs
+public sealed record PdfDocumentHandle(string Id, int PageCount, string? Title = null, string? Language = null);
 ```
+
+JS-Seite (`pdfjs-bridge.ts`): `loadPdf` liefert ein `LoadResult` mit `id`, `pageCount`, `title` und `language`. `language` ist `/Lang` aus dem Dokumentkatalog, von PDF.js als `info.Language` ausgegeben; Leerraum zählt als nicht gesetzt.
 
 ## Datenfluss / Call-Flow
 
 ```mermaid
 sequenceDiagram
-    participant UI as ReaderPage / ReaderPane (.razor)
+    participant U as Nutzer
+    participant P as ReaderPane.razor
     participant R as PdfJsRenderer (C#)
     participant B as pdfjs-bridge.ts
-    participant P as pdfjs-dist (Worker)
-
-    UI->>R: LoadAsync(stream, options)
-    R->>B: JS-Interop (Bytes übergeben)
-    B->>P: getDocument(...)
-    P-->>B: PDFDocumentProxy
-    B-->>R: Handle-Id + Metadaten
-    R-->>UI: PdfDocumentHandle
-    UI->>R: RenderPageAsync(handle, n, zoom)
-    R->>B: renderPage(handleId, n, scale)
-    B->>P: page.render(canvasCtx)
-    B-->>UI: Canvas gefüllt (RenderedPage)
+    participant J as PDF.js
+    U->>P: Datei geöffnet
+    P->>R: LoadAsync(stream, options)
+    R->>B: pageboundPdf.loadPdf(bytes)
+    B->>J: getDocument(...)
+    J-->>B: Dokument + info.Language
+    B-->>R: LoadResult{id, pageCount, title, language}
+    R-->>P: PdfDocumentHandle
+    P->>R: RenderPageAsync(handle, n, options)
+    R->>B: renderPage(id, n, scale)
+    B-->>P: Canvas gezeichnet
 ```
 
-- Suche: `ReaderPage` → `SearchAsync` → Bridge iteriert TextLayer-Inhalte → `SearchHit`-Liste (Seite + Position) → UI springt zur Trefferseite und hebt hervor.
-- Outline/Thumbnails: nach `LoadAsync` lädt die Sidebar `GetOutlineAsync` (rekursiv via `OutlineNode.razor`) bzw. rendert verkleinerte Seiten als Thumbnails.
-- Nachtmodus: Darstellungsfilter auf der Render-Ausgabe, Theme-gesteuert.
-- Fortlaufende Ansicht: `ReaderPane` rendert Seiten sequenziell in einem Scroll-Container und lädt sichtbare Seiten bei Bedarf nach.
+1. `LoadAsync` übergibt die Bytes an `loadPdf` (`pdfjs-bridge.ts:70`); das Ergebnis trägt die Dokumentsprache mit.
+2. Beim Vorlesen gibt `ReaderPane` `_handle.Language` als vierten Parameter an `pageboundTts.speak` (`tts-bridge.ts:91`). Fehlt `/Lang` — der häufigere Fall —, bleibt es bei der Vorgabe der Plattform; die App-Sprache wird **nicht** als Ersatz genommen, weil eine deutsche Stimme auf einem englischen PDF schlechter ist als die Plattform-Vorgabe.
+3. Die Suche läuft über `extractText`/`pageText` (`:317`, `:335`) und trifft nur, was im Textlayer steht; für Scans liefert OCR den Textlayer nachträglich.
+4. `unload` gibt den PDF.js-Ladevorgang frei (`:194`) — wichtig, weil ein nicht freigegebener `loadingTask` in WASM Speicher hält.
 
 ## Offene Fragen / TODOs
 
-- Genaue Strategie für Lazy-Rendering/Virtualisierung sehr großer Dokumente ist im Code zu verifizieren (nicht Teil dieses Blueprints).
+- Keine Virtualisierung der Seitenliste: Thumbnails und fortlaufende Ansicht halten gerenderte Seiten in Dictionaries. Bei großen PDFs ist das der erste Kandidat für einen Speicherausfall; die Leitplanke dazu steht in `.claude/lessons-learned.md`.
+- `ReaderPane.razor` bündelt zehn Features in einer Datei. Jede Änderung dort trifft potenziell alle; der Kantengraph zeigt zehn ausgehende Kanten allein von dieser Komponente.
+- Die Prüfung der Sprach-Weitergabe in `tts.test.mjs` arbeitet am **Quelltext** des Readers, nicht zur Laufzeit. Sie findet, wenn jemand den Parameter entfernt, nicht, ob der Wert zur Laufzeit ankommt — im Test selbst als schwächstes Glied benannt.
