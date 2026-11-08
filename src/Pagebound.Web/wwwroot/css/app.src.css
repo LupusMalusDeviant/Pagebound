@@ -509,6 +509,21 @@ input[type="file"]:hover::-webkit-file-upload-button {
      aufmachen und die `absolute` positionierten Klappmenüs von ToolbarMenu
      abschneiden. */
   .pb-reader .pb-reader-toolbar .pb-toolbtn { min-height: 44px; }
+
+  /* Die Seite war 309 px breit auf 375 px Schirm. Das war nie der Zoom —
+     `width: min(100%, <Raster>px)` am Canvas löst auf dem Telefon immer zu
+     100 % auf. Die 66 px Unterschied sind Innenabstand: 2×16 px am Abschnitt
+     (px-4), 2×16 px an der Figur (p-4), 2×1 px Rahmen. Bei offenem Dokument
+     holt die Bühne den Abstand des Abschnitts zurück und die Figur gibt ihren
+     fast ganz her — gemessen 357 px statt 309. */
+  .pb-reader.pb-doc-open .pb-reader-stage {
+    margin-left: -1rem;
+    margin-right: -1rem;
+  }
+  .pb-reader.pb-doc-open .pb-reader-stage > figure {
+    padding: 0.5rem;
+    border-radius: 0;
+  }
 }
 
 /* --- Designer-Werkzeugleiste auf dem Telefon -------------------------------

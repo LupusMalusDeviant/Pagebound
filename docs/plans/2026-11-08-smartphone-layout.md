@@ -66,8 +66,17 @@ Telefon der ungünstigste Fall für den Speicher.
 3. Die acht Klappmenüs auf dem Telefon zu einer waagerecht scrollenden Leiste
    oder einem einzigen Menü zusammenfassen.
 4. Die Tastatur-Legende unter `(hover: hover) and (pointer: fine)` stellen.
-5. Die Seite auf die Schirmbreite einpassen (Standard-Zoom „Breite" statt
-   100 %) — 309 px von 375 px sind 18 % verschenkt.
+5. ~~Die Seite auf die Schirmbreite einpassen (Standard-Zoom „Breite" statt
+   100 %) — 309 px von 375 px sind 18 % verschenkt.~~
+   **Diagnose war falsch, am 2026-11-08 nachgemessen.** Der Zoom hat damit
+   nichts zu tun: der Canvas trägt `width: min(100%, <Rasterbreite>px)`, und
+   auf dem Telefon löst das immer zu 100 % auf. Die Seite ist also längst
+   eingepasst. Die 66 px Unterschied sind Innenabstand — 2×16 px am Abschnitt
+   (`px-4`), 2×16 px an der Figur (`p-4`), 2×1 px Rahmen. Ein anderer
+   Standard-Zoom hätte nur die Rasterauflösung verändert, nicht die Breite.
+   Umgesetzt wurde stattdessen: bei offenem Dokument holt die Bühne unter
+   640 px den Abstand des Abschnitts über negative Ränder zurück und die Figur
+   gibt ihren bis auf 8 px her. Gemessen 357 px statt 309.
 6. Gegenprobe: dieselbe Sonde erneut fahren, `chromeHoeheVorSeite` muss unter
    die Sichthöhe fallen. Ein Befund, den diese Prüfung findet: käme die
    Überschrift zurück, stiege der Wert wieder über 743.
