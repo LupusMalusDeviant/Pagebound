@@ -132,11 +132,35 @@ Das Telefon-Verhalten steckt fast vollständig in 13 handgeschriebenen
 untere Leiste, `pb-segbar`) sauber ist und die beiden großen Arbeitsflächen
 nicht: sie wurden nie angefasst.
 
-### Schritt [braucht Nutzer]
+### Entschieden am 2026-11-08 vom Nutzer: bei `app.src.css` bleiben
 
-Entscheidung, ob die Arbeitsflächen Telefon-Varianten im Markup bekommen oder
-weiter über `app.src.css` bedient werden. Das ist eine Stil-Entscheidung über
-die ganze UI-Schicht, keine Einzelkorrektur.
+Das Telefon-Layout wird weiter über handgeschriebene `@media`-Blöcke in
+`app.src.css` bedient, nicht über Responsive-Präfixe im Markup. Die vier
+Korrekturen dieses Plans (Commits `5f161b9`, `0c833fc`, `db896ad`, `a23fe1c`)
+sind genau so gebaut.
+
+**Was das für die nächste Änderung heißt.** Sichtbarkeit, Abstände, Richtung
+einer Flex-Achse und Mindestgrößen gehören in einen `@media`-Block, mit einer
+Zustandsklasse am Wurzelelement, wenn das Verhalten vom Zustand abhängt
+(`pb-doc-open`, `pb-show-b`). Tailwind-Präfixe im Markup bleiben die Ausnahme.
+
+**Wo die Grenze liegt.** Solange die Telefon-Ansicht dieselbe Anordnung mit
+anderen Werten ist, trägt das. Braucht eine Arbeitsfläche eine *andere*
+Anordnung — andere Reihenfolge, andere Elemente, ein anderer Fluss —, lässt
+sich das mit CSS allein nicht sauber ausdrücken; dann ist der Fall da, der
+diese Entscheidung neu aufwirft. Bis dahin gilt sie.
+
+**Zwei Fallen, die beim Umsetzen beide zugeschlagen haben** (je einmal in
+`5f161b9` und `0c833fc`, beide nur durch Nachmessen gefunden):
+
+1. `flex-direction` umlegen macht aus `align-items` eine andere Achse. Ein
+   geerbtes `items-start` ließ die Seite auf 34 px Inhaltsbreite schrumpfen.
+   Gegenmittel: `align-items` beim Umlegen mitsetzen.
+2. `overflow-x: auto` macht das Element zum Scroll-Container. Damit fällt sein
+   `min-height: auto` auf `0` (ein Spalten-Flex darüber drückt es zusammen —
+   gemessen 16 px statt 60) *und* es entsteht ein Clipping-Kontext, der
+   `absolute` positionierte Klappmenüs abschneidet. Gegenmittel: `flex: none`
+   dazu, und vorher prüfen, ob in der Leiste Aufklapper stecken.
 
 ## Prüfliste für den Nutzer
 
