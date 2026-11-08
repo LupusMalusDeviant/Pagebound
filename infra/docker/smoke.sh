@@ -83,6 +83,29 @@ for paar in "/datenschutz/:Datenschutz:de" "/en/privacy/:Privacy:en"; do
   ok "Datenschutzseite $pfad ($sprache)"
 done
 
+# Digital Asset Links: die Datei, mit der Google Play eine Trusted Web Activity
+# dieser Domain zuordnet. Fehlt sie, zeigt die Android-App eine Browser-Leiste —
+# und zwar ohne jede Fehlermeldung, denn der SPA-Fallback beantwortet auch
+# /.well-known/… mit HTTP 200 und text/html. Googles Prüfer bekommt also eine
+# gültige Antwort, die kein JSON ist. Auf den Status zu prüfen wäre nutzlos;
+# geprüft wird der Typ und dass der Inhalt eine JSON-Liste ist.
+#
+# Eine leere Liste ist erlaubt, solange keine TWA veröffentlicht ist. VOR der
+# Play-Einreichung gehört der SHA-256 des App-Signaturschlüssels aus der Play
+# Console hinein (nicht nur der des lokalen Upload-Schlüssels).
+out=$(probe "/.well-known/assetlinks.json" - -)
+IFS='|' read -r status bytes _enc type <<<"$out"
+[ "$status" = 200 ] || fail "/.well-known/assetlinks.json: HTTP $status"
+case "$type" in
+  *json*) ;;
+  *) fail "/.well-known/assetlinks.json: Content-Type '$type' statt JSON — Datei fehlt im Abbild, der SPA-Fallback liefert index.html mit HTTP 200" ;;
+esac
+links=$("${CURL[@]}" "$BASE/.well-known/assetlinks.json")
+case "$(tr -d ' \t\r\n' <<<"$links" | cut -c1)" in
+  "[") ok "/.well-known/assetlinks.json ($bytes B, JSON-Liste)" ;;
+  *) fail "/.well-known/assetlinks.json ist keine JSON-Liste, beginnt mit: $(head -c 80 <<<"$links")" ;;
+esac
+
 # Der Service Worker: Quelle ist service-worker.published.js, ausgeliefert wird
 # sie beim Veröffentlichen als /service-worker.js. Genau diese Umbenennung macht
 # einen Irrtum unsichtbar — wer auf /service-worker.published.js prüft, bekommt
@@ -184,4 +207,31 @@ while IFS= read -r s; do
   shots=$((shots + 1))
 done <<<"$srcs"
 ok "$shots Icons/Screenshots aus manifest.webmanifest werden als Bild ausgeliefert"
+
+# ---------------------------------------------------------------------------
+# Das ausgelieferte Manifest muss DASSELBE sein wie das geprüfte im Repo.
+#
+# manifest.test.mjs prüft den Inhalt gründlich — Pflichtfelder, maskierbares
+# Icon, Screenshot-Verhältnis, und dass die Eintrittswege zu dem passen, was der
+# Code behandelt. Aber nur die Datei im Arbeitsbaum. PWABuilder und Bubblewrap
+# bauen die Store-Pakete aus dem AUSGELIEFERTEN Manifest. Weicht es ab, entsteht
+# ein Paket ohne PDF-Dateihandler und ohne Teilen-Ziel — ohne die zwei Wege also,
+# für die Pagebound in den Stores überhaupt antritt —, und keine der Prüfungen
+# oben hätte etwas gesagt: Typ, Bilder und Status sind dabei alle in Ordnung.
+#
+# Der Vergleich ist auch gegen eine LIVE-Adresse aussagekräftig; er sagt dann,
+# ob der ausgelieferte Stand dem Arbeitsbaum entspricht. Zeilenenden werden
+# normalisiert (.gitattributes setzt "* text=auto", die Arbeitskopie hat CRLF).
+# ---------------------------------------------------------------------------
+repo_mf="$(dirname "$0")/../../src/Pagebound.Web/wwwroot/manifest.webmanifest"
+if [ -f "$repo_mf" ]; then
+  if ! diff -q <(tr -d '\r' < "$repo_mf") <(tr -d '\r' <<<"$mf") >/dev/null 2>&1; then
+    echo "--- Repo erwartet / +++ ausgeliefert:" >&2
+    diff <(tr -d '\r' < "$repo_mf") <(tr -d '\r' <<<"$mf") | head -20 >&2 || true
+    fail "ausgeliefertes manifest.webmanifest weicht vom Repo ab — ein daraus gebautes Store-Paket trägt andere Eintrittswege als die geprüften"
+  fi
+  ok "ausgeliefertes Manifest stimmt mit dem Repo überein"
+else
+  echo "HINWEIS: Repo-Manifest nicht gefunden ($repo_mf) — der Vergleich lief NICHT." >&2
+fi
 echo "SMOKE OK"

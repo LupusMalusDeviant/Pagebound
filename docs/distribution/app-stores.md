@@ -37,8 +37,15 @@ Gefunden im aktuellen `wwwroot/manifest.webmanifest`:
 - **Datenschutzerklärung als eigene URL** (Play und MS Store verlangen sie):
   eine statische Seite wie die Landingpages, z. B. `/datenschutz/` — Inhalt im
   Kern: „Es werden keine Daten erhoben" (stimmt; `privacy-check.mjs` hält das).
-- `/.well-known/assetlinks.json` für Google Play (s. u.). Achtung beim Ausliefern:
-  Verzeichnisse mit Punkt — prüfen, dass Publish und nginx sie mitnehmen.
+- `/.well-known/assetlinks.json` für Google Play (s. u.). **Gemessen am
+  2026-11-08 und erledigt:** `dotnet publish` nimmt das Punkt-Verzeichnis mit,
+  und das gebaute Abbild liefert die Datei mit `application/json` aus. Die Datei
+  liegt als leere Liste (`[]`) im Repo; `infra/docker/smoke.sh` prüft Typ und
+  Form. Der Fallstrick, den die Prüfung fängt: ein **fehlender** Pfad unter
+  `.well-known/` kommt als **HTTP 200 mit `text/html`** zurück (SPA-Fallback),
+  nicht als 404 — Googles Prüfer sähe eine gültige Antwort, die kein JSON ist,
+  und die TWA zeigte stumm die Browser-Leiste. Vor der Einreichung muss der
+  SHA-256 des App-Signaturschlüssels hinein (s. 2.3).
 
 ## 1. Microsoft Store — zuerst
 
@@ -100,6 +107,16 @@ Web-App (Teilen → „Zum Home-Bildschirm").
 
 ## Reihenfolge (Vorschlag)
 
+0. **Deployen, bevor paketiert wird.** PWABuilder und Bubblewrap lesen die
+   **ausgelieferte** Seite, nicht das Repo. Am 2026-11-08 gemessen: live fehlten
+   der PDF-Dateihandler, das Teilen-Ziel, die Screenshots und das maskierbare
+   Icon, und `/datenschutz/` wie `/en/privacy/` lieferten den App-Rahmen statt
+   der Erklärung (gleicher `<title>` wie ein erfundener Pfad). Ein Paket aus
+   diesem Stand hätte genau die zwei Wege nicht, für die Pagebound in den Stores
+   antritt, und ein Store-Prüfer hätte unter der Datenschutz-URL den Reader
+   gesehen. `infra/docker/smoke.sh` nimmt eine beliebige Basis-URL und prüft das
+   — auch gegen live: `bash infra/docker/smoke.sh https://pagebound.app.lupusmalus.dev`.
+   Gegen den heutigen Live-Stand ist der Lauf rot. **Nach jedem Deploy fahren.**
 1. Manifest store-tauglich + PDF-`file_handlers` (Windows) + Datenschutzseite.
 2. Microsoft Store einreichen.
 3. Play-Konto + geschlossenen Test starten (die 14 Tage laufen nebenher);
