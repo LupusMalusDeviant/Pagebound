@@ -243,6 +243,8 @@
   "reader.next": "Weiter ›",
   "reader.pageNav": "Seitennavigation",
   "reader.zoom.label": "Zoom:",
+  "reader.phonePanels": "Datei & Suche",
+  "reader.phonePanels.title": "Datei-Auswahl und Suche ein- oder ausblenden",
   "reader.tool.label": "Werkzeug:",
   "reader.menu.text": "Text",
   "reader.menu.add": "Hinzufügen",

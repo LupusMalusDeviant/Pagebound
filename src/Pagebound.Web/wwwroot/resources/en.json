@@ -243,6 +243,8 @@
   "reader.next": "Next ›",
   "reader.pageNav": "Page navigation",
   "reader.zoom.label": "Zoom:",
+  "reader.phonePanels": "File & search",
+  "reader.phonePanels.title": "Show or hide the file picker and search",
   "reader.tool.label": "Tool:",
   "reader.menu.text": "Text",
   "reader.menu.add": "Add",

@@ -20,15 +20,18 @@
 @inject IJSRuntime JS
 @implements IAsyncDisposable
 
-<section class="mx-auto max-w-[1800px] px-4 sm:px-6 lg:px-8 py-8">
-    <header class="max-w-4xl mx-auto mb-6">
+@* Die pb-reader-Klassen steuern das Telefon-Layout (app.src.css, max-width 640px):
+   bei offenem Dokument weichen Kopfzeile, Datei-Karte und Suche dem Dokument,
+   erreichbar bleiben sie über den Schalter in der Werkzeugleiste. *@
+<section class="pb-reader mx-auto max-w-[1800px] px-4 sm:px-6 lg:px-8 py-8 @(_handle is not null ? "pb-doc-open" : null) @(_phonePanelsOpen ? "pb-panels-open" : null)">
+    <header class="pb-reader-head max-w-4xl mx-auto mb-6">
         <h1 class="text-2xl font-bold">@L.T("reader.heading")</h1>
         <p class="mt-1 text-sm text-pb-fg-muted">
             @L.T("reader.subheading")
         </p>
     </header>
 
-    <div class="max-w-4xl mx-auto rounded-lg pb-glass p-4">
+    <div class="pb-reader-opencard max-w-4xl mx-auto rounded-lg pb-glass p-4">
         <label class="flex flex-col gap-2 text-sm">
             <span class="font-medium">@L.T("reader.choosePdf")</span>
             @if (_fsaSupported)
@@ -70,7 +73,7 @@
 
     @if (_handle is not null)
     {
-        <div class="max-w-4xl mx-auto mt-4 rounded-lg pb-glass p-4">
+        <div class="pb-reader-searchcard max-w-4xl mx-auto mt-4 rounded-lg pb-glass p-4">
             <form @onsubmit="DoSearchAsync" @onsubmit:preventDefault>
                 <div class="flex flex-wrap gap-2 items-center">
                     <input @bind="_searchQuery"
@@ -183,7 +186,16 @@
         </div>
 
         @* Kompakte Menüleiste — Kategorie-Dropdowns (ToolbarMenu) statt breiter Button-Reihe. *@
-        <div class="max-w-4xl mx-auto mt-3 flex flex-wrap items-center gap-2 text-sm">
+        <div class="pb-reader-toolbar max-w-4xl mx-auto mt-3 flex flex-wrap items-center gap-2 text-sm">
+            @* Nur auf dem Telefon: holt Datei-Karte und Suche zurück, die dort
+               bei offenem Dokument dem Dokument weichen. *@
+            <button type="button"
+                    class="@($"pb-phone-only rounded border px-2 py-0.5 {(_phonePanelsOpen ? "pb-toolbtn is-on" : "pb-toolbtn")}")"
+                    aria-expanded="@_phonePanelsOpen.ToString().ToLowerInvariant()"
+                    title="@L.T("reader.phonePanels.title")"
+                    @onclick="@(() => _phonePanelsOpen = !_phonePanelsOpen)">
+                @L.T("reader.phonePanels")
+            </button>
             <ToolbarMenu Label="@($"{L.T("reader.zoom.label")} {(int)(_zoomFactor * 100)}%")" Title="@L.T("reader.zoom.label")">
                 @foreach (var z in _zoomLevels)
                 {
@@ -651,7 +663,7 @@
             </div>
         }
 
-        <div class="mt-6 flex gap-4 items-start">
+        <div class="pb-reader-stage mt-6 flex gap-4 items-start">
 
         @if (_outlineOpen)
         {
@@ -1349,7 +1361,9 @@
             </button>
         </nav>
 
-        <p class="max-w-4xl mx-auto mt-4 text-xs text-pb-fg-muted">
+        @* Tastenkürzel nur dort, wo es Tasten gibt — auf reinen Tippgeräten
+           blendet app.src.css den Absatz aus (hover: none und pointer: coarse). *@
+        <p class="pb-reader-keyhint max-w-4xl mx-auto mt-4 text-xs text-pb-fg-muted">
             @L.T("reader.shortcuts.label")
             <kbd class="rounded border border-pb-border px-1.5 py-0.5">←</kbd>
             <kbd class="rounded border border-pb-border px-1.5 py-0.5">→</kbd>
@@ -1395,6 +1409,10 @@
     // aktuelle Seite zurückspringt (auch wenn _currentPage sich nicht ändert).
     private int _pageInputNonce;
     private double _zoomFactor = 1.0;
+
+    // Telefon: Datei-Karte und Suche sind bei offenem Dokument eingeklappt,
+    // dieser Schalter holt sie zurück. Auf breiten Schirmen ohne Wirkung.
+    private bool _phonePanelsOpen;
     private string? _rasterDataUrl;
     private string? _errorMessage;
     private bool _isLoading;
