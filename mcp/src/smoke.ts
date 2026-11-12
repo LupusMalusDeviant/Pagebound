@@ -13,6 +13,7 @@ import * as pdfa from "./pdfa.js";
 import * as pdfua from "./pdfua.js";
 import * as sign from "./sign.js";
 import { encryptPdf } from "./encrypt.js";
+import * as annots from "./annots.js";
 
 let failures = 0;
 function check(name: string, cond: boolean, detail = "") {
@@ -161,6 +162,53 @@ async function main() {
   const st = await pdf.stamp(s3, { watermarkText: "ENTWURF", pageNumbers: true });
   check("pdf_stamp → 3 pages, bytes grow", st.pageCount === 3 && st.bytes.length > s3.length);
   check("pdf_stamp output re-parses", (await pdf.getInfo(st.bytes)).pageCount === 3);
+
+  // Annotationen als echte /Annots (Vertrag:
+  // docs/contracts/annotationen-als-pdf-annots.md). Geprüft wird, dass
+  // ANNOTATIONSOBJEKTE entstehen — eingebrannte Grafik sähe richtig aus und
+  // würde hier gar nicht auftauchen.
+  {
+    const rotated = await pdf.rotatePages(await makeSample(1, "Annots"), "1", 90);
+    const items = [
+      { kind: "highlight" as const, pageNumber: 1, color: "#fef08a",
+        rects: [{ x: 0.2, y: 0.3, w: 0.25, h: 0.05 }], text: "Belegstelle",
+        id: "ann-smoke001", modified: "2026-11-12T10:00:00.000Z" },
+      { kind: "ink" as const, pageNumber: 1, color: "#112233", strokeWidth: 0.005,
+        strokes: [[{ x: 0.1, y: 0.1 }, { x: 0.3, y: 0.4 }]] },
+      { kind: "shape" as const, pageNumber: 1, shape: "arrow" as const,
+        startX: 0.1, startY: 0.6, endX: 0.5, endY: 0.7 },
+      { kind: "note" as const, pageNumber: 1, x: 0.7, y: 0.2, text: "**fett**" },
+      { kind: "text" as const, pageNumber: 1, x: 0.2, y: 0.8, text: "Hallo", fontSize: 0.03 },
+      // Signaturen gehen diesen Weg laut Vertrag NICHT mit.
+      { kind: "signature" as const, pageNumber: 1, x: 0.1, y: 0.5, width: 0.2, height: 0.1 },
+    ];
+    const aw = await annots.writeAnnotations(rotated.bytes, items);
+    check("pdf_annotations_write schreibt 5 und überspringt die Signatur",
+      aw.written === 5 && aw.skipped === 1, `written=${aw.written} skipped=${aw.skipped}`);
+    check("pdf_annotations_write Ausgabe lässt sich neu lesen",
+      (await pdf.getInfo(aw.bytes)).pageCount === 1);
+
+    const ar = await annots.readAnnotations(aw.bytes);
+    check("pdf_annotations_read findet alle 5 wieder",
+      ar.items.length === 5 && ar.unsupported === 0,
+      `items=${ar.items.length} unsupported=${ar.unsupported}`);
+
+    // Round-Trip auf einer GEDREHTEN Seite: auf einer geraden Seite ab (0,0)
+    // bestünde auch eine falsche Geometrie.
+    const hl = ar.items.find((i) => i.kind === "highlight");
+    const dx = Math.abs((hl?.rects?.[0].x ?? 0) - 0.2);
+    const dy = Math.abs((hl?.rects?.[0].y ?? 0) - 0.3);
+    check("Round-Trip trifft die Koordinaten auf /Rotate 90", dx < 0.002 && dy < 0.002,
+      `dx=${dx.toFixed(4)} dy=${dy.toFixed(4)}`);
+
+    // Festlegung 1 des Vertrags: /Contents ist Klartext.
+    const note = ar.items.find((i) => i.kind === "note");
+    check("Notiz verliert ihr Markdown (/Contents ist Klartext)", note?.text === "fett",
+      JSON.stringify(note?.text));
+
+    check("pdf_annotations_read meldet fremde Subtypen statt sie zu schlucken",
+      (await annots.readAnnotations(await makeFormSample())).unsupported >= 1);
+  }
 
   // forms
   const fp = await makeFormSample();
@@ -667,6 +715,12 @@ async function main() {
     check("determinism: pdf_rotate_pages", await twice(async () => (await pdf.rotatePages(detSrc, "1", 90)).bytes));
     check("determinism: pdf_reorder_pages", await twice(async () => (await pdf.reorderPages(detSrc, [3, 1, 2])).bytes));
     check("determinism: pdf_stamp", await twice(async () => (await pdf.stamp(detSrc, { watermarkText: "ENTWURF", pageNumbers: true })).bytes));
+    // /M und /NM dürfen NICHT aus Uhr oder Zufall kommen, sonst bricht die Zusage.
+    check("determinism: pdf_annotations_write", await twice(async () =>
+      (await annots.writeAnnotations(detSrc, [{
+        kind: "highlight", pageNumber: 1, rects: [{ x: 0.2, y: 0.3, w: 0.25, h: 0.05 }],
+        id: "ann-stable01", modified: "2026-11-12T10:00:00.000Z",
+      }])).bytes));
     check("determinism: pdf_set_metadata", await twice(async () => (await pdf.setMetadata(detSrc, { title: "Fest" })).bytes));
     check("determinism: pdf_to_pdfa (part 2)", await twice(async () => (await pdfa.toPdfA(detSrc, {})).bytes));
     check("determinism: pdf_to_pdfa (part 3 mit Anhang)", await twice(async () =>

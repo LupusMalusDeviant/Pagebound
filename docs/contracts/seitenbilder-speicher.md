@@ -1,6 +1,6 @@
 # Vertrag: Wie Seitenbilder in den Speicher kommen und wieder hinaus
 
-Status: **Entwurf, wartet auf Abnahme** · Bean `PDF-Tool-s4fl` ·
+Status: **abgenommen 2026-11-12** · Bean `PDF-Tool-s4fl` ·
 betrifft `IPdfRenderer`, `PdfJsRenderer`, `pdfjs-bridge.ts`, `ReaderPane.razor`
 
 Anlass: `docs/findings/WETTBEWERB-2026-11-12-vergleich.md`, Befund 2.

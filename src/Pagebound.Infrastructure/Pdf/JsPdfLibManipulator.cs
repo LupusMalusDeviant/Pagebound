@@ -226,11 +226,36 @@ public sealed class JsPdfLibManipulator : IPdfManipulator
         var bytes = await ReadAllAsync(pdf, cancellationToken).ConfigureAwait(false);
         if (annotations.Count == 0) return bytes;
 
-        // Domain-Annotationen → flache DTOs für die Bridge (camelCase via STJ).
-        // Koordinaten bleiben 0..1/oben-links; die Bridge rechnet pro Seite um.
+        var items = ProjectAnnotations(annotations);
+        if (items.Count == 0) return bytes;
+
+        try
+        {
+            var result = await _js.InvokeAsync<byte[]>(
+                "pageboundPdfManipulator.flattenAnnotations", cancellationToken, bytes, items.ToArray()).ConfigureAwait(false);
+            return result ?? bytes;
+        }
+        catch (JSException jsex)
+        {
+            throw new InvalidOperationException($"[stage:flatten] pdf-lib flattenAnnotations fehlgeschlagen: {jsex.Message}", jsex);
+        }
+    }
+
+    /// <summary>
+    /// Domain-Annotationen → flache DTOs für die Brücke (camelCase via STJ).
+    /// EINE Projektion für beide Wege — Einbrennen und <c>/Annots</c>. Zwei
+    /// parallele Projektionen wären zwei Stellen, an denen die Koordinaten
+    /// auseinanderlaufen können (Vertrag
+    /// <c>docs/contracts/annotationen-als-pdf-annots.md</c>).
+    /// Koordinaten bleiben 0..1 mit Ursprung oben-links; die Brücke rechnet pro
+    /// Seite um.
+    /// </summary>
+    private static List<JsFlattenItem> ProjectAnnotations(IReadOnlyList<Annotation> annotations)
+    {
         var items = new List<JsFlattenItem>(annotations.Count);
         foreach (var a in annotations)
         {
+            var before = items.Count;
             switch (a.Type)
             {
                 case AnnotationType.Highlight:
@@ -316,21 +341,128 @@ public sealed class JsPdfLibManipulator : IPdfManipulator
                     });
                     break;
             }
+
+            // Id und Änderungszeitpunkt begleiten jedes Item: der /Annots-Weg
+            // bildet daraus /NM und /M. Beide MÜSSEN aus den Daten kommen und
+            // nicht aus Uhr oder Zufall, sonst ist die Ausgabe nicht mehr
+            // reproduzierbar (Zusage seit MCP 2.0.0). Das Einbrennen ignoriert sie.
+            if (items.Count > before)
+            {
+                var added = items[^1];
+                added.Id = a.Id.Value;
+                added.Modified = a.UpdatedAt.ToString("O", System.Globalization.CultureInfo.InvariantCulture);
+            }
         }
 
-        if (items.Count == 0) return bytes;
+        return items;
+    }
+
+    public async Task<AnnotationWriteResult> WriteAnnotationsAsync(
+        Stream pdf,
+        IReadOnlyList<Annotation> annotations,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(pdf);
+        ArgumentNullException.ThrowIfNull(annotations);
+
+        var bytes = await ReadAllAsync(pdf, cancellationToken).ConfigureAwait(false);
+        if (annotations.Count == 0) return new AnnotationWriteResult(bytes, 0, 0);
+
+        var items = ProjectAnnotations(annotations);
+        // Was die Projektion gar nicht erst erzeugt hat (z.B. eine Signatur ohne
+        // Bild), zählt bereits hier als übersprungen — sonst meldet die Summe
+        // weniger, als der Aufrufer übergeben hat.
+        var droppedInProjection = annotations.Count - items.Count;
+        if (items.Count == 0) return new AnnotationWriteResult(bytes, 0, droppedInProjection);
 
         try
         {
-            var result = await _js.InvokeAsync<byte[]>(
-                "pageboundPdfManipulator.flattenAnnotations", cancellationToken, bytes, items.ToArray()).ConfigureAwait(false);
-            return result ?? bytes;
+            var result = await _js.InvokeAsync<JsWriteAnnotationsResult>(
+                "pageboundPdfManipulator.writeAnnotations", cancellationToken, bytes, items.ToArray())
+                .ConfigureAwait(false);
+            if (result?.Bytes is null) return new AnnotationWriteResult(bytes, 0, annotations.Count);
+            return new AnnotationWriteResult(result.Bytes, result.Written, result.Skipped + droppedInProjection);
         }
         catch (JSException jsex)
         {
-            throw new InvalidOperationException($"[stage:flatten] pdf-lib flattenAnnotations fehlgeschlagen: {jsex.Message}", jsex);
+            throw new InvalidOperationException(
+                $"[stage:annots-write] pdf-lib writeAnnotations fehlgeschlagen: {jsex.Message}", jsex);
         }
     }
+
+    public async Task<AnnotationReadResult> ReadAnnotationsAsync(
+        Stream pdf,
+        PdfId pdfId,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(pdf);
+
+        var bytes = await ReadAllAsync(pdf, cancellationToken).ConfigureAwait(false);
+        JsReadAnnotationsResult? result;
+        try
+        {
+            result = await _js.InvokeAsync<JsReadAnnotationsResult>(
+                "pageboundPdfManipulator.readAnnotations", cancellationToken, bytes).ConfigureAwait(false);
+        }
+        catch (JSException jsex)
+        {
+            throw new InvalidOperationException(
+                $"[stage:annots-read] pdf-lib readAnnotations fehlgeschlagen: {jsex.Message}", jsex);
+        }
+
+        if (result?.Items is null)
+        {
+            return new AnnotationReadResult(Array.Empty<NewAnnotation>(), result?.Unsupported ?? 0);
+        }
+
+        var annotations = new List<NewAnnotation>(result.Items.Length);
+        var unmapped = 0;
+        foreach (var it in result.Items)
+        {
+            var mapped = ToDomain(it, pdfId);
+            if (mapped is not null) annotations.Add(mapped); else unmapped++;
+        }
+
+        return new AnnotationReadResult(annotations, result.Unsupported + unmapped);
+    }
+
+    /// <summary>Rückweg der Projektion: Brücken-DTO → Domänen-Annotation.</summary>
+    private static NewAnnotation? ToDomain(JsFlattenItem it, PdfId pdfId) => it.Kind switch
+    {
+        "highlight" => HighlightAnnotation.Create(
+            pdfId,
+            it.PageNumber,
+            (it.Rects ?? Array.Empty<JsRect>())
+                .Select(r => new HighlightRect(r.X, r.Y, r.W, r.H)).ToList(),
+            it.Text ?? string.Empty,
+            it.Color),
+
+        "ink" => InkAnnotation.Create(
+            pdfId,
+            it.PageNumber,
+            (it.Strokes ?? Array.Empty<JsPoint[]>())
+                .Select(s => new InkStroke(s.Select(p => new InkPoint(p.X, p.Y)).ToList())).ToList(),
+            it.Color,
+            it.StrokeWidth),
+
+        "shape" => ShapeAnnotation.Create(
+            pdfId,
+            it.PageNumber,
+            it.Shape switch { "arrow" => ShapeKind.Arrow, "line" => ShapeKind.Line, _ => ShapeKind.Rectangle },
+            it.StartX ?? 0, it.StartY ?? 0, it.EndX ?? 0, it.EndY ?? 0,
+            it.Color,
+            it.StrokeWidth),
+
+        // Der Weg /Annots führt Klartext (/Contents kennt kein Markdown) — beim
+        // Einlesen landet er unverändert im Markdown-Feld, siehe Vertrag.
+        "note" => StickyNoteAnnotation.Create(
+            pdfId, it.PageNumber, it.X ?? 0, it.Y ?? 0, it.Text ?? string.Empty, it.Color),
+
+        "text" => FreeTextAnnotation.Create(
+            pdfId, it.PageNumber, it.X ?? 0, it.Y ?? 0, it.Text ?? string.Empty, it.FontSize, it.Color),
+
+        _ => null,
+    };
 
     /// <summary>Schneidet das "data:...;base64,"-Präfix einer Data-URL ab (liefert reines base64).</summary>
     private static string StripDataUrlPrefix(string dataUrl)
@@ -559,6 +691,24 @@ public sealed class JsPdfLibManipulator : IPdfManipulator
         public string? ImageBase64 { get; init; }
         public double? Width { get; init; }
         public double? Height { get; init; }
+
+        // Nur für den /Annots-Weg (→ /NM und /M). Setzbar, weil sie nach dem
+        // Zweig der Projektion nachgetragen werden; das Einbrennen liest sie nicht.
+        public string? Id { get; set; }
+        public string? Modified { get; set; }
+    }
+
+    private sealed class JsWriteAnnotationsResult
+    {
+        public byte[]? Bytes { get; init; }
+        public int Written { get; init; }
+        public int Skipped { get; init; }
+    }
+
+    private sealed class JsReadAnnotationsResult
+    {
+        public JsFlattenItem[]? Items { get; init; }
+        public int Unsupported { get; init; }
     }
 
     private sealed class JsRect

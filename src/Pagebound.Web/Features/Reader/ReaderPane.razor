@@ -65,6 +65,19 @@
             </div>
         }
 
+        @* Ergebnis von „Als PDF-Anmerkungen speichern" / „übernehmen" — nennt
+           ausdrücklich, was NICHT mitging, statt es zu verschweigen. *@
+        @if (_annotsNotice is not null)
+        {
+            <div class="mt-3 flex items-start gap-2 rounded border border-pb-border bg-pb-surface px-3 py-2 text-sm"
+                 role="status" aria-live="polite">
+                <span class="grow">@_annotsNotice</span>
+                <button type="button" class="shrink-0 text-pb-fg-muted hover:text-pb-fg"
+                        title="@L.T("common.close")" aria-label="@L.T("common.close")"
+                        @onclick="@(() => _annotsNotice = null)">×</button>
+            </div>
+        }
+
         @if (_isLoading)
         {
             <div class="mt-3 text-sm text-pb-fg-muted" aria-live="polite">@L.T("app.loadingShort")</div>
@@ -316,6 +329,12 @@
                     {
                         <span class="ml-1 text-xs">(@_annotations.Count)</span>
                     }
+                </button>
+                <button type="button" class="pb-menuitem" disabled="@(_isWritingAnnots || _annotations.Count == 0 || _originalPdfBytes is null)" title="@(_annotations.Count == 0 ? L.T("reader.annots.exportEmpty") : L.T("reader.annots.exportTitle"))" @onclick="WriteAnnotationsAsync">
+                    @(_isWritingAnnots ? L.T("reader.annots.exportRunning") : L.T("reader.annots.export"))
+                </button>
+                <button type="button" class="pb-menuitem" disabled="@(_isReadingAnnots || _originalPdfBytes is null)" title="@L.T("reader.annots.importTitle")" @onclick="ImportAnnotationsAsync">
+                    @(_isReadingAnnots ? L.T("reader.annots.importRunning") : L.T("reader.annots.import"))
                 </button>
                 <button type="button" class="pb-menuitem" disabled="@(_isFlattening || _annotations.Count == 0 || _originalPdfBytes is null)" title="@(_annotations.Count == 0 ? L.T("reader.flatten.empty") : L.T("reader.flatten.title"))" @onclick="FlattenAnnotationsAsync">
                     @(_isFlattening ? L.T("reader.flatten.running") : L.T("reader.flatten.button"))
@@ -1440,6 +1459,12 @@
     private bool _isExporting;
     private bool _isExportingSidecar;
     private bool _isFlattening;
+
+    // Weg „/Annots" (Vertrag docs/contracts/annotationen-als-pdf-annots.md):
+    // schreiben, einlesen, und eine Meldung, die auch das Übersprungene nennt.
+    private bool _isWritingAnnots;
+    private bool _isReadingAnnots;
+    private string? _annotsNotice;
     // Reentrancy-Guard für HandlePdfClickAsync: verhindert Doppel-Platzierung
     // durch einen schnellen zweiten Klick, während der erste noch an einem
     // await (JS-Interop / CreateAsync) hängt.
@@ -3789,6 +3814,109 @@
         }
     }
 
+    // „Als PDF-Anmerkungen speichern": schreibt die Sidecar-Annotationen als
+    // echte /Annots-Objekte. Der Unterschied zum Einbrennen ist der ganze Punkt
+    // — in Acrobat, Vorschau, Okular oder Zotero bleiben sie anwählbar und
+    // löschbar, statt als Grafik in der Seite zu stecken.
+    // Signaturen gehen diesen Weg nicht mit (Vertrag
+    // docs/contracts/annotationen-als-pdf-annots.md); sie zählen in `Skipped`.
+    private async Task WriteAnnotationsAsync()
+    {
+        if (_originalPdfBytes is null || _annotations.Count == 0 || _isWritingAnnots) return;
+
+        _isWritingAnnots = true;
+        _errorMessage = null;
+        _annotsNotice = null;
+        try
+        {
+            using var ms = new MemoryStream(_originalPdfBytes);
+            var result = await Manipulator.WriteAnnotationsAsync(ms, _annotations, CancellationToken.None);
+
+            await JS.InvokeVoidAsync(
+                "pageboundShortcuts.downloadBytes",
+                $"{SafeBaseName()}.annotiert.pdf",
+                Convert.ToBase64String(result.Bytes),
+                "application/pdf");
+
+            // Übersprungenes wird GENANNT, nicht geschluckt: wer zwölf Markierungen
+            // hat und neun in der Datei wiederfindet, soll den Grund hier lesen.
+            _annotsNotice = result.Skipped > 0
+                ? L.T("reader.annots.exportDoneSkipped", new Dictionary<string, object>
+                    { ["written"] = result.Written, ["skipped"] = result.Skipped })
+                : L.T("reader.annots.exportDone", new Dictionary<string, object>
+                    { ["written"] = result.Written });
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Anmerkungen konnten nicht als PDF-Annotationen geschrieben werden:\n{Describe(ex)}";
+        }
+        finally
+        {
+            _isWritingAnnots = false;
+        }
+    }
+
+    // „Vorhandene PDF-Anmerkungen übernehmen": liest die /Annots der geöffneten
+    // Datei ins Sidecar. Bewusst eine ausdrückliche Handlung und kein stiller
+    // Import beim Öffnen — sonst stünde beim nächsten Speichern alles doppelt in
+    // der Datei (einmal vorgefunden, einmal neu geschrieben).
+    private async Task ImportAnnotationsAsync()
+    {
+        if (_originalPdfBytes is null || _currentPdfId is null || _isReadingAnnots) return;
+
+        _isReadingAnnots = true;
+        _errorMessage = null;
+        _annotsNotice = null;
+        try
+        {
+            using var ms = new MemoryStream(_originalPdfBytes);
+            var result = await Manipulator.ReadAnnotationsAsync(ms, _currentPdfId.Value, CancellationToken.None);
+
+            var imported = new List<Annotation>(result.Annotations.Count);
+            foreach (var item in result.Annotations)
+            {
+                imported.Add(await Annotations.CreateAsync(item, CancellationToken.None));
+            }
+            if (imported.Count > 0) _annotations = _annotations.Concat(imported).ToList();
+
+            _annotsNotice = result.Annotations.Count == 0 && result.Unsupported == 0
+                ? L.T("reader.annots.importNone")
+                : L.T("reader.annots.importDone", new Dictionary<string, object>
+                    { ["imported"] = result.Annotations.Count, ["unsupported"] = result.Unsupported });
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Vorhandene PDF-Anmerkungen konnten nicht gelesen werden:\n{Describe(ex)}";
+        }
+        finally
+        {
+            _isReadingAnnots = false;
+        }
+    }
+
+    /// <summary>Dateiname ohne Endung, von allem befreit, was ein Dateisystem stört.</summary>
+    private string SafeBaseName()
+    {
+        var baseName = !string.IsNullOrWhiteSpace(_currentFilename)
+            ? System.IO.Path.GetFileNameWithoutExtension(_currentFilename)
+            : (_handle?.Title ?? "pagebound");
+        return string.Concat(baseName.Select(c =>
+            char.IsLetterOrDigit(c) || c is '_' or '-' or '.' or ' ' ? c : '_'));
+    }
+
+    /// <summary>Ausnahmekette als Text — die innere Ursache ist meist die interessante.</summary>
+    private static string Describe(Exception ex)
+    {
+        var details = new System.Text.StringBuilder();
+        var walker = ex;
+        while (walker is not null)
+        {
+            details.AppendLine($"{walker.GetType().FullName}: {walker.Message}");
+            walker = walker.InnerException;
+        }
+        return details.ToString();
+    }
+
     // „Annotationen einbrennen": brennt ALLE Sidecar-Annotationen (Highlights,
     // Notizen, Ink, Formen, Signaturen) fest in die PDF-Bytes und lädt das
     // Ergebnis als <name>.flach.pdf herunter. Die Sidecar/Originaldatei bleibt
@@ -3804,28 +3932,15 @@
             using var ms = new MemoryStream(_originalPdfBytes);
             var flattened = await Manipulator.FlattenAnnotationsAsync(ms, _annotations, CancellationToken.None);
 
-            var baseName = !string.IsNullOrWhiteSpace(_currentFilename)
-                ? System.IO.Path.GetFileNameWithoutExtension(_currentFilename)
-                : (_handle?.Title ?? "pagebound");
-            var safeBase = string.Concat(baseName.Select(c =>
-                char.IsLetterOrDigit(c) || c is '_' or '-' or '.' or ' ' ? c : '_'));
-
             await JS.InvokeVoidAsync(
                 "pageboundShortcuts.downloadBytes",
-                $"{safeBase}.flach.pdf",
+                $"{SafeBaseName()}.flach.pdf",
                 Convert.ToBase64String(flattened),
                 "application/pdf");
         }
         catch (Exception ex)
         {
-            var details = new System.Text.StringBuilder();
-            var walker = ex;
-            while (walker is not null)
-            {
-                details.AppendLine($"{walker.GetType().FullName}: {walker.Message}");
-                walker = walker.InnerException;
-            }
-            _errorMessage = $"Annotationen konnten nicht eingebrannt werden:\n{details}";
+            _errorMessage = $"Annotationen konnten nicht eingebrannt werden:\n{Describe(ex)}";
         }
         finally
         {

@@ -82,6 +82,32 @@ public interface IPdfManipulator
         CancellationToken cancellationToken);
 
     /// <summary>
+    /// Schreibt die Annotationen als echte PDF-Annotationen (<c>/Annots</c>) in die
+    /// Datei. Im Gegensatz zu <see cref="FlattenAnnotationsAsync"/> bleiben sie damit
+    /// in jedem Betrachter anwählbar, änderbar und löschbar — eingebrannte
+    /// Markierungen sind dagegen endgültig.
+    ///
+    /// Signaturen werden dabei ÜBERSPRUNGEN und in
+    /// <see cref="AnnotationWriteResult.Skipped"/> gezählt: als <c>/Stamp</c> abgelegt
+    /// wären sie ein Bild ohne Beweiskraft, das wie eine Signatur aussieht.
+    /// Siehe <c>docs/contracts/annotationen-als-pdf-annots.md</c>.
+    /// </summary>
+    Task<AnnotationWriteResult> WriteAnnotationsAsync(
+        Stream pdf,
+        IReadOnlyList<Annotation> annotations,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Liest vorhandene <c>/Annots</c> einer PDF als Domänen-Annotationen.
+    /// Nicht abgebildete Subtypen werden in
+    /// <see cref="AnnotationReadResult.Unsupported"/> gezählt statt still verworfen.
+    /// </summary>
+    Task<AnnotationReadResult> ReadAnnotationsAsync(
+        Stream pdf,
+        PdfId pdfId,
+        CancellationToken cancellationToken);
+
+    /// <summary>
     /// Echte Redaktion (Schwärzen): die betroffenen Seiten werden rasterisiert
     /// und die angegebenen Bereiche als schwarze Pixel eingebrannt — der
     /// darunterliegende Text/Vektor-Inhalt wird dabei ENTFERNT (nicht nur
@@ -211,3 +237,17 @@ public sealed record EmbeddedSignature(
     DateTimeOffset SignedAt,
     SignerInfo Signer,
     string? IntegrityHash);
+
+/// <summary>
+/// Ergebnis von <see cref="IPdfManipulator.WriteAnnotationsAsync"/>.
+/// <paramref name="Skipped"/> ist nicht kosmetisch: die Oberfläche muss sagen
+/// können „3 von 12 Anmerkungen wurden nicht geschrieben", statt still zu schlucken.
+/// </summary>
+public sealed record AnnotationWriteResult(byte[] Bytes, int Written, int Skipped);
+
+/// <summary>
+/// Ergebnis von <see cref="IPdfManipulator.ReadAnnotationsAsync"/>.
+/// <paramref name="Unsupported"/> zählt vorgefundene Annotationen, für die es
+/// keine Entsprechung im Domänenmodell gibt (Widgets, Popups, Stempel …).
+/// </summary>
+public sealed record AnnotationReadResult(IReadOnlyList<NewAnnotation> Annotations, int Unsupported);

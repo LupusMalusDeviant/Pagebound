@@ -133,6 +133,46 @@ export async function withDisplaySpaceAsync<T>(
 }
 
 /**
+ * Ein im Anzeigeraum normierter Punkt (0..1, Origin OBEN-links) in einen
+ * Userspace-Punkt. Die eine Quelle der Punkt-Umrechnung: normPointToUser und
+ * normRectToUser gehen beide hierüber, damit Rechtecke und Einzelpunkte nicht
+ * auseinanderlaufen können.
+ *
+ * Gebraucht für PDF-Objekte, die Punktlisten statt Rechtecke tragen —
+ * /QuadPoints (Highlight), /InkList (Ink), /L (Line) — siehe
+ * docs/contracts/annotationen-als-pdf-annots.md.
+ */
+function pointToUser(g: DisplayGeometry, x: number, y: number): { x: number; y: number } {
+  const [a, b, c, d, e, f] = g.matrix;
+  const u = x * g.width;
+  const v = g.height - y * g.height; // 0..1 oben-links → Anzeigeraum unten-links
+  return { x: a * u + c * v + e, y: b * u + d * v + f };
+}
+
+/**
+ * Punkt im Anzeigeraum (0..1, Origin oben-links) → Userspace-Punkt.
+ * Für Annotationen, die Koordinaten direkt tragen (/QuadPoints, /InkList, /L).
+ */
+export function normPointToUser(
+  page: PDFPage,
+  p: { x: number; y: number }
+): { x: number; y: number } {
+  return pointToUser(displayGeometry(page), p.x, p.y);
+}
+
+/**
+ * Mehrere Punkte in einem Rutsch — spart das wiederholte Aufbauen der
+ * Geometrie bei Strichlisten, die leicht tausende Punkte haben.
+ */
+export function normPointsToUser(
+  page: PDFPage,
+  points: readonly { x: number; y: number }[]
+): { x: number; y: number }[] {
+  const g = displayGeometry(page);
+  return points.map((p) => pointToUser(g, p.x, p.y));
+}
+
+/**
  * Für Objekte mit eigenem Rechteck im Userspace (Formular-Widgets): ein im
  * Anzeigeraum normiertes Rechteck (0..1, Origin oben-links) in ein
  * Userspace-Rechteck umrechnen. Liefert zusätzlich die Drehung, mit der das
@@ -143,13 +183,83 @@ export function normRectToUser(
   r: { x: number; y: number; width: number; height: number }
 ): { x: number; y: number; width: number; height: number; rotation: 0 | 90 | 180 | 270 } {
   const g = displayGeometry(page);
-  const [a, b, c, d, e, f] = g.matrix;
-  const u0 = r.x * g.width, u1 = (r.x + r.width) * g.width;
-  const v1 = g.height - r.y * g.height, v0 = g.height - (r.y + r.height) * g.height;
-  const pts = [[u0, v0], [u1, v0], [u0, v1], [u1, v1]].map(([u, v]) => [a * u + c * v + e, b * u + d * v + f]);
-  const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
+  const pts = [
+    pointToUser(g, r.x, r.y),
+    pointToUser(g, r.x + r.width, r.y),
+    pointToUser(g, r.x, r.y + r.height),
+    pointToUser(g, r.x + r.width, r.y + r.height),
+  ];
+  const xs = pts.map((p) => p.x), ys = pts.map((p) => p.y);
   const x = Math.min(...xs), y = Math.min(...ys);
   return { x, y, width: Math.max(...xs) - x, height: Math.max(...ys) - y, rotation: g.rotation };
+}
+
+/**
+ * Rückweg: Userspace-Punkt → normierter Anzeigeraum (0..1, Origin oben-links).
+ * Gebraucht beim Einlesen vorhandener /Annots, die im Userspace stehen.
+ *
+ * Die Matrix aus computeDisplayGeometry ist stets Drehung plus Verschiebung
+ * (|det| = 1), also exakt invertierbar — keine Näherung.
+ */
+function userToNorm(g: DisplayGeometry, X: number, Y: number): { x: number; y: number } {
+  const [a, b, c, d, e, f] = g.matrix;
+  const det = a * d - b * c;
+  const dx = X - e, dy = Y - f;
+  const u = (d * dx - c * dy) / det;
+  const v = (-b * dx + a * dy) / det;
+  return { x: u / g.width, y: (g.height - v) / g.height };
+}
+
+export function userPointToNorm(
+  page: PDFPage,
+  p: { x: number; y: number }
+): { x: number; y: number } {
+  return userToNorm(displayGeometry(page), p.x, p.y);
+}
+
+export function userPointsToNorm(
+  page: PDFPage,
+  points: readonly { x: number; y: number }[]
+): { x: number; y: number }[] {
+  const g = displayGeometry(page);
+  return points.map((p) => userToNorm(g, p.x, p.y));
+}
+
+/**
+ * Userspace-Rechteck → normiertes Anzeige-Rechteck. Über die vier Ecken, weil
+ * ein gedrehtes Rechteck sonst Breite und Höhe vertauscht.
+ */
+export function userRectToNorm(
+  page: PDFPage,
+  r: { x: number; y: number; width: number; height: number }
+): { x: number; y: number; width: number; height: number } {
+  const g = displayGeometry(page);
+  const pts = [
+    userToNorm(g, r.x, r.y),
+    userToNorm(g, r.x + r.width, r.y),
+    userToNorm(g, r.x, r.y + r.height),
+    userToNorm(g, r.x + r.width, r.y + r.height),
+  ];
+  const xs = pts.map((p) => p.x), ys = pts.map((p) => p.y);
+  const x = Math.min(...xs), y = Math.min(...ys);
+  return { x, y, width: Math.max(...xs) - x, height: Math.max(...ys) - y };
+}
+
+/** Angezeigte Maße einer Seite in Punkten — für Umrechnungen von Strichstärken. */
+export function displaySize(page: PDFPage): { width: number; height: number } {
+  const g = displayGeometry(page);
+  return { width: g.width, height: g.height };
+}
+
+/** Umschließendes Userspace-Rechteck einer Punktwolke (für /Rect aus /InkList, /L). */
+export function boundsOfUserPoints(
+  points: readonly { x: number; y: number }[],
+  pad = 0
+): { x: number; y: number; width: number; height: number } {
+  if (points.length === 0) return { x: 0, y: 0, width: 0, height: 0 };
+  const xs = points.map((p) => p.x), ys = points.map((p) => p.y);
+  const x = Math.min(...xs) - pad, y = Math.min(...ys) - pad;
+  return { x, y, width: Math.max(...xs) + pad - x, height: Math.max(...ys) + pad - y };
 }
 
 /**

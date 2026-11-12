@@ -1,10 +1,27 @@
 # Vertrag: Anmerkungen als echte PDF-Annotationen (`/Annots`)
 
-Status: **Entwurf, wartet auf Abnahme** · Bean `PDF-Tool-5kvq` ·
+Status: **abgenommen 2026-11-12** · Bean `PDF-Tool-5kvq` ·
 betrifft `IPdfManipulator`, `JsPdfLibManipulator`, `pdf-manipulator-bridge.ts`,
 `pdfjs-bridge.ts`, `IPdfRenderer`, `ReaderPane.razor`, `mcp/src/index.ts`
 
 Anlass: `docs/findings/WETTBEWERB-2026-11-12-vergleich.md`, Befund 1.
+
+> **Nachtrag 1 (bei der Umsetzung, 2026-11-12).** Der Ursprungsstand sagt an
+> einer Stelle „`AnnotItem` ist derselbe Typ wie `FlattenItem`" und an einer
+> anderen „`/NM` wird aus der `AnnotationId` abgeleitet, `/M` aus `UpdatedAt`".
+> Beides zugleich geht nicht, solange der Typ weder Id noch Zeitpunkt trägt.
+> Aufgelöst wurde es zugunsten **beider** Absichten: `FlattenItem` bekommt die
+> zwei optionalen Felder `id` und `modified`; es bleibt **ein** Typ und **eine**
+> Projektion, das Einbrennen ignoriert die neuen Felder. Fehlt `modified`, wird
+> **kein** `/M` geschrieben — ersatzweise die Systemuhr zu nehmen würde die
+> Reproduzierbarkeit brechen.
+>
+> **Nachtrag 2 (MCP).** Das Paket unter `mcp/` ist ein eigenständiger Port und
+> kann über die Paketgrenze nicht importieren (wie `encrypt.ts`, `pdfa.ts`,
+> `pdfua.ts`). Es hatte bis dahin **gar keine** Anzeigeraum-Geometrie — ein
+> Port allein der Annotationen hätte auf gedrehten Seiten bekannt falsch
+> gelegen. Deshalb sind **zwei** Dateien portiert: `mcp/src/geometry.ts` und
+> `mcp/src/annots.ts`, beide mit einem Kopf, der die Quelle nennt.
 
 ## Der Ist-Stand, belegt
 

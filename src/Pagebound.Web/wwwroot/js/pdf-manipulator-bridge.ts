@@ -33,6 +33,10 @@ import {
 } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
 import { beginDisplaySpace, endDisplaySpace, widgetPlacement } from "./page-geometry";
+import type { AnnotItem } from "./pdf-annots";
+import { stripMarkdown } from "./pdf-annots";
+export { writeAnnotations, readAnnotations } from "./pdf-annots";
+export type { AnnotItem, WriteAnnotationsResult, ReadAnnotationsResult } from "./pdf-annots";
 import * as pdfjsLib from "pdfjs-dist";
 
 // Eigene Worker-Konfig — diese Bridge ist ein separater IIFE-Bundle, der
@@ -1339,24 +1343,11 @@ export async function stampPdf(pdfBytes: Uint8Array, opts: StampOptions): Promis
 // JsPdfLibManipulator.FlattenAnnotationsAsync (projiziert die Domain-Typen).
 // ============================================================================
 
-export interface FlattenItem {
-  kind: "highlight" | "ink" | "shape" | "note" | "signature" | "text";
-  pageNumber: number;
-  color?: string | null;
-  opacity?: number | null;
-  /** Strichbreite als Anteil der Seitenbreite (wie im Reader). */
-  strokeWidth?: number | null;
-  rects?: { x: number; y: number; w: number; h: number }[] | null;
-  strokes?: { x: number; y: number }[][] | null;
-  shape?: "rectangle" | "line" | "arrow" | null;
-  startX?: number; startY?: number; endX?: number; endY?: number;
-  text?: string | null;
-  /** Schriftgröße als Anteil der Seitenhöhe (Freitext, wie im Reader via cqh). */
-  fontSize?: number | null;
-  x?: number; y?: number;
-  imageBase64?: string | null;
-  width?: number; height?: number;
-}
+// Einbrennen und /Annots teilen sich EINEN Item-Typ (Vertrag
+// docs/contracts/annotationen-als-pdf-annots.md): zwei Projektionen aus den
+// Domänentypen wären zwei Stellen, an denen die Koordinaten auseinanderlaufen.
+// Definiert in pdf-annots.ts, hier nur weitergereicht.
+export type FlattenItem = AnnotItem;
 
 function hexToRgbColor(hex: string | null | undefined, fallback = rgb(0, 0, 0)) {
   if (!hex) return fallback;
@@ -1386,18 +1377,8 @@ function wrapText(font: any, text: string, size: number, maxWidth: number): stri
   return lines;
 }
 
-function stripMarkdown(md: string): string {
-  return (md ?? "")
-    .replace(/```[\s\S]*?```/g, "")
-    .replace(/`([^`]*)`/g, "$1")
-    .replace(/^#{1,6}\s+/gm, "")
-    .replace(/^\s*[-*+]\s+/gm, "• ")
-    .replace(/\*\*([^*]+)\*\*/g, "$1")
-    .replace(/(\*|_){1,3}([^*_]+)(\*|_){1,3}/g, "$2")
-    .replace(/^>\s?/gm, "")
-    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
-    .trim();
-}
+// stripMarkdown liegt in pdf-annots.ts — es wird vom Einbrennen UND vom
+// /Annots-Weg gebraucht, also an einer Stelle statt zweimal.
 
 export async function flattenAnnotations(
   pdfBytes: Uint8Array,
