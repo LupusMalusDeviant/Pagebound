@@ -443,7 +443,11 @@ Eingabe: 'path'/'dataBase64' plus 'annotations'. Ausgabe: 'outputPath' oder 'dat
     },
     annotations: writeAnn,
   }, guard(async (a: { path?: string; dataBase64?: string; annotations: annots.AnnotItem[]; outputPath?: string }) => {
-    const r = await annots.writeAnnotations(await loadPdf(a), a.annotations);
+    const quelle = await loadPdf(a);
+    // Die Wächter dieses Pakets (Seitenlimit, Fehlerkennungen) VOR dem
+    // eigenen Motor — annots.ts kennt sie nicht, siehe pdf.assertLoadable.
+    await pdf.assertLoadable(quelle);
+    const r = await annots.writeAnnotations(quelle, a.annotations);
     const parts = [`${r.written} Annotation(en) geschrieben`];
     if (r.replaced > 0) parts.push(`${r.replaced} davon ersetzt (gleiche /NM)`);
     if (r.skipped > 0) parts.push(`${r.skipped} übersprungen`);
@@ -461,7 +465,9 @@ Eingabe: 'path'/'dataBase64'. Ändert nichts.`,
     inputSchema: { ...srcIn },
     annotations: readAnn,
   }, guard(async (a: { path?: string; dataBase64?: string }) => {
-    const r = await annots.readAnnotations(await loadPdf(a));
+    const quelle = await loadPdf(a);
+    await pdf.assertLoadable(quelle);
+    const r = await annots.readAnnotations(quelle);
     return ok(
       { annotations: r.items, count: r.items.length, unsupported: r.unsupported },
       `${r.items.length} Annotation(en) gelesen, ${r.unsupported} ohne Entsprechung.`);

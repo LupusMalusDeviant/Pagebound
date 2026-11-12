@@ -90,6 +90,24 @@ async function loadDoc(bytes: Uint8Array): Promise<PDFDocument> {
   return doc;
 }
 
+/**
+ * Dieselben Wächter für Werkzeuge, die ihren eigenen Motor mitbringen.
+ *
+ * `annots.ts` ist eine buchstäbliche Kopie der Web-Datei und darf keine
+ * MCP-Eigenheiten enthalten — es lädt also selbst und kennt weder
+ * `MCP_MAX_PAGES` noch die Fehlerkennungen dieses Pakets. Ohne diesen Aufruf
+ * davor nahm `pdf_annotations_read` bei `MCP_MAX_PAGES=1` klaglos ein
+ * zweiseitiges Dokument an, und kaputte Bytes kamen als `INTERNAL` statt als
+ * `PDF_CORRUPT` zurück — beides sind zugesagte Vertragspunkte.
+ *
+ * Kostet einen zusätzlichen Parse. Das ist der Preis dafür, dass die Kopie
+ * eine Kopie bleibt.
+ */
+export async function assertLoadable(bytes: Uint8Array): Promise<number> {
+  const doc = await loadDoc(bytes);
+  return doc.getPageCount();
+}
+
 // --- Reproduzierbarkeit (gleiche Eingabe → gleiche Bytes) --------------------
 // pdf-lib ruft beim LADEN und beim ERZEUGEN eines Dokuments ungefragt
 // updateInfoDict() auf und schreibt /Producer sowie /ModDate (und bei neuen

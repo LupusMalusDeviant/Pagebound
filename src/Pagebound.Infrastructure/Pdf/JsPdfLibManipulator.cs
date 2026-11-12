@@ -412,18 +412,42 @@ public sealed class JsPdfLibManipulator : IPdfManipulator
 
         if (result?.Items is null)
         {
-            return new AnnotationReadResult(Array.Empty<NewAnnotation>(), result?.Unsupported ?? 0);
+            return new AnnotationReadResult(Array.Empty<Annotation>(), result?.Unsupported ?? 0);
         }
 
-        var annotations = new List<NewAnnotation>(result.Items.Length);
+        var annotations = new List<Annotation>(result.Items.Length);
         var unmapped = 0;
         foreach (var it in result.Items)
         {
             var mapped = ToDomain(it, pdfId);
-            if (mapped is not null) annotations.Add(mapped); else unmapped++;
+            if (mapped is null) { unmapped++; continue; }
+            annotations.Add(WithSourceIdentity(mapped, it));
         }
 
         return new AnnotationReadResult(annotations, result.Unsupported + unmapped);
+    }
+
+    /// <summary>
+    /// Hängt die mitgebrachte Identität an: <c>/NM</c> wird zur
+    /// <see cref="AnnotationId"/>, <c>/M</c> zum Zeitpunkt. Fehlt eines von
+    /// beiden, entsteht hier ein Ersatz — das ist der einzige Fall, in dem
+    /// Importieren eine neue Id vergibt.
+    /// </summary>
+    private static Annotation WithSourceIdentity(NewAnnotation input, JsFlattenItem it)
+    {
+        var id = !string.IsNullOrWhiteSpace(it.Id)
+            ? new AnnotationId(it.Id!)
+            : AnnotationId.NewId();
+
+        var when = DateTimeOffset.TryParse(
+            it.Modified,
+            System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.RoundtripKind,
+            out var parsed)
+            ? parsed
+            : DateTimeOffset.UtcNow;
+
+        return new Annotation(id, input.PdfId, input.Type, input.PageNumber, when, when, input.Payload);
     }
 
     /// <summary>Rückweg der Projektion: Brücken-DTO → Domänen-Annotation.</summary>

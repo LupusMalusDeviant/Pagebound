@@ -475,6 +475,102 @@ test("Befund 15: /M überlebt den Round-Trip mit Zeitzone", async () => {
   assert.equal(back.items[0].modified, "2026-11-12T08:00:00.000Z");
 });
 
+// =============================================================================
+// Zweite Codex-Runde (2026-11-12, GPT-6.1-Sol). Zwei Rückfälle aus der ERSTEN
+// Korrektur — beide entstanden daraus, dass dort zu breit repariert wurde.
+// =============================================================================
+
+test("Runde 2, Befund 4: /DA ist ASCII, kein UTF-16 — PDF.js liest Größe und Farbe", async () => {
+  // Der Rückfall: Befund 4 der ersten Runde liess ALLE Zeichenketten auf
+  // PDFHexString umstellen. /DA ist aber kein Text, sondern der Bauplan für
+  // das Erscheinungsbild. Als Hex bekam er eine UTF-16-Stückliste voran und
+  // ein Nullbyte zwischen jedes Zeichen.
+  //
+  // Dass diese Prüfung den Fehler sieht, ist nachgemessen (Sonde vom
+  // 2026-11-12): mit Hex meldete PDF.js Größe 10, leeren Schriftnamen und
+  // Schwarz — also genau dann einen Durchfall, wenn der Fehler da ist. Die
+  // vorhandenen Dreh- und Rechteck-Prüfungen bestanden daneben munter weiter.
+  const w = await annots.writeAnnotations(await makePdf({}), [{
+    kind: "text", pageNumber: 1, x: 0.1, y: 0.2, text: "Hallo",
+    fontSize: 24 / 800, color: "#cc0000",
+  }]);
+
+  const list = await annotationsInDisplay(w.bytes);
+  const ft = list.find((a) => a.subtype === "FreeText");
+  assert.ok(ft, "kein FreeText gefunden");
+
+  const da = ft.raw.defaultAppearanceData;
+  assert.equal(da.fontSize, 24, "Schriftgröße kam bei PDF.js nicht an");
+  assert.equal(da.fontName, "Helv", "Schriftname kam bei PDF.js nicht an");
+  assert.deepEqual([da.fontColor[0], da.fontColor[1], da.fontColor[2]], [204, 0, 0],
+    "Farbe kam bei PDF.js nicht an");
+
+  // Und die rohe Form: eine literale Zeichenkette, keine Hex-Klammer.
+  const roh = Buffer.from(w.bytes).toString("latin1");
+  assert.ok(/\/DA \(\/Helv /.test(roh), "/DA steht nicht als literale Zeichenkette in der Datei");
+  assert.ok(!/\/DA <FEFF/.test(roh), "/DA ist hex-kodiert");
+});
+
+test("Runde 2, Befund 2: ein nicht schreibbarer Ersatz löscht das Original NICHT", async () => {
+  // Der Rückfall: Befund 5 der ersten Runde brachte das Ersetzen über /NM.
+  // Entfernt wurde aber, BEVOR feststand, dass sich der Ersatz überhaupt
+  // schreiben lässt. Ein Highlight ohne Rechtecke liess sich nicht bauen —
+  // und damit war die vorgefundene Annotation ersatzlos weg.
+  const erst = await annots.writeAnnotations(await makePdf({}), [{
+    kind: "highlight", pageNumber: 1, rects: [{ x: 0.2, y: 0.3, w: 0.25, h: 0.05 }],
+    id: "ann-bleibt", text: "Originalfassung",
+  }]);
+  assert.equal(erst.written, 1);
+
+  // Derselbe /NM, aber ohne Rechtecke: unschreibbar.
+  const zweit = await annots.writeAnnotations(erst.bytes, [{
+    kind: "highlight", pageNumber: 1, rects: [], id: "ann-bleibt", text: "kaputt",
+  }]);
+
+  assert.equal(zweit.written, 0, "ein leeres Highlight darf nicht geschrieben werden");
+  assert.equal(zweit.skipped, 1, "und es muss als übersprungen gemeldet werden");
+  assert.equal(zweit.replaced, 0, "ohne Ersatz wird auch nichts ersetzt");
+
+  const back = await annots.readAnnotations(zweit.bytes);
+  assert.equal(back.items.length, 1, "das Original wurde gelöscht, statt erhalten zu bleiben");
+  assert.equal(back.items[0].id, "ann-bleibt");
+  assert.equal(back.items[0].text, "Originalfassung");
+});
+
+test("Runde 2, Befund 2: dasselbe für Ink ohne Striche", async () => {
+  const erst = await annots.writeAnnotations(await makePdf({}), [{
+    kind: "ink", pageNumber: 1, id: "ann-ink",
+    strokes: [[{ x: 0.1, y: 0.1 }, { x: 0.3, y: 0.4 }]],
+  }]);
+  assert.equal(erst.written, 1);
+
+  const zweit = await annots.writeAnnotations(erst.bytes, [{
+    kind: "ink", pageNumber: 1, id: "ann-ink", strokes: [],
+  }]);
+  assert.equal(zweit.written, 0);
+  assert.equal(zweit.replaced, 0);
+
+  const back = await annots.readAnnotations(zweit.bytes);
+  assert.equal(back.items.length, 1, "der Strich wurde gelöscht, statt erhalten zu bleiben");
+});
+
+test("Runde 2: ein schreibbarer Ersatz ersetzt weiterhin", async () => {
+  // Die Gegenprobe zur vorigen Prüfung: die Reihenfolgeänderung darf das
+  // Ersetzen nicht kaputtmachen.
+  const erst = await annots.writeAnnotations(await makePdf({}), [{
+    kind: "note", pageNumber: 1, x: 0.3, y: 0.3, text: "erste", id: "ann-ersetz",
+  }]);
+  const zweit = await annots.writeAnnotations(erst.bytes, [{
+    kind: "note", pageNumber: 1, x: 0.3, y: 0.3, text: "zweite", id: "ann-ersetz",
+  }]);
+
+  assert.equal(zweit.written, 1);
+  assert.equal(zweit.replaced, 1);
+  const back = await annots.readAnnotations(zweit.bytes);
+  assert.equal(back.items.length, 1);
+  assert.equal(back.items[0].text, "zweite");
+});
+
 test("leere Eingabe lässt die PDF unangetastet", async () => {
   const input = await makePdf({});
   const r = await annots.writeAnnotations(input, []);

@@ -55,6 +55,32 @@ public sealed class AnnotationService : IAnnotationService
         return annotation;
     }
 
+    public async Task<Annotation> ImportAsync(Annotation annotation, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(annotation);
+
+        await _lock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await EnsureLoadedAsync(annotation.PdfId, cancellationToken).ConfigureAwait(false);
+            var list = _cache[annotation.PdfId];
+            var idx = list.FindIndex(a => a.Id.Value == annotation.Id.Value);
+
+            // Upsert statt Add: ein zweiter Import derselben Datei soll nichts
+            // verdoppeln. Zeitpunkt und Id kommen MIT, werden hier also
+            // ausdrücklich nicht überschrieben — das ist der Unterschied zu
+            // CreateAsync und UpdateAsync.
+            if (idx >= 0) list[idx] = annotation; else list.Add(annotation);
+
+            await PersistAsync(annotation.PdfId, cancellationToken).ConfigureAwait(false);
+            return annotation;
+        }
+        finally
+        {
+            _lock.Release();
+        }
+    }
+
     public async Task<Annotation> UpdateAsync(Annotation annotation, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(annotation);

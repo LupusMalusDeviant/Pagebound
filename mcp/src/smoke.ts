@@ -1381,6 +1381,19 @@ async function main() {
       await codeOf(async () => pdf.extractPages(await makeSample(1, "E"), "9-12")) === "INVALID_INPUT");
     check("error contract: Drehwinkel → INVALID_INPUT",
       await codeOf(async () => pdf.rotatePages(await makeSample(1, "E"), "1", 45)) === "INVALID_INPUT");
+    // Codex-Runde 2, Befund 6: die Annotationswerkzeuge bringen ihren eigenen
+    // Motor mit (annots.ts ist eine Kopie der Web-Datei) und kennen weder das
+    // Seitenlimit noch die Fehlerkennungen dieses Pakets. Deshalb geht
+    // `assertLoadable` voran — ohne das meldete ein kaputter Eingang INTERNAL
+    // statt PDF_CORRUPT, und MCP_MAX_PAGES galt für sie nicht.
+    check("error contract: assertLoadable → PDF_CORRUPT (Wächter der Annotationswerkzeuge)",
+      await codeOf(() => pdf.assertLoadable(junk)) === "PDF_CORRUPT",
+      await codeOf(() => pdf.assertLoadable(junk)));
+    check("error contract: assertLoadable meldet die Seitenzahl",
+      await pdf.assertLoadable(await makeSample(3, "Limit")) === 3);
+    check("error contract: der eigene Motor nimmt denselben kaputten Eingang NICHT an",
+      await codeOf(() => annots.readAnnotations(junk)) !== "(kein Fehler)");
+
     check("error contract: verzweigter Namensbaum → UNSUPPORTED (Default nicht überschrieben)",
       new pdf.ToolError("x", "UNSUPPORTED").code === "UNSUPPORTED" && new pdf.ToolError("x").code === "INVALID_INPUT");
 

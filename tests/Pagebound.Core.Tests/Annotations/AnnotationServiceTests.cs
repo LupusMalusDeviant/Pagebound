@@ -95,6 +95,81 @@ public sealed class AnnotationServiceTests
         (await svc.GetForDocumentAsync(new PdfId("other"), Ct)).ShouldBeEmpty();
     }
 
+    // =========================================================================
+    // Import: Identität und Zeitpunkt kommen MIT (Codex-Runde 2, Befund 3).
+    //
+    // Warum das geprüft wird: vorgefundene /Annots bringen /NM und /M mit.
+    // Lief der Import über CreateAsync, bekam die Annotation eine neue Id —
+    // und beim nächsten Speichern fand der Ersetzen-Schritt das Original in
+    // der Datei nicht mehr, so dass beide Fassungen darin standen. Die
+    // JS-Prüfungen zum Ersetzen laufen an diesem .NET-Weg vorbei und können
+    // den Fehler strukturell nicht sehen.
+    // =========================================================================
+
+    private static Annotation Fremd(string id, DateTimeOffset when, string text = "aus der Datei") =>
+        new(new AnnotationId(id), Pdf, AnnotationType.StickyNote, 1, when, when,
+            new Dictionary<string, object?> { ["content"] = text });
+
+    [Fact]
+    public async Task Import_BehaeltMitgebrachteIdUndZeitpunkt()
+    {
+        var svc = new AnnotationService(new InMemoryStorage());
+        var when = new DateTimeOffset(2026, 11, 12, 8, 0, 0, TimeSpan.Zero);
+
+        var ann = await svc.ImportAsync(Fremd("ann-ausDerDatei", when), Ct);
+
+        ann.Id.Value.ShouldBe("ann-ausDerDatei");
+        ann.UpdatedAt.ShouldBe(when);
+        ann.CreatedAt.ShouldBe(when);
+
+        var list = await svc.GetForDocumentAsync(Pdf, Ct);
+        list.Count.ShouldBe(1);
+        list[0].Id.Value.ShouldBe("ann-ausDerDatei");
+        list[0].UpdatedAt.ShouldBe(when);
+    }
+
+    [Fact]
+    public async Task Import_ZweimalDieselbeDatei_VerdoppeltNichts()
+    {
+        var svc = new AnnotationService(new InMemoryStorage());
+        var when = new DateTimeOffset(2026, 11, 12, 8, 0, 0, TimeSpan.Zero);
+
+        await svc.ImportAsync(Fremd("ann-gleich", when, "erste Lesung"), Ct);
+        await svc.ImportAsync(Fremd("ann-gleich", when, "zweite Lesung"), Ct);
+
+        var list = await svc.GetForDocumentAsync(Pdf, Ct);
+        list.Count.ShouldBe(1);
+        list[0].Payload["content"].ShouldBe("zweite Lesung");
+    }
+
+    [Fact]
+    public async Task Import_UeberlebtDenDienstwechsel()
+    {
+        var store = new InMemoryStorage();
+        var when = new DateTimeOffset(2026, 11, 12, 8, 0, 0, TimeSpan.Zero);
+        await new AnnotationService(store).ImportAsync(Fremd("ann-bleibt", when), Ct);
+
+        var list = await new AnnotationService(store).GetForDocumentAsync(Pdf, Ct);
+        list.Count.ShouldBe(1);
+        list[0].Id.Value.ShouldBe("ann-bleibt");
+        list[0].UpdatedAt.ShouldBe(when);
+    }
+
+    [Fact]
+    public async Task Create_VergibtWeiterhin_EineNeueId()
+    {
+        // Die Gegenprobe: ImportAsync ist der Sonderweg, CreateAsync bleibt,
+        // wie es war. Ohne diese Prüfung könnte man den Unterschied
+        // versehentlich einebnen.
+        var svc = new AnnotationService(new InMemoryStorage());
+        var vorher = DateTimeOffset.UtcNow.AddSeconds(-1);
+
+        var ann = await svc.CreateAsync(NewAnn(), Ct);
+
+        ann.Id.Value.ShouldStartWith("ann-");
+        ann.UpdatedAt.ShouldBeGreaterThan(vorher);
+    }
+
     [Fact]
     public async Task ObserveChanges_YieldsNothing()
     {

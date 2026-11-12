@@ -1837,6 +1837,14 @@
     /// <summary>Laufender Import der vorhandenen /Annots — beim Dateiwechsel abgebrochen.</summary>
     private CancellationTokenSource? _annotsImportCts;
 
+    /// <summary>
+    /// Zählt die Fensterwechsel der fortlaufenden Ansicht. Ein laufender
+    /// Renderdurchlauf vergleicht nach jeder Rückkehr: hat sich der Stand
+    /// geändert, gehört das eben erzeugte Bild niemandem mehr und wird
+    /// freigegeben — und der Durchlauf beginnt mit dem neuen Fenster von vorn.
+    /// </summary>
+    private int _continuousGeneration;
+
     private CancellationTokenSource? _continuousCts;
     private int _continuousFrom = 1;
     private int _continuousTo;
@@ -2541,16 +2549,19 @@
     private int _thumbFrom = 1;
     private int _thumbTo;
 
+    /// <summary>
+    /// Wie bei der fortlaufenden Ansicht: kein Abbruch über ein Token, sondern
+    /// ein Zählerstand. Das Abbrechen der .NET-Wartezeit hält die JS-Seite
+    /// nicht auf — sie rendert fertig und meldet eine Blob-URL zurück, die
+    /// dann niemandem gehört. Hier wird zu Ende gewartet und sofort
+    /// freigegeben, was nicht mehr ins Fenster passt.
+    /// </summary>
     private async Task SetThumbnailWindowAsync(int from, int to)
     {
         if (_handle is null) return;
         _thumbFrom = from;
         _thumbTo = to;
-
-        _thumbnailsCts?.Cancel();
-        _thumbnailsCts?.Dispose();
-        _thumbnailsCts = new CancellationTokenSource();
-        var ct = _thumbnailsCts.Token;
+        _thumbGeneration++;
 
         // Erst freigeben, dann nachladen.
         foreach (var p in PageWindow.Outside(_thumbnails.Keys, from, to))
@@ -2563,38 +2574,57 @@
         _thumbnailsProgress = _thumbnails.Count;
         await InvokeAsync(StateHasChanged);
 
+        if (_thumbsRendering) return;
+        _thumbsRendering = true;
         try
         {
-            for (var i = from; i <= to; i++)
+            while (_handle is not null)
             {
-                ct.ThrowIfCancellationRequested();
-                if (i < _thumbFrom || i > _thumbTo) continue;
-                if (_thumbnails.ContainsKey(i)) continue;
-
-                var image = await Renderer
-                    .RenderPageToUrlAsync(_handle, i, new RenderOptions(Scale: 0.35), ct)
-                    .ConfigureAwait(false);
-
-                if (i < _thumbFrom || i > _thumbTo)
+                var gen = _thumbGeneration;
+                for (var i = _thumbFrom; i <= _thumbTo; i++)
                 {
-                    await Renderer.ReleasePageImageAsync(image).ConfigureAwait(false);
-                    continue;
+                    if (_thumbGeneration != gen || _handle is null) break;
+                    if (_thumbnails.ContainsKey(i)) continue;
+
+                    PageImage image;
+                    try
+                    {
+                        image = await Renderer
+                            .RenderPageToUrlAsync(_handle, i, new RenderOptions(Scale: 0.35), CancellationToken.None)
+                            .ConfigureAwait(false);
+                    }
+                    catch (Exception ex) when (ex is OperationCanceledException or JSException or JSDisconnectedException)
+                    {
+                        return;
+                    }
+
+                    if (_thumbGeneration != gen || _handle is null || i < _thumbFrom || i > _thumbTo)
+                    {
+                        await Renderer.ReleasePageImageAsync(image).ConfigureAwait(false);
+                        continue;
+                    }
+
+                    _thumbnails[i] = image;
+                    RememberAspect(i, image);
+                    _thumbnailsProgress = _thumbnails.Count;
+                    await InvokeAsync(StateHasChanged);
+                    // Browser-Frame Zeit zum Atmen geben — sonst friert die UI ein,
+                    // wenn jemand bei einer 200-Seiten-PDF die Sidebar öffnet.
+                    await Task.Yield();
                 }
 
-                _thumbnails[i] = image;
-                RememberAspect(i, image);
-                _thumbnailsProgress = _thumbnails.Count;
-                await InvokeAsync(StateHasChanged);
-                // Browser-Frame Zeit zum Atmen geben — sonst friert die UI ein,
-                // wenn jemand bei einer 200-Seiten-PDF die Sidebar öffnet.
-                await Task.Yield();
+                if (_thumbGeneration == gen) return;
             }
         }
-        catch (OperationCanceledException)
+        finally
         {
-            // Erwartet bei Datei-Wechsel, Sidebar-Close oder weitergescrollt.
+            _thumbsRendering = false;
         }
     }
+
+    /// <summary>Siehe <c>_continuousGeneration</c> — dasselbe für den Vorschaustreifen.</summary>
+    private int _thumbGeneration;
+    private bool _thumbsRendering;
 
     private async Task RenderCurrentPageAsync()
     {
@@ -3136,36 +3166,87 @@
         _continuousFrom = from;
         _continuousTo = to;
 
-        // Scrollt der Nutzer weiter, während noch gerendert wird, ist der alte
-        // Auftrag wertlos: ein Bild fertigstellen, das niemand mehr sieht, kostet
-        // nur Zeit und Speicher.
-        _continuousCts?.Cancel();
-        _continuousCts?.Dispose();
-        _continuousCts = new CancellationTokenSource();
-        var token = _continuousCts.Token;
+        // Das Fenster hat sich bewegt. Ein laufender Durchlauf erkennt das an
+        // der Zählerstandsänderung und fängt danach mit dem NEUEN Fenster von
+        // vorne an, statt still stehenzubleiben.
+        _continuousGeneration++;
 
         await EvictOutsideAsync(from, to).ConfigureAwait(false);
         await InvokeAsync(StateHasChanged);
 
+        // Läuft schon jemand, ist nichts zu tun: der Durchlauf unten zieht das
+        // neue Fenster selbst nach. Früher kehrte man hier zurück UND der
+        // laufende Durchlauf brach ab — danach füllte niemand das neue Fenster,
+        // bis der Beobachter zufällig noch einmal meldete. Wer mit dem Scrollen
+        // aufhörte, sah leere Platzhalter.
         if (_continuousRendering) return;
+
         _continuousRendering = true;
         try
         {
+            await DrainContinuousAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            _continuousRendering = false;
+        }
+    }
+
+    /// <summary>
+    /// Rendert, bis das zuletzt gewünschte Fenster vollständig ist.
+    /// <para>
+    /// Zwei Dinge macht diese Schleife anders als ein einfaches „für jede
+    /// Seite im Fenster":
+    /// </para>
+    /// <para>
+    /// 1. <b>Kein Abbruch über ein Token.</b> Das Abbrechen der .NET-Wartezeit
+    /// hält die JS-Seite nicht auf — sie rendert fertig und meldet eine
+    /// Blob-URL zurück, die dann niemandem mehr gehört. Zwölf abgebrochene
+    /// Wartezeiten liessen zwölf URLs offen, bis das Dokument geschlossen
+    /// wurde. Hier wird deshalb IMMER zu Ende gewartet; was nicht mehr ins
+    /// Fenster passt, wird sofort freigegeben. Gespart wird trotzdem: die
+    /// Seiten DANACH werden erst gar nicht mehr beauftragt.
+    /// </para>
+    /// <para>
+    /// 2. <b>Erneuter Durchlauf statt Rückkehr.</b> Hat sich das Fenster
+    /// während des Durchlaufs bewegt, beginnt der nächste mit dem neuen
+    /// Stand — so bleibt kein gewünschtes Fenster unbedient.
+    /// </para>
+    /// </summary>
+    private async Task DrainContinuousAsync()
+    {
+        while (_handle is not null)
+        {
+            var gen = _continuousGeneration;
+            var from = _continuousFrom;
+            var to = _continuousTo;
+
             // Von der Mitte nach aussen: die sichtbare Seite zuerst, der Puffer danach.
             foreach (var p in PageWindow.RenderOrder(from, to))
             {
-                if (token.IsCancellationRequested) break;
-                // Das Fenster kann sich während des Renderns verschoben haben.
-                if (p < _continuousFrom || p > _continuousTo) continue;
+                if (_continuousGeneration != gen) break;
+                if (_handle is null) break;
                 if (_continuousPages.ContainsKey(p)) continue;
 
-                var image = await Renderer.RenderPageToUrlAsync(
-                    _handle, p, new RenderOptions(Scale: 1.5), token).ConfigureAwait(false);
+                PageImage image;
+                try
+                {
+                    image = await Renderer.RenderPageToUrlAsync(
+                        _handle, p, new RenderOptions(Scale: 1.5), CancellationToken.None)
+                        .ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is OperationCanceledException or JSException or JSDisconnectedException)
+                {
+                    // Dokument zu, Seite weg oder Verbindung fort — kein Bild,
+                    // also auch nichts freizugeben.
+                    return;
+                }
 
-                // Zwischen Auftrag und Antwort kann die Seite aus dem Fenster
-                // gelaufen sein — dann wird das Bild gar nicht erst aufgenommen,
-                // sondern sofort wieder freigegeben.
-                if (p < _continuousFrom || p > _continuousTo)
+                // Zwischen Auftrag und Antwort kann sich alles verschoben haben.
+                // Jede erzeugte URL geht entweder ins Verzeichnis oder sofort
+                // wieder zurück — ein dritter Ausgang darf nicht existieren.
+                if (_continuousGeneration != gen || _handle is null
+                    || p < _continuousFrom || p > _continuousTo)
                 {
                     await Renderer.ReleasePageImageAsync(image).ConfigureAwait(false);
                     continue;
@@ -3176,14 +3257,9 @@
                 _continuousRenderedCount = _continuousPages.Count;
                 await InvokeAsync(StateHasChanged);
             }
-        }
-        catch (OperationCanceledException)
-        {
-            // Erwartet: der Nutzer hat weitergescrollt.
-        }
-        finally
-        {
-            _continuousRendering = false;
+
+            // Nichts hat sich bewegt → das gewünschte Fenster steht.
+            if (_continuousGeneration == gen) return;
         }
     }
 
@@ -3201,6 +3277,13 @@
     /// <summary>Alle Seitenbilder freigeben (Dateiwechsel, Ansicht aus, Entsorgen).</summary>
     private async Task ReleaseAllContinuousAsync()
     {
+        // Das Fenster auf „leer" stellen UND den Zähler weiterdrehen: ein
+        // Renderdurchlauf, der gerade auf ein Bild wartet, gibt es danach
+        // selbst frei, statt es in ein längst geräumtes Verzeichnis zu legen.
+        _continuousGeneration++;
+        _continuousFrom = 1;
+        _continuousTo = 0;
+
         _continuousCts?.Cancel();
         _continuousCts?.Dispose();
         _continuousCts = null;
@@ -3216,6 +3299,10 @@
     /// <summary>Alle Vorschaubilder freigeben.</summary>
     private async Task ReleaseAllThumbnailsAsync()
     {
+        _thumbGeneration++;
+        _thumbFrom = 1;
+        _thumbTo = 0;
+
         foreach (var image in _thumbnails.Values)
         {
             await Renderer.ReleasePageImageAsync(image).ConfigureAwait(false);
@@ -4181,17 +4268,33 @@
             var result = await Manipulator.ReadAnnotationsAsync(ms, pdfId, ct);
             if (generation != _docGeneration) return;
 
+            // ImportAsync, nicht CreateAsync: die Annotation bringt ihre Id
+            // (/NM) und ihren Zeitpunkt (/M) aus der Datei mit. Mit CreateAsync
+            // bekäme sie eine neue Id — und beim nächsten Speichern fände der
+            // Ersetzen-Schritt das Original in der PDF nicht mehr wieder, so
+            // dass beide Fassungen darin stünden.
             var imported = new List<Annotation>(result.Annotations.Count);
             foreach (var item in result.Annotations)
             {
                 ct.ThrowIfCancellationRequested();
-                imported.Add(await Annotations.CreateAsync(item, ct));
+                imported.Add(await Annotations.ImportAsync(item, ct));
             }
 
             // Letzte Gegenprobe VOR dem Veröffentlichen: zwischen der letzten
             // Speicherung und hier kann das Dokument gewechselt haben.
             if (generation != _docGeneration) return;
-            if (imported.Count > 0) _annotations = _annotations.Concat(imported).ToList();
+
+            // Ein zweiter Import derselben Datei darf die Liste nicht
+            // verdoppeln: ImportAsync ist ein Upsert, die Anzeige muss das
+            // nachvollziehen.
+            if (imported.Count > 0)
+            {
+                var neu = imported.ToDictionary(a => a.Id.Value);
+                _annotations = _annotations
+                    .Where(a => !neu.ContainsKey(a.Id.Value))
+                    .Concat(imported)
+                    .ToList();
+            }
 
             _annotsNotice = result.Annotations.Count == 0 && result.Unsupported == 0
                 ? L.T("reader.annots.importNone")

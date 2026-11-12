@@ -5,7 +5,7 @@
 // npm-Paket veröffentlicht und kann nicht über die Paketgrenze importieren;
 // encrypt.ts, pdfa.ts und pdfua.ts sind aus demselben Grund Kopien. Wer dort
 // etwas ändert, ändert es hier mit — der Abgleich ist eine Kopie der Datei,
-// danach nur Kopfzeile, Importpfad und die beiden `| null`-Zeilen unten.
+// danach nur Kopfzeile und Importpfad.
 //
 // Vertrag: docs/contracts/annotationen-als-pdf-annots.md (abgenommen 2026-11-12)
 //
@@ -274,6 +274,28 @@ function pdfText(value: string): PDFHexString {
 }
 
 /**
+ * ASCII-Anweisungen, NICHT Nutzertext.
+ *
+ * `/DA` ist kein Text, den jemand liest, sondern der Bauplan, aus dem der
+ * Betrachter das Erscheinungsbild zeichnet — dieselbe Sprache wie ein
+ * Inhaltsstrom (`/Helv 12 Tf 0 0 0 rg`). Als `PDFHexString` bekäme er eine
+ * UTF-16-Stückliste vorweg und ein Nullbyte zwischen jedes Zeichen; PDF.js
+ * las daraus Schriftgröße 10 und einen leeren Schriftnamen. Also eine
+ * literale Zeichenkette.
+ *
+ * Maskierung braucht es hier nicht, und zwar nachweislich: der Inhalt wird
+ * ausschließlich aus einem festen Schriftnamen und `toFixed()`-Zahlen gebaut
+ * (siehe Aufrufstelle). Es kommt kein Nutzertext hinein — die Prüfung unten
+ * ist die Zusicherung dafür und wirft, falls sich das je ändert.
+ */
+function pdfInstructions(value: string): PDFString {
+  if (!/^[\x20-\x7e]*$/.test(value) || /[()\\]/.test(value)) {
+    throw new Error(`/DA darf nur maskierungsfreies ASCII enthalten: ${JSON.stringify(value)}`);
+  }
+  return PDFString.of(value);
+}
+
+/**
  * Zeichenkette lesen — literal ODER hex. `decodeText()` beherrscht beide und
  * macht die Maskierung rückgängig; `asString()` liefert die rohe, noch
  * maskierte Form und wäre hier falsch.
@@ -384,16 +406,21 @@ export async function writeAnnotations(
     // Signaturen gehen diesen Weg laut Vertrag nicht mit.
     if (it.kind === "signature") { skipped++; continue; }
 
+    // ERST bauen, DANN ersetzen. Andersherum löscht eine Eingabe, die sich
+    // gar nicht schreiben lässt (ein Highlight ohne Rechtecke etwa), die
+    // vorgefundene Annotation und setzt nichts an ihre Stelle — aus „ersetzen"
+    // würde stilles Löschen. Der Zähler meldete das sogar brav als
+    // `written: 0, skipped: 1, replaced: 1`, nur war das Original weg.
+    const { width: dw, height: dh } = displaySize(page);
+    const thickness = Math.max(0.5, (it.strokeWidth ?? 0.004) * dw);
+    const dict = buildAnnot(doc, page, it, dw, dh, thickness, page.ref);
+    if (!dict) { skipped++; continue; }
+
     // Vertrag: „importierte Annotationen ersetzen die vorgefundenen (gleiche
     // /NM), nicht importierte bleiben unangetastet." Ohne diesen Schritt
     // entstünde bei importieren → ändern → speichern eine Dublette: das alte
     // Objekt bliebe stehen und das neue käme daneben.
     if (it.id) replaced += removeByName(doc, it.id);
-
-    const { width: dw, height: dh } = displaySize(page);
-    const thickness = Math.max(0.5, (it.strokeWidth ?? 0.004) * dw);
-    const dict = buildAnnot(doc, page, it, dw, dh, thickness, page.ref);
-    if (!dict) { skipped++; continue; }
 
     annotsArray(doc, page).push(doc.context.register(dict));
     written++;
@@ -528,7 +555,7 @@ function buildAnnot(
     const da = `/Helv ${size.toFixed(2)} Tf ${c[0].toFixed(3)} ${c[1].toFixed(3)} ${c[2].toFixed(3)} rg`;
     return baseAnnot(doc, "FreeText", placed, it, {
       Contents: pdfText(text),
-      DA: pdfText(da),
+      DA: pdfInstructions(da),
       Q: PDFNumber.of(0),
       // Ohne /Rotate richtet sich der Text am ungedrehten Userspace aus und
       // steht auf einer gedrehten Seite quer im schmalen Rechteck. Denselben

@@ -250,4 +250,13 @@ public sealed record AnnotationWriteResult(byte[] Bytes, int Written, int Skippe
 /// <paramref name="Unsupported"/> zählt vorgefundene Annotationen, für die es
 /// keine Entsprechung im Domänenmodell gibt (Widgets, Popups, Stempel …).
 /// </summary>
-public sealed record AnnotationReadResult(IReadOnlyList<NewAnnotation> Annotations, int Unsupported);
+/// <summary>
+/// Das Gelesene kommt als fertige <see cref="Annotation"/>, NICHT als
+/// <see cref="NewAnnotation"/>: die Identität (<c>/NM</c>) und der Zeitpunkt
+/// (<c>/M</c>) stehen in der Datei und müssen den Weg überleben. Wer hier
+/// <c>NewAnnotation</c> weitergibt, zwingt den Aufrufer zu
+/// <c>CreateAsync</c> — und das vergibt eine neue Id, womit das spätere
+/// Ersetzen das Original nicht mehr findet und beide Fassungen in der PDF
+/// stehen bleiben.
+/// </summary>
+public sealed record AnnotationReadResult(IReadOnlyList<Annotation> Annotations, int Unsupported);
