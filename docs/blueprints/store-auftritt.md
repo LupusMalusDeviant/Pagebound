@@ -16,6 +16,7 @@ Alles, was außerhalb der App gefunden werden muss: vier zweisprachige Aufgaben-
 | `src/Pagebound.Web/wwwroot/en/` | Generierte englische Seiten |
 | `src/Pagebound.Web/wwwroot/datenschutz/` | Generierte Datenschutzerklärung (`PRIVACY` `:228`, Slug `datenschutz`) |
 | `src/Pagebound.Web/wwwroot/pdf-zusammenfuegen/`, `pdf-unterschreiben/`, `pdf-schwaerzen/`, `pdf-seiten-loeschen/` | Die vier generierten Aufgabenseiten (englische Gegenstücke: `merge-pdf`, `sign-pdf`, `redact-pdf`, `delete-pdf-pages`) |
+| `src/Pagebound.Web/wwwroot/.well-known/assetlinks.json` | Digital Asset Links: ordnet die Android-TWA der Domain zu. Steht als leere Liste im Repo; vor der Play-Einreichung gehört der SHA-256 des App-Signaturschlüssels aus der Play Console hinein |
 | `src/Pagebound.Web/tests-js/landing.test.mjs` | 13 Prüfungen auf die generierten Seiten |
 
 ## Abhängigkeiten
@@ -50,8 +51,11 @@ Der Generator **prüft seine Eingabedaten selbst**: `validate()` (`:361`) verlan
 5. `sitemap.xml` entsteht mit `lastmod` und Sprachalternativen als `xhtml:link` (`:653`–`666`), dann `robots.txt` (`:669`) und `llms.txt` (`:672`).
 6. Die CI prüft, dass die eingecheckten Seiten zum Generator passen: der Schritt „Landing pages up to date (gen-landing.mjs)" in `.github/workflows/ci.yml:56` lässt den Generator laufen und vergleicht. Eine von Hand geänderte Seite macht den Lauf rot — genau so soll es sein.
 
+7. `.well-known/assetlinks.json` erzeugt der Generator **nicht**; die Datei ist von Hand gepflegt. `dotnet publish` trägt das Punkt-Verzeichnis mit, und nginx hat keine Regel gegen Punkt-Pfade, also wird sie ausgeliefert. Die Rauchprobe am Abbild prüft sie seit `5f5cae9` auf Content-Type und JSON-Liste statt nur auf den Status, weil der SPA-Fallback einen fehlenden Pfad mit HTTP 200 und `text/html` beantwortet (siehe [Auslieferung, Build & CI](./auslieferung-ci.md)).
+
 ## Offene Fragen / TODOs
 
+- **Offen beim Nutzer:** `assetlinks.json` ist eine leere Liste. Ohne den SHA-256 des App-Signaturschlüssels aus der Play Console zeigt die Android-App stumm eine Browser-Leiste statt als eigenständige App zu laufen.
 - **Offen beim Nutzer:** die Datenschutzerklärung nennt keine verantwortliche Stelle und keine erreichbare Kontaktadresse. Google Play und der Microsoft Store prüfen die Datenschutz-URL; ohne diese Angaben wird sie abgelehnt. Das kann nur der Betreiber ausfüllen (Art. 13 DSGVO).
 - `LASTMOD` (`:28`) ist von Hand zu pflegen. Wird es vergessen, zeigt die Sitemap ein falsches Datum; eine Prüfung darauf gibt es nicht — die CI prüft nur, dass die Dateien zum Generator passen, und der Generator passt dann zu seinem veralteten Datum.
 - `ORIGIN` ist fest eingetragen (`:26`). Ein Betrieb unter einer anderen Domain braucht eine Änderung am Skript.

@@ -1,8 +1,8 @@
 # Codebase-Blueprint
 
 **Repository:** Pagebound (PDF-Tool)
-**Generiert:** 2026-11-08
-**Stand (Commit):** 15bf8a85f7da71b29307a47d55bd656228b749a0 (Working Tree hatte uncommitted Änderungen)
+**Generiert:** 2026-11-08, inkrementell nachgezogen 2026-11-12
+**Stand (Commit):** 80910d4bf1755c3bbd6ad1abc5fbdb34876bd8c9
 **Scope:** Komplettes Repo
 
 ## Überblick
@@ -62,7 +62,7 @@ Pagebound ist ein quelloffener PDF-Reader und -Editor als Blazor-WebAssembly-PWA
 | [Storage & Persistenz](./storage-persistenz.md) | `src/Pagebound.Infrastructure/Storage/**`, `src/Pagebound.Web/wwwroot/js/storage-bridge.ts`, `src/Pagebound.Web/wwwroot/js/file-handle-bridge.ts` | Querschnitt |
 | [Lokalisierung & Theme](./lokalisierung-theme.md) | `src/Pagebound.Infrastructure/Localization/**`, `src/Pagebound.Infrastructure/Theme/**`, `src/Pagebound.Core/Domain/ThemeName.cs`, `src/Pagebound.Web/wwwroot/resources/**` | Querschnitt |
 | [Interop-Hilfen (UI)](./interop-hilfen.md) | `src/Pagebound.Web/wwwroot/js/shortcuts-bridge.ts`, `src/Pagebound.Web/wwwroot/js/tweaks-bridge.ts`, `src/Pagebound.Web/wwwroot/js/types.d.ts` | Querschnitt |
-| [Statische Seiten & Store-Auftritt](./store-auftritt.md) | `tools/gen-landing.mjs`, `tools/app-icons/**`, `tools/og-image/**`, `src/Pagebound.Web/wwwroot/landing/**`, `src/Pagebound.Web/wwwroot/datenschutz/**`, `src/Pagebound.Web/wwwroot/en/**`, `src/Pagebound.Web/wwwroot/pdf-schwaerzen/**`, `src/Pagebound.Web/wwwroot/pdf-seiten-loeschen/**`, `src/Pagebound.Web/wwwroot/pdf-unterschreiben/**`, `src/Pagebound.Web/wwwroot/pdf-zusammenfuegen/**`, `src/Pagebound.Web/tests-js/landing.test.mjs` | fach |
+| [Statische Seiten & Store-Auftritt](./store-auftritt.md) | `tools/gen-landing.mjs`, `tools/app-icons/**`, `tools/og-image/**`, `src/Pagebound.Web/wwwroot/landing/**`, `src/Pagebound.Web/wwwroot/datenschutz/**`, `src/Pagebound.Web/wwwroot/en/**`, `src/Pagebound.Web/wwwroot/.well-known/**`, `src/Pagebound.Web/wwwroot/pdf-schwaerzen/**`, `src/Pagebound.Web/wwwroot/pdf-seiten-loeschen/**`, `src/Pagebound.Web/wwwroot/pdf-unterschreiben/**`, `src/Pagebound.Web/wwwroot/pdf-zusammenfuegen/**`, `src/Pagebound.Web/tests-js/landing.test.mjs` | fach |
 | [Auslieferung, Build & CI](./auslieferung-ci.md) | `Dockerfile`, `infra/**`, `.github/workflows/**`, `src/Pagebound.Web/esbuild.mjs`, `tools/privacy-check.mjs`, `src/Pagebound.Infrastructure/Telemetry/**` | Querschnitt |
 | [MCP-Server](./mcp-server.md) | `mcp/src/**`, `mcp/testdata/**`, `mcp/Dockerfile`, `src/Pagebound.Web/tests-js/repo-meta.test.mjs` | fach |
 | [Core-Verträge](./core-vertraege.md) | `src/Pagebound.Core/Abstractions/**` | Vertrag |
@@ -207,6 +207,8 @@ Pfeil = „benutzt“. Durchgezogen: Build- oder Typ-Kante; gestrichelt: nur zur
 Das MCP-Paket teilt **keinen** Quelltext mit der Web-App. Es spiegelt die Funktionen mit denselben npm-Bibliotheken in Node und kann deshalb auseinanderlaufen; die Kommentare in `mcp/src/encrypt.ts:3`, `pdfa.ts:32`, `pdfua.ts:19`, `sign.ts:34` und `ocr.ts:4` benennen jeweils ihr Gegenstück in der PWA.
 
 Die beiden Features **Text bearbeiten** und **Schwärzung (Redaktion)** stehen im Graph als Knoten ohne Kanten, weil sie keine eigenen Dateien haben (siehe den Hinweis unter „Zuordnung"). Ihre Abhängigkeiten stehen in ihren Feature-Dateien und sind von Hand ermittelt.
+
+**Eine Kopplung, die der Graph grundsätzlich nicht sieht: CSS.** Das Telefon-Layout von Reader, Designer und Split-View liegt in `src/Pagebound.Web/wwwroot/css/app.src.css`, also im Feature [App-Shell & Start](./app-shell.md) (Entscheidung vom 2026-11-08, `CLAUDE.md` unter „Style-Regeln"). Die Feature-Dateien setzen nur Klassen. Das Skript vergleicht Symbole und Routen, keine CSS-Selektoren, deshalb gibt es dorthin keine Kante. Wer `app.src.css` ändert, prüft die Tabelle im Abschnitt „Telefon-Layout" von [App-Shell & Start](./app-shell.md) mit. Dasselbe gilt für die Komponentengrenze zwischen Split-View und `ReaderPane`.
 
 ## Externe Kern-Dependencies
 

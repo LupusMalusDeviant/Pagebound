@@ -1,5 +1,35 @@
 # Skill-Log: codebase-mapper
 
+## 2026-11-12 — Run
+
+**Aufgabe:** Blueprint nachziehen („aktualisiere den Blueprint"). Marke stand auf `15bf8a8`, HEAD auf `80910d4`.
+
+**Entscheidungen:**
+- Re-Run-Modus: inkrementell (Nutzerwahl). 13 Dateien geändert, 7 Features betroffen, 17 Feature-Dateien unberührt gelassen und nicht einmal gelesen.
+- `src/Pagebound.Web/wwwroot/.well-known/**` als Glob zu „Statische Seiten & Store-Auftritt" ergänzt. Der Pfad war vorher keinem Feature zugeordnet; die Datei ordnet die Android-TWA der Domain zu und gehört damit zum Store-Auftritt.
+- Kantengraph unverändert: die Änderungen seit der Marke sind CSS-Klassen, ein Bool-Feld und Markup-Klassen, keine neuen Feature-Abhängigkeiten. Alte und neue Tabelle Zeile für Zeile verglichen, 119 Zeilen identisch.
+- Neu aufgenommen: ein Abschnitt in `INDEX.md` und in `app-shell.md` darüber, dass CSS eine Kopplung ist, die das Skript grundsätzlich nicht sieht. Seit der Entscheidung vom 2026-11-08 liegt das Telefon-Layout dreier Features in `app.src.css`, das zu App-Shell & Start gehört, ohne dass eine Kante dorthin zeigt.
+
+**Korrigierte Abweichungen (Doku gegen Code):**
+- `split-view-vergleich.md` beschrieb `/compare` als eigenständige Seite, die zwei PDFs wählt und den Vergleich zeigt. Tatsächlich leitet `ComparePage.razor:17` seit `971fc79` (11. Juni) nur noch auf `split?compare=1` um; der Vergleich läuft in `SplitViewPage.CompareAsync`. Call-Flow und Dateitabelle berichtigt, der Poll in `AutoCompareWhenBothLoadedAsync` ergänzt.
+- `auslieferung-ci.md` nannte `tests/Pagebound.Web.Tests` eine „leere Hülle". Das Projekt enthält seit `c9a567c` (5. November) `Reader/SignaturePadTests.cs` mit 11 Prüfungen. Berichtigt, samt Hinweis, dass `CLAUDE.md` an dieser Stelle noch die alte Aussage trägt.
+- `pdf-reader.md` und `designer.md` trugen die alte Zeilenzahl von `ReaderPane.razor` (4397, jetzt 4415).
+
+**Artefakte:**
+- `docs/blueprints/INDEX.md` (Marke, Generiert-Datum, Glob für `.well-known`, Abschnitt zur CSS-Kopplung)
+- `docs/blueprints/split-view-vergleich.md` (neu geschrieben)
+- `docs/blueprints/pdf-reader.md`, `designer.md`, `app-shell.md`, `lokalisierung-theme.md`, `store-auftritt.md`, `auslieferung-ci.md` (abschnittsweise ergänzt)
+- `docs/SkillUsed/codebase-mapper.md` (dieser Eintrag)
+
+**Nachweis:**
+- `node .../edges.mjs <repo> --lang de` → 147 Quelldateien, 144 zugeordnet, 3 ohne Feature (die bekannten, unter „Bewusste Reste" begründet), 0 doppelt
+- `node .../edges.mjs <repo> --lang de --check` → „keine Befunde", nach drei Korrekturen am selben Satz: ein nackter Dateiname in Backticks wird vom Prüfer als Pfad relativ zum zuletzt genannten Verzeichnis aufgelöst
+- Quelltext nicht verändert; `git status` zeigt nur Dateien unter `docs/`
+
+**Status:** completed
+
+---
+
 ## 2026-11-08 — Run
 
 **Aufgabe:** Blueprint komplett neu erzeugen („aktualisiere den Blueprint", Nutzerwahl: komplett neu statt inkrementell).

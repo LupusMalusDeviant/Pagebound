@@ -18,7 +18,7 @@ Der Rahmen, in dem alle anderen Features laufen: die DI-Registrierung aller Dien
 | `src/Pagebound.Web/Layout/Icon.razor` | Eine Icon-Komponente für die ganze App (keine Icon-Bibliothek, keine externen Requests) |
 | `src/Pagebound.Web/wwwroot/index.html` | Hülle: Metadaten, Vor-Boot-Skript gegen FOUC (`index.html:40`–`72`), Boot-Bildschirm `#pb-boot` (`index.html:78`), Skript-Reihenfolge boot.js dann lazy-bridges.js (`index.html:108`, `111`) |
 | `src/Pagebound.Web/wwwroot/js/lazy-bridges.js` | Platzhalter für die drei großen Brücken, die erst beim ersten Zugriff geladen werden (`lazy-bridges.js:28`–`31`) |
-| `src/Pagebound.Web/wwwroot/css/app.src.css` | Tailwind-v4-Quelle samt Theme- und Akzent-Variablen |
+| `src/Pagebound.Web/wwwroot/css/app.src.css` | Tailwind-v4-Quelle samt Theme- und Akzent-Variablen; dazu die handgeschriebenen `@media`-Blöcke für das Telefon-Layout anderer Features (siehe unten) |
 
 ## Abhängigkeiten
 
@@ -60,6 +60,22 @@ Routen der App:
 3. `src/Pagebound.Web/wwwroot/js/boot.js` wird geladen (`index.html:108`), danach `src/Pagebound.Web/wwwroot/js/lazy-bridges.js` (`index.html:111`). Letzteres legt für `pageboundPdf`, `pageboundPdfManipulator` und `pageboundSign` je einen Proxy-Platzhalter an; der erste Aufruf lädt das echte Bündel nach und ruft dann die echte Funktion (`lazy-bridges.js:28`–`31`, Lade-Logik ab `:36`).
 4. `Program.cs` registriert die 24 Dienste und baut den Host; **vor** `RunAsync` werden Theme und Sprache aus localStorage in den C#-Zustand gespiegelt, damit der erste Render bereits stimmt (`Program.cs:64` ff.).
 5. `App.razor` übergibt an `MainLayout`; die Seite zur Route rendert innerhalb der Shell.
+
+## Telefon-Layout in `app.src.css`
+
+Seit der Entscheidung vom 2026-11-08 (`CLAUDE.md`, Abschnitt „Style-Regeln") liegt das Telefon-Verhalten der Arbeitsflächen in handgeschriebenen `@media`-Blöcken dieser Datei, nicht als Responsive-Präfixe im Markup. Die Feature-Dateien setzen nur Klassen und Zustandsklassen; was sie bewirken, steht hier.
+
+| Block in `app.src.css` | Für welches Feature |
+|------------------------|---------------------|
+| `@media (max-width: 640px)` mit `.pb-reader…` | [PDF-Reader & Rendering](./pdf-reader.md) |
+| `@media (max-width: 640px)` mit `.pb-editor-toolbar` und `.pb-swatch` | [Designer (WYSIWYG)](./designer.md) |
+| `@media (max-width: 860px)` mit `.pb-split…` | [Split-View & Vergleich](./split-view-vergleich.md) |
+| `@media (min-width: 641px)` mit `.pb-phone-only`, `@media (min-width: 1024px)` mit `.pb-mobile-only` | zwei Sichtbarkeits-Helfer, je eine Grenze |
+| `@media (hover: none) and (pointer: coarse)` mit `.pb-reader-keyhint` | Tastenkürzel nur auf Geräten mit Tasten |
+
+Das heißt für die Änderungsverfolgung: eine Änderung an dieser Datei kann Features berühren, zu denen **keine** Kante führt. Der Kantengraph sieht CSS-Klassen nicht. Wer `app.src.css` anfasst, prüft die Features in der Tabelle mit.
+
+`app.css` ist Build-Ausgabe und nicht eingecheckt (`.gitignore:66`); die CI erzeugt sie im Schritt „Build CSS + JS bridges" aus `app.src.css`.
 
 ## Offene Fragen / TODOs
 

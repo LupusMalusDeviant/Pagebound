@@ -2,14 +2,14 @@
 
 ## Zweck
 
-Das Herzstück: PDF.js rendert Seiten auf Canvas, dazu Zoom, Suche, Outline, Thumbnails, fortlaufende Ansicht und Vorlesen. `ReaderPane.razor` ist die eine Komponente, in der fast alle Werkzeuge zusammenlaufen (Annotationen, Formulare, OCR, Signatur, Schwärzung, Text bearbeiten) — deshalb ist sie mit 4397 Zeilen die größte Datei der Codebase und der Ort, an dem Änderungen am ehesten andere Features berühren.
+Das Herzstück: PDF.js rendert Seiten auf Canvas, dazu Zoom, Suche, Outline, Thumbnails, fortlaufende Ansicht und Vorlesen. `ReaderPane.razor` ist die eine Komponente, in der fast alle Werkzeuge zusammenlaufen (Annotationen, Formulare, OCR, Signatur, Schwärzung, Text bearbeiten) — deshalb ist sie mit 4415 Zeilen die größte Datei der Codebase und der Ort, an dem Änderungen am ehesten andere Features berühren.
 
 ## Dateien
 
 | Pfad | Rolle |
 |------|-------|
 | `src/Pagebound.Web/Features/Reader/ReaderPage.razor` | Seite `/reader` (`:1`); hält nur den Rahmen, die Logik liegt in `ReaderPane`, weil die Split-View zwei Panes nebeneinander braucht |
-| `src/Pagebound.Web/Features/Reader/ReaderPane.razor` | Die Reader-Logik: Rendering, Zoom, Suche, Outline, Thumbnails, Modi für alle Werkzeuge (4397 Zeilen) |
+| `src/Pagebound.Web/Features/Reader/ReaderPane.razor` | Die Reader-Logik: Rendering, Zoom, Suche, Outline, Thumbnails, Modi für alle Werkzeuge (4415 Zeilen) |
 | `src/Pagebound.Web/Features/Reader/OutlineNode.razor` | Ein Knoten des Inhaltsverzeichnisses, rekursiv |
 | `src/Pagebound.Web/Features/Reader/ToolbarMenu.razor` | Werkzeugleiste des Readers |
 | `src/Pagebound.Web/Features/Reader/FreeTextEditorPopover.razor` | Popover für Freitext; auch von „Text bearbeiten" wiederverwendet |
@@ -85,6 +85,23 @@ sequenceDiagram
 2. Beim Vorlesen gibt `ReaderPane` `_handle.Language` als vierten Parameter an `pageboundTts.speak` (`tts-bridge.ts:91`). Fehlt `/Lang` — der häufigere Fall —, bleibt es bei der Vorgabe der Plattform; die App-Sprache wird **nicht** als Ersatz genommen, weil eine deutsche Stimme auf einem englischen PDF schlechter ist als die Plattform-Vorgabe.
 3. Die Suche läuft über `extractText`/`pageText` (`:317`, `:335`) und trifft nur, was im Textlayer steht; für Scans liefert OCR den Textlayer nachträglich.
 4. `unload` gibt den PDF.js-Ladevorgang frei (`:194`) — wichtig, weil ein nicht freigegebener `loadingTask` in WASM Speicher hält.
+
+## Verhalten auf dem Telefon
+
+Das Layout des Readers auf schmalen Schirmen steuern Klassen, die `ReaderPane.razor` setzt, zusammen mit Regeln in `src/Pagebound.Web/wwwroot/css/app.src.css` (Feature [App-Shell & Start](./app-shell.md), keine Symbolkante dorthin):
+
+| Klasse | Wo gesetzt | Wirkung unter 640 px |
+|--------|-----------|----------------------|
+| `pb-reader` | Wurzel-`<section>`, `ReaderPane.razor:26` | Anker für alle folgenden Regeln |
+| `pb-doc-open` | dieselbe Zeile, wenn `_handle` gesetzt ist | Kopfzeile (`pb-reader-head`), Datei-Karte (`pb-reader-opencard`) und Suche (`pb-reader-searchcard`) weichen dem Dokument |
+| `pb-panels-open` | dieselbe Zeile, wenn `_phonePanelsOpen` gesetzt ist | holt Datei-Karte und Suche zurück |
+| `pb-phone-only` | Schalter in der Werkzeugleiste, `:193` | der Schalter ist nur unter 640 px sichtbar |
+| `pb-reader-keyhint` | Absatz mit den Tastenkürzeln | ausgeblendet unter `(hover: none) and (pointer: coarse)` |
+| `pb-reader-stage` | Fläche mit Gliederung und Seite | Gliederung über statt neben der Seite; Innenabstand der Figur reduziert |
+
+Grund: gemessen am 2026-11-08 begann die gerenderte Seite bei 375 Punkt Breite erst nach 630 Punkt Bedienelementen, also außerhalb des Sichtfelds. Der Zustand steckt in `_phonePanelsOpen` (`ReaderPane.razor`), die Darstellung ausschließlich in CSS. Die Entscheidung, Telefon-Layout in `app.src.css` statt als Responsive-Präfixe im Markup zu halten, steht in `CLAUDE.md` unter „Style-Regeln" und ausführlich in `docs/plans/2026-11-08-smartphone-layout.md`.
+
+Die Seitenbreite ergibt sich nicht aus dem Zoom: der Canvas trägt `width: min(100%, <Rasterbreite>px)`, was auf dem Telefon immer zu 100 Prozent auflöst. Was dort Breite kostet, ist Innenabstand.
 
 ## Offene Fragen / TODOs
 

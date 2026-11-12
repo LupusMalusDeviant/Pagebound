@@ -74,6 +74,14 @@ Das Dokumentmodell ist der eigentliche Vertrag: `EditorDocument` (`EditorDocumen
 6. Der Export baut das PDF mit pdf-lib und gibt es über `downloadBytes` aus (`…/DesignerPage.razor:264`).
 7. Serienbrief: `EditorSeries` ersetzt die Platzhalter je CSV-Zeile; daraus entsteht ein Dokument je Zeile bzw. ein zusammengefügtes PDF.
 
+## Verhalten auf dem Telefon
+
+Die Werkzeugleiste (`pb-editor-toolbar`) läuft unter 640 px als eine Zeile, die waagerecht scrollt, statt auf vier Zeilen umzubrechen; ihre Knöpfe haben dort mindestens 44 mal 44 Punkt. Die dreizehn festen Farbfelder (`pb-swatch`, `DesignerPage.razor:556` und `:565`) sind dort ausgeblendet, weil sie auf Fingergröße rund 570 Punkt Scrollweg nur für Farben gekostet hätten; die beiden `input[type="color"]` bleiben und können jede Farbe. Die Regeln stehen in `src/Pagebound.Web/wwwroot/css/app.src.css` (Feature [App-Shell & Start](./app-shell.md)).
+
+Die Werkzeug-Seitenleiste ist unter 1024 px eine einfahrbare Schublade: `aside.pb-editor-sidebar` trägt `max-lg:-translate-x-full` bzw. `max-lg:translate-x-0` je nach `_sidebarOpen` (`DesignerPage.razor:26`–`28`), geöffnet über den Knopf mit `pb-mobile-only` in der Werkzeugleiste (`:536`). Das ist die eine Stelle im Projekt, an der das Telefon-Verhalten doch im Markup steht; sie ist älter als die Entscheidung vom 2026-11-08.
+
+Bei `overflow-x: auto` auf einer Werkzeugleiste gilt: das Element wird zum Scroll-Container, sein `min-height: auto` fällt damit auf 0, und ein Spalten-Flex darüber kann es zusammendrücken. Die Leiste trägt deshalb `flex: none`. Ein zweiter Nebeneffekt, der hier nicht zuschlägt, aber im Reader: ein Scroll-Container schneidet `absolute` positionierte Klappmenüs ab. Diese Leiste hat keine, nur native `select`- und `input`-Elemente, deren Aufklapper der Browser außerhalb zeichnet.
+
 ## Offene Fragen / TODOs
 
 - `DesignerPage.razor` ist mit 2635 Zeilen die zweitgrößte Datei der Codebase und bündelt Oberfläche, Zustand und Exportlogik.

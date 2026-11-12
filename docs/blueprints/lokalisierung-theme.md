@@ -13,8 +13,8 @@ Zweisprachige Oberfläche (Deutsch und Englisch) über JSON-Textbündel mit eine
 | `src/Pagebound.Core/Domain/ThemeName.cs` | Die zugelassenen Themes |
 | `src/Pagebound.Infrastructure/Localization/LocalizationService.cs` | Lädt die Bündel, bildet Schlüssel auf Text ab, interpoliert; greift über die Interop-Brücke auf localStorage und Theme zu (`:48`) |
 | `src/Pagebound.Infrastructure/Theme/ThemeService.cs` | Setzt Theme-Attribut und CSS-Variablen, sichert die Auswahl |
-| `src/Pagebound.Web/wwwroot/resources/de.json` | Deutsches Textbündel |
-| `src/Pagebound.Web/wwwroot/resources/en.json` | Englisches Textbündel |
+| `src/Pagebound.Web/wwwroot/resources/de.json` | Deutsches Textbündel, 874 Schlüssel; trägt auch `app.version` |
+| `src/Pagebound.Web/wwwroot/resources/en.json` | Englisches Textbündel, 874 Schlüssel |
 
 Die Shell-Komponenten (`MainLayout`, `SettingsPanel`, `Icon`) gehören zu [App-Shell & Start](./app-shell.md); das Vor-Boot-Skript und `app.src.css` ebenfalls.
 
@@ -64,5 +64,6 @@ public interface IThemeService
 
 ## Offene Fragen / TODOs
 
-- Zwei Bündel müssen von Hand synchron gehalten werden. Eine Prüfung, dass `de.json` und `en.json` dieselben Schlüssel haben, gibt es nicht; ein fehlender Schlüssel fällt erst in der Oberfläche auf.
+- Zwei Bündel müssen von Hand synchron gehalten werden. Eine Prüfung, dass `de.json` und `en.json` dieselben Schlüssel haben, gibt es nicht; ein fehlender Schlüssel fällt erst in der Oberfläche auf. Gezählt am 2026-11-12 stehen beide bei 874 Schlüsseln, was die Gleichheit der Mengen nicht belegt, nur ihre Größe.
+- `app.version` steht als Schlüssel in beiden Bündeln und ist die einzige Stelle, an der die Versionsnummer im Code steht; kein csproj trägt ein `<Version>`. Ein Release muss den Schlüssel in **beiden** Bündeln anfassen.
 - Ein Sprachwechsel kann ein Neuladen auslösen (`reload`, `shortcuts-bridge.ts:679`). Welche Fälle das genau sind, ist aus dem Dienst nicht abzulesen — im Code zu verifizieren.

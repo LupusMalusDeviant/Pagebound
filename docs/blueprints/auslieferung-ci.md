@@ -13,7 +13,7 @@ Wie aus dem Quelltext ein auslieferbares Abbild wird und was dabei geprüft wird
 | `infra/docker/nginx.conf` | Sicherheits-Header (`:31`–`:34`), CSP mit `connect-src 'self'` (`:35`), `brotli_static` und `gzip_static` (`:85`–`:86`), Service-Worker ohne Cache (`:106`, `:110`), `/share-target` (`:123`), Framework-Dateien unveränderlich für ein Jahr (`:137`) |
 | `infra/docker/script-srcs.sh` | Listet die ausgelieferten Skriptquellen |
 | `infra/docker/script-srcs.test.sh` | Prüft diese Liste gegen die Erwartung |
-| `infra/docker/smoke.sh` | Prüft das **laufende** Abbild, nicht den Build |
+| `infra/docker/smoke.sh` | Prüft das **laufende** Abbild, nicht den Build; seit `5f5cae9` auch die ausgelieferten Digital Asset Links und das ausgelieferte Manifest gegen das Repo |
 | `infra/deploy/docker-compose.yml`, `Caddyfile.pagebound`, `deploy.sh`, `README.md` | Betrieb hinter Caddy; Auslieferung bleibt manuell |
 | `tools/privacy-check.mjs` | Der Datenschutz-Wächter (siehe unten) |
 | `src/Pagebound.Infrastructure/Telemetry/NoOpTelemetryService.cs` | Die einzige Umsetzung von `ITelemetryService`: tut nichts, und das ist der Punkt |
@@ -70,8 +70,16 @@ Der Wächter ruft selbst **keine** externen Dienste auf und endet mit Code 1, we
 6. **CI, Arbeit 2** (`ci.yml:148`): baut das Auslieferungsabbild (`:194`), startet den Container (`:197`), startet einen **umleitenden Gegenspieler** (`:206`) — damit die Prüfung bemerkt, wenn die App doch nach draußen telefoniert —, raucht das Abbild ab (`:228`) und fährt die Playwright-Prüfungen dagegen.
 7. **Veröffentlichen** (`publish-image.yml`): zwei Abbilder nach GHCR, eines für die PWA (`:21`), eines für den MCP-Server (`:59`). Push, Merge und Auslieferung bleiben Handarbeit.
 
+## Die Falle, auf die `smoke.sh` ausgelegt ist
+
+nginx beantwortet einen **fehlenden** Pfad wegen des SPA-Fallbacks (`try_files … /index.html`) mit HTTP 200 und `text/html`, nicht mit 404. Eine Prüfung, die nur den Status ansieht, hält jede fehlende Datei für vorhanden. Das ist die wiederkehrende Fehlerklasse dieses Projekts, und `smoke.sh` prüft deshalb durchweg Inhalt oder Content-Type:
+
+- `src/Pagebound.Web/wwwroot/.well-known/assetlinks.json`, ausgeliefert unter `/.well-known/assetlinks.json`: Content-Type muss JSON sein und der Inhalt mit `[` beginnen. Fehlt die Datei im Abbild, bekommt Googles Prüfer eine gültige Antwort, die kein JSON ist, und die Android-App zeigt stumm eine Browser-Leiste.
+- Das ausgelieferte `manifest.webmanifest` wird zeilenende-normalisiert gegen die Fassung im Repo verglichen. `manifest.test.mjs` prüft nur die Datei im Arbeitsbaum, PWABuilder und Bubblewrap bauen die Store-Pakete aber aus dem ausgelieferten Manifest. Weicht es ab, entstünde ein Paket ohne PDF-Dateihandler und ohne Teilen-Ziel, ohne dass Typ, Bilder oder Status etwas gemeldet hätten.
+- Die Datenschutzseiten prüft `smoke.sh` seit `37f718b` je auf ihre Überschrift und ihr `lang`-Attribut.
+
 ## Offene Fragen / TODOs
 
 - Das Abbild wird in der CI **zweimal** gebaut (einmal in `ci.yml:194` für E2E, einmal in `publish-image.yml`). Kostet Laufzeit, kein Korrektheitsproblem.
 - Der Start des Containers in der E2E-Arbeit wartet mit einem Zeitlimit auf die URL. Das ist der wahrscheinlichste Flattermacher dieser Werkzeugkette — wird der Lauf dort rot, ist zuerst die Wartezeit zu prüfen und nicht der Code.
-- `tests/Pagebound.Web.Tests` ist eine leere Hülle. Die CI prüft damit die rund 11000 Zeilen der Oberflächenschicht nur über die neun `tests-js`-Dateien und die E2E-Prüfungen, nicht über .NET-Komponententests.
+- `tests/Pagebound.Web.Tests` enthält genau eine Datei, `Reader/SignaturePadTests.cs` (11 Prüfungen, seit `c9a567c`). Die rund 11000 Zeilen der Oberflächenschicht prüft die CI darüber hinaus nur über die `tests-js`-Dateien und die E2E-Prüfungen. Für Reader, Designer und die PDF-Werkzeuge gibt es keine .NET-Komponententests. (`CLAUDE.md` nennt das Projekt an dieser Stelle noch eine „leere Hülle"; das stimmt seit `c9a567c` nicht mehr.)
