@@ -79,6 +79,55 @@ public sealed class PdfJsRenderer : IPdfRenderer
             result.PageHeightPt);
     }
 
+    public async Task<PageImage> RenderPageToUrlAsync(
+        PdfDocumentHandle handle,
+        int pageNumber,
+        RenderOptions options,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(handle);
+        ArgumentNullException.ThrowIfNull(options);
+        if (pageNumber < 1 || pageNumber > handle.PageCount)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(pageNumber),
+                pageNumber,
+                $"Seitenzahl muss zwischen 1 und {handle.PageCount} liegen.");
+        }
+
+        // Hier reist bewusst KEIN Raster: die Antwort trägt nur die URL und die
+        // Maße. Das ist der ganze Unterschied zu RenderPageAsync.
+        var result = await _js.InvokeAsync<PageImageDto>(
+            $"{JsModuleId}.renderPageToUrl",
+            cancellationToken,
+            handle.Id,
+            pageNumber,
+            options.Scale)
+            .ConfigureAwait(false);
+
+        return new PageImage(
+            result.PageNumber,
+            result.Url,
+            result.WidthPx,
+            result.HeightPx,
+            result.PageWidthPt,
+            result.PageHeightPt);
+    }
+
+    public async Task ReleasePageImageAsync(PageImage image)
+    {
+        ArgumentNullException.ThrowIfNull(image);
+        if (string.IsNullOrEmpty(image.Url)) return;
+        try
+        {
+            await _js.InvokeVoidAsync($"{JsModuleId}.releasePageImage", image.Url).ConfigureAwait(false);
+        }
+        catch (JSDisconnectedException)
+        {
+            // Die Seite ist weg; mit ihr der Blob. Nichts mehr freizugeben.
+        }
+    }
+
     public async Task<IReadOnlyList<TextItem>> ExtractTextAsync(
         PdfDocumentHandle handle,
         int pageNumber,
@@ -187,6 +236,14 @@ public sealed class PdfJsRenderer : IPdfRenderer
         int HeightPx,
         string RasterBase64,
         string RasterFormat,
+        double PageWidthPt,
+        double PageHeightPt);
+
+    private sealed record PageImageDto(
+        int PageNumber,
+        string Url,
+        int WidthPx,
+        int HeightPx,
         double PageWidthPt,
         double PageHeightPt);
 

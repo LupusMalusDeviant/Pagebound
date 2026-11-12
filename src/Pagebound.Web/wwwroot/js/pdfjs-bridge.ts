@@ -100,6 +100,179 @@ export async function loadPdf(
   return { id, pageCount: doc.numPages, title, language };
 }
 
+// ============================================================================
+// Seitenbilder für die ANZEIGE — Vertrag docs/contracts/seitenbilder-speicher.md
+// ----------------------------------------------------------------------------
+// renderPage (unten) reicht das Raster als base64 nach C#. Das ist für Aufrufer
+// richtig, die die Bytes wirklich brauchen (Schwärzen, Audit, Export) — für die
+// bloße Anzeige ist es ein teurer Umweg: der base64-String entsteht in JS,
+// reist als .NET-string (UTF-16, zwei Byte je Zeichen) durch den WASM-Heap,
+// wird dort zu Bytes dekodiert und gleich wieder zu base64 kodiert, um als
+// <img src> im DOM zu landen — also wieder in JS.
+//
+// renderPageToUrl bricht den Umweg ab: das Raster bleibt hier, C# bekommt nur
+// eine Blob-URL. Der Preis ist, dass eine Blob-URL eine RESSOURCE ist und kein
+// String: nicht widerrufen heißt geleckt. Dieselbe Leitplanke wie
+// loadingTask.destroy() und das Beenden der Tesseract-Worker.
+// ============================================================================
+
+export interface PageImageResult {
+  url: string;
+  pageNumber: number;
+  widthPx: number;
+  heightPx: number;
+  pageWidthPt: number;
+  pageHeightPt: number;
+}
+
+/** Offene Blob-URLs je Handle — damit ein vergessener Pfad die Sitzung nicht leckt. */
+const pageImageUrls = new Map<string, Set<string>>();
+
+/** Nur für Prüfungen: wie viele Blob-URLs sind gerade offen? */
+export function openPageImageCount(handleId?: string): number {
+  if (handleId !== undefined) return pageImageUrls.get(handleId)?.size ?? 0;
+  let total = 0;
+  for (const set of pageImageUrls.values()) total += set.size;
+  return total;
+}
+
+export async function renderPageToUrl(
+  handleId: string,
+  pageNumber: number,
+  scale: number
+): Promise<PageImageResult> {
+  const doc = requireDoc(handleId);
+  const page: PDFPageProxy = await doc.getPage(pageNumber);
+  const viewport = page.getViewport({ scale });
+  const baseViewport = page.getViewport({ scale: 1 });
+  const widthPx = Math.ceil(viewport.width);
+  const heightPx = Math.ceil(viewport.height);
+
+  const canvas = document.createElement("canvas");
+  canvas.width = widthPx;
+  canvas.height = heightPx;
+  const ctx = canvas.getContext("2d", { alpha: false });
+  if (!ctx) {
+    throw new Error("Pagebound: failed to get 2D rendering context.");
+  }
+
+  await page.render({ canvasContext: ctx, viewport, canvas }).promise;
+
+  const blob = await new Promise<Blob | null>((resolve) =>
+    canvas.toBlob(resolve, "image/png")
+  );
+  if (!blob) {
+    throw new Error("Pagebound: canvas.toBlob lieferte kein Bild.");
+  }
+  const url = URL.createObjectURL(blob);
+
+  let set = pageImageUrls.get(handleId);
+  if (!set) { set = new Set(); pageImageUrls.set(handleId, set); }
+  set.add(url);
+
+  // Die Leinwand selbst freigeben: ohne das bleibt der dekodierte Puffer
+  // hängen, bis der Sammler vorbeikommt — bei einem Fenster über viele Seiten
+  // ist das genau der Druck, den dieser Weg vermeiden soll.
+  canvas.width = 0;
+  canvas.height = 0;
+
+  return {
+    url,
+    pageNumber,
+    widthPx,
+    heightPx,
+    pageWidthPt: baseViewport.width,
+    pageHeightPt: baseViewport.height
+  };
+}
+
+/** Eine Blob-URL widerrufen und vergessen. Unbekannte URLs sind kein Fehler. */
+export function releasePageImage(url: string): void {
+  if (!url) return;
+  for (const set of pageImageUrls.values()) {
+    if (set.delete(url)) break;
+  }
+  try { URL.revokeObjectURL(url); } catch { /* schon weg */ }
+}
+
+/** Alle offenen URLs eines Handles widerrufen — Dateiwechsel, Entladen. */
+export function releaseAllPageImages(handleId: string): void {
+  const set = pageImageUrls.get(handleId);
+  if (!set) return;
+  for (const url of set) {
+    try { URL.revokeObjectURL(url); } catch { /* schon weg */ }
+  }
+  pageImageUrls.delete(handleId);
+}
+
+// ----------------------------------------------------------------------------
+// Welche Seiten sind im Blick?
+// ----------------------------------------------------------------------------
+// Welche Seite sichtbar ist, entscheidet der Browser — nicht eine Rechnung über
+// Scroll-Position und geschätzte Seitenhöhen. Ein IntersectionObserver meldet
+// die Nummern nach C#; daraus ergibt sich das Fenster (Vertrag
+// docs/contracts/seitenbilder-speicher.md, Teil B).
+//
+// Die Meldungen werden bis zum nächsten Frame gesammelt: beim Scrollen feuert
+// der Observer für jede Seite einzeln, und jeder Aufruf über die Interop-Grenze
+// kostet. Ein Frame später steht ohnehin die endgültige Liste.
+// ----------------------------------------------------------------------------
+
+interface PageWatch {
+  observer: IntersectionObserver;
+  visible: Set<number>;
+  scheduled: boolean;
+}
+
+const pageWatches = new Map<string, PageWatch>();
+
+export function observeVisiblePages(
+  key: string,
+  rootSelector: string,
+  dotNetRef: { invokeMethodAsync: (name: string, ...args: unknown[]) => Promise<unknown> },
+  method: string
+): boolean {
+  stopObservingPages(key);
+  const root = document.querySelector(rootSelector) as HTMLElement | null;
+  if (!root) return false;
+
+  const watch: PageWatch = { observer: null as unknown as IntersectionObserver, visible: new Set(), scheduled: false };
+
+  const flush = () => {
+    watch.scheduled = false;
+    const pages = Array.from(watch.visible).sort((a, b) => a - b);
+    // Fehler hier dürfen den Observer nicht abwürgen: die Komponente kann
+    // zwischen Frame und Aufruf weg sein (Dateiwechsel, Navigation).
+    void dotNetRef.invokeMethodAsync(method, pages).catch(() => stopObservingPages(key));
+  };
+
+  watch.observer = new IntersectionObserver((entries) => {
+    for (const e of entries) {
+      const raw = (e.target as HTMLElement).dataset.pbPage;
+      const n = raw ? Number(raw) : NaN;
+      if (!Number.isFinite(n)) continue;
+      if (e.isIntersecting) watch.visible.add(n); else watch.visible.delete(n);
+    }
+    if (!watch.scheduled) {
+      watch.scheduled = true;
+      requestAnimationFrame(flush);
+    }
+  }, { root, threshold: 0 });
+
+  for (const el of Array.from(root.querySelectorAll("[data-pb-page]"))) {
+    watch.observer.observe(el);
+  }
+  pageWatches.set(key, watch);
+  return true;
+}
+
+export function stopObservingPages(key: string): void {
+  const watch = pageWatches.get(key);
+  if (!watch) return;
+  watch.observer.disconnect();
+  pageWatches.delete(key);
+}
+
 export async function renderPage(
   handleId: string,
   pageNumber: number,
@@ -192,6 +365,10 @@ export async function getOutline(handleId: string): Promise<OutlineEntryDto[]> {
 }
 
 export async function unload(handleId: string): Promise<void> {
+  // Immer zuerst: die Blob-URLs haben kein Verfallsdatum und überleben das
+  // Dokument, wenn sie niemand widerruft — auch dann, wenn kein Dokument
+  // mehr unter diesem Handle liegt.
+  releaseAllPageImages(handleId);
   const doc = documents.get(handleId);
   if (!doc) return;
   documents.delete(handleId);

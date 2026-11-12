@@ -284,9 +284,13 @@
                          Active="@(_continuous || _nightMode || _outlineOpen || _thumbsOpen || _formPanelOpen)">
                 <button type="button" class="@($"pb-menuitem {(_continuous ? "is-on" : "")}")" title="@L.T("reader.view.continuousTitle")" @onclick="ToggleContinuousAsync">
                     @L.T("reader.view.continuous")
-                    @if (_continuous && _handle is not null && _continuousRenderedCount < _handle.PageCount)
+                    @* Früher stand hier „gerendert/gesamt". Mit einem Fenster
+                       (Vertrag seitenbilder-speicher.md) erreicht diese Zahl die
+                       Seitenzahl nie — sie sähe aus wie ein Hänger. Angezeigt
+                       wird jetzt nur, SOLANGE gerendert wird. *@
+                    @if (_continuous && _continuousRendering)
                     {
-                        <span class="ml-1 text-xs text-pb-fg-muted">@_continuousRenderedCount/@_handle.PageCount</span>
+                        <span class="ml-1 text-xs text-pb-fg-muted">@L.T("app.loadingShort")</span>
                     }
                 </button>
                 <button type="button" class="@($"pb-menuitem {(_nightMode ? "is-on" : "")}")" title="@L.T("reader.view.nightTitle")" @onclick="@(() => _nightMode = !_nightMode)">@L.T("reader.view.night")</button>
@@ -299,9 +303,12 @@
                 </button>
                 <button type="button" class="@($"pb-menuitem {(_thumbsOpen ? "is-on" : "")}")" title="@L.T("reader.thumbs.toggleTitle")" @onclick="ToggleThumbsAsync">
                     @L.T("reader.thumbs.toggle")
-                    @if (_thumbsOpen && _handle is not null && _thumbnailsProgress < _handle.PageCount)
+                    @* Wie bei der fortlaufenden Ansicht: das Fenster erreicht die
+                       Seitenzahl nie. Gezeigt wird nur das aktuelle Fenster, und
+                       nur solange es nicht vollständig ist. *@
+                    @if (_thumbsOpen && _handle is not null && _thumbnailsProgress < _thumbTo - _thumbFrom + 1)
                     {
-                        <span class="ml-1 text-xs text-pb-fg-muted">@L.T("reader.thumbs.loading", new Dictionary<string, object> { ["current"] = _thumbnailsProgress, ["total"] = _handle.PageCount })</span>
+                        <span class="ml-1 text-xs text-pb-fg-muted">@L.T("reader.thumbs.loading", new Dictionary<string, object> { ["current"] = _thumbnailsProgress, ["total"] = Math.Max(0, _thumbTo - _thumbFrom + 1) })</span>
                     }
                 </button>
                 @if (HasFormFields)
@@ -715,7 +722,7 @@
 
         @if (_thumbsOpen)
         {
-            <aside class="w-44 shrink-0 rounded-lg pb-glass p-2 max-h-[80vh] overflow-y-auto"
+            <aside id="pb-thumbs" class="w-44 shrink-0 rounded-lg pb-glass p-2 max-h-[80vh] overflow-y-auto"
                    aria-label="@L.T("reader.thumbs.heading")">
                 <div class="flex items-center justify-between mb-2 px-1">
                     <h3 class="text-sm font-medium">@L.T("reader.thumbs.heading")</h3>
@@ -734,7 +741,7 @@
                             var pageNum = i;
                             var thumb = _thumbnails.GetValueOrDefault(pageNum);
                             var isCurrent = pageNum == _currentPage;
-                            <li>
+                            <li data-pb-page="@pageNum">
                                 <button type="button"
                                         class="@($"w-full flex flex-col items-center gap-1 rounded border p-1 hover:border-pb-fg-muted {(isCurrent ? "border-pb-accent ring-2 ring-pb-accent/30" : "border-pb-border")}")"
                                         title="@L.T("reader.thumbs.pageAria", new Dictionary<string, object> { ["page"] = pageNum })"
@@ -742,7 +749,7 @@
                                         @onclick="@(() => GoToPageAsync(pageNum))">
                                     @if (thumb is not null)
                                     {
-                                        <img src="@thumb"
+                                        <img src="@thumb.Url"
                                              alt="@L.T("reader.thumbs.pageLabel", new Dictionary<string, object> { ["page"] = pageNum })"
                                              draggable="false"
                                              class="block w-full h-auto bg-pb-bg shadow-sm" />
@@ -764,26 +771,33 @@
         {
             @* Fortlaufende Leseansicht (FA Reader-Komfort): alle Seiten gestapelt,
                scrollbar. Read-only (Annotieren/Schwärzen im Einzelseiten-Modus). *@
-            <div class="flex-1 min-w-0 overflow-auto rounded-lg border border-pb-border bg-pb-bg p-4"
+            <div id="pb-continuous" class="flex-1 min-w-0 overflow-auto rounded-lg border border-pb-border bg-pb-bg p-4"
                  style="max-height: calc(100vh - 230px)">
                 <div class="mx-auto flex w-full max-w-3xl flex-col items-center gap-4">
                     @for (var p = 1; p <= _handle.PageCount; p++)
                     {
                         var pg = p;
-                        @if (_continuousPages.TryGetValue(pg, out var url))
-                        {
-                            <img src="@url" draggable="false"
-                                 alt="@L.T("reader.thumbs.pageLabel", new Dictionary<string, object> { ["page"] = pg })"
-                                 class="block w-full select-none shadow-sm"
-                                 style="@(_nightMode ? NightFilterStyle : null)" />
-                        }
-                        else
-                        {
-                            <div class="flex w-full items-center justify-center text-xs text-pb-fg-muted"
-                                 style="aspect-ratio: 1 / 1.414; background: var(--bg-sunken, #1118270d)">
-                                @L.T("reader.thumbs.pageLabel", new Dictionary<string, object> { ["page"] = pg })
-                            </div>
-                        }
+                        @* Der Platzhalter trägt die Höhe, nicht das Bild: wird eine
+                           Seite aus dem Fenster verdrängt, darf die Bildlaufposition
+                           nicht springen. Das Seitenverhältnis kommt von der Seite
+                           selbst, sobald sie einmal gerendert war — ein festes A4
+                           wäre auf jeder anderen Seitengröße ein Sprung. *@
+                        <div data-pb-page="@pg" class="w-full"
+                             style="@PageAspectStyle(pg); background: var(--bg-sunken, #1118270d)">
+                            @if (_continuousPages.TryGetValue(pg, out var img))
+                            {
+                                <img src="@img.Url" draggable="false"
+                                     alt="@L.T("reader.thumbs.pageLabel", new Dictionary<string, object> { ["page"] = pg })"
+                                     class="block h-full w-full select-none shadow-sm"
+                                     style="@(_nightMode ? NightFilterStyle : null)" />
+                            }
+                            else
+                            {
+                                <div class="flex h-full w-full items-center justify-center text-xs text-pb-fg-muted">
+                                    @L.T("reader.thumbs.pageLabel", new Dictionary<string, object> { ["page"] = pg })
+                                </div>
+                            }
+                        </div>
                     }
                 </div>
             </div>
@@ -1506,7 +1520,10 @@
     // bricht das Rendering ab, wenn der User die PDF wechselt oder die
     // Sidebar wieder schließt.
     private bool _thumbsOpen;
-    private Dictionary<int, string> _thumbnails = new();
+    // Auch die Vorschaubilder lagen früher als base64-Daten-URLs über ALLE
+    // Seiten im Speicher und wurden erst beim Dateiwechsel geleert. Gleiches
+    // Fenster, grösserer Puffer — der Streifen zeigt mehr auf einmal.
+    private Dictionary<int, PageImage> _thumbnails = new();
     private int _thumbnailsProgress;
     private CancellationTokenSource? _thumbnailsCts;
 
@@ -1767,9 +1784,29 @@
         _ttsPaused = false;
     }
     private bool _continuous;
+    // Fortlaufende Ansicht — Vertrag docs/contracts/seitenbilder-speicher.md.
+    // Früher lag hier ein unbegrenztes Dictionary voller base64-Daten-URLs, über
+    // ALLE Seiten, geleert erst beim Dateiwechsel. Jetzt: ein Fenster aus
+    // Blob-URLs, alles ausserhalb wird freigegeben.
     private bool _continuousRendering;
     private int _continuousRenderedCount;
-    private readonly Dictionary<int, string> _continuousPages = new();
+    private readonly Dictionary<int, PageImage> _continuousPages = new();
+
+    /// <summary>Puffer je Richtung in der fortlaufenden Ansicht (Vertrag: 2).</summary>
+    private const int ContinuousBuffer = 2;
+
+    /// <summary>Puffer je Richtung im Vorschaustreifen (Vertrag: 10).</summary>
+    private const int ThumbnailBuffer = 10;
+
+    /// <summary>Seitenverhältnis (Höhe/Breite) je Seite, sobald sie einmal gerendert war.</summary>
+    private readonly Dictionary<int, double> _pageAspect = new();
+
+    /// <summary>Letztes bekanntes Verhältnis — bessere Schätzung als ein festes A4.</summary>
+    private double _lastKnownAspect = 1.414;
+
+    private CancellationTokenSource? _continuousCts;
+    private int _continuousFrom = 1;
+    private int _continuousTo;
 
     // Zeichenwerkzeug-State (FA-013 Stift, FA-014 Formen).
     // Persistente Listener-Verwaltung liegt im JS (shortcuts-bridge), pro
@@ -1934,8 +1971,10 @@
         _pendingEdit = null;
         StopTts();
         _continuous = false;
-        _continuousPages.Clear();
-        _continuousRenderedCount = 0;
+        // Blob-URLs sind Ressourcen: ein blosses Clear() liesse sie offen.
+        await StopWatchingPagesAsync(ContinuousWatchKey);
+        await ReleaseAllContinuousAsync();
+        _pageAspect.Clear();
         _annotations = await Annotations.GetForDocumentAsync(_currentPdfId.Value, CancellationToken.None).ConfigureAwait(false);
 
         // FA-072/073: Wenn ein zentraler Sidecar-Workspace gesetzt ist, dort nach
@@ -2181,8 +2220,15 @@
         _pendingEdit = null;
         StopTts();
         _continuous = false;
+        // Hier wird NICHT über die Interop-Grenze freigegeben: diese Methode ist
+        // synchron und wird aus sechs Pfaden gerufen. Die Blob-URLs hängen am
+        // Handle, und die JS-Seite widerruft sie in unload(handleId) — das läuft
+        // beim Dokumentwechsel (LoadPdfBytesAsync) und beim Entsorgen. Was hier
+        // bleibt, ist das Aufräumen der verwalteten Seite.
+        _continuousCts?.Cancel();
         _continuousPages.Clear();
         _continuousRenderedCount = 0;
+        _pageAspect.Clear();
         _editingAnnotation = null;
         _editingContent = string.Empty;
         _pageTextItems = Array.Empty<TextItem>();
@@ -2207,7 +2253,7 @@
         // damit das nächste Dokument bei Bedarf frische Thumbnails bekommt.
         _thumbnailsCts?.Cancel();
         _thumbnailsCts = null;
-        _thumbnails = new Dictionary<int, string>();
+        _thumbnails.Clear();
         _thumbnailsProgress = 0;
         _thumbsOpen = false;
         // OCR-Status der Vorgänger-PDF nicht "vererben".
@@ -2410,6 +2456,10 @@
             _thumbsOpen = false;
             _thumbnailsCts?.Cancel();
             _thumbnailsCts = null;
+            // Zugeklappt heisst nicht ausgeblendet: die Bilder werden freigegeben,
+            // sonst bliebe der Streifen im Speicher, obwohl ihn niemand sieht.
+            await StopWatchingPagesAsync(ThumbnailWatchKey);
+            await ReleaseAllThumbnailsAsync();
             return;
         }
 
@@ -2420,32 +2470,72 @@
         _outlineOpen = false;
 
         if (_handle is null) return;
-        if (_thumbnails.Count >= _handle.PageCount) return;
 
-        _thumbnailsCts = new CancellationTokenSource();
-        await RenderThumbnailsAsync(_handle, _thumbnailsCts.Token).ConfigureAwait(false);
+        // Erstes Fenster um die aktuelle Seite, danach übernimmt der Beobachter.
+        await SetThumbnailWindowAsync(
+            Math.Max(1, _currentPage - ThumbnailBuffer),
+            Math.Min(_handle.PageCount, _currentPage + ThumbnailBuffer));
+
+        await InvokeAsync(StateHasChanged);
+        await WatchPagesAsync(ThumbnailWatchKey, "#pb-thumbs", nameof(OnVisibleThumbnailsChangedAsync));
     }
 
-    private async Task RenderThumbnailsAsync(PdfDocumentHandle handle, CancellationToken ct)
+    private const string ThumbnailWatchKey = "thumbs";
+
+    [JSInvokable]
+    public async Task OnVisibleThumbnailsChangedAsync(int[] pages)
     {
+        if (_handle is null || pages is null) return;
+        var (from, to) = PageWindow.Compute(pages, ThumbnailBuffer, _handle.PageCount);
+        if (to < from) return;
+        await SetThumbnailWindowAsync(from, to).ConfigureAwait(false);
+    }
+
+    private int _thumbFrom = 1;
+    private int _thumbTo;
+
+    private async Task SetThumbnailWindowAsync(int from, int to)
+    {
+        if (_handle is null) return;
+        _thumbFrom = from;
+        _thumbTo = to;
+
+        _thumbnailsCts?.Cancel();
+        _thumbnailsCts?.Dispose();
+        _thumbnailsCts = new CancellationTokenSource();
+        var ct = _thumbnailsCts.Token;
+
+        // Erst freigeben, dann nachladen.
+        foreach (var p in PageWindow.Outside(_thumbnails.Keys, from, to))
+        {
+            if (_thumbnails.Remove(p, out var old))
+            {
+                await Renderer.ReleasePageImageAsync(old).ConfigureAwait(false);
+            }
+        }
+        _thumbnailsProgress = _thumbnails.Count;
+        await InvokeAsync(StateHasChanged);
+
         try
         {
-            for (var i = 1; i <= handle.PageCount; i++)
+            for (var i = from; i <= to; i++)
             {
                 ct.ThrowIfCancellationRequested();
-                if (_thumbnails.ContainsKey(i))
+                if (i < _thumbFrom || i > _thumbTo) continue;
+                if (_thumbnails.ContainsKey(i)) continue;
+
+                var image = await Renderer
+                    .RenderPageToUrlAsync(_handle, i, new RenderOptions(Scale: 0.35), ct)
+                    .ConfigureAwait(false);
+
+                if (i < _thumbFrom || i > _thumbTo)
                 {
-                    _thumbnailsProgress = i;
+                    await Renderer.ReleasePageImageAsync(image).ConfigureAwait(false);
                     continue;
                 }
-                var rendered = await Renderer
-                    .RenderPageAsync(handle, i, new RenderOptions(Scale: 0.35), ct)
-                    .ConfigureAwait(false);
-                if (rendered.RasterBytes is not null && rendered.RasterFormat is not null)
-                {
-                    _thumbnails[i] = $"data:{rendered.RasterFormat};base64,{Convert.ToBase64String(rendered.RasterBytes)}";
-                }
-                _thumbnailsProgress = i;
+
+                _thumbnails[i] = image;
+                _thumbnailsProgress = _thumbnails.Count;
                 await InvokeAsync(StateHasChanged);
                 // Browser-Frame Zeit zum Atmen geben — sonst friert die UI ein,
                 // wenn jemand bei einer 200-Seiten-PDF die Sidebar öffnet.
@@ -2454,7 +2544,7 @@
         }
         catch (OperationCanceledException)
         {
-            // Erwartet bei Datei-Wechsel oder Sidebar-Close.
+            // Erwartet bei Datei-Wechsel, Sidebar-Close oder weitergescrollt.
         }
     }
 
@@ -2915,32 +3005,182 @@
     private async Task ToggleContinuousAsync()
     {
         _continuous = !_continuous;
-        if (_continuous && _handle is not null && _continuousRenderedCount < _handle.PageCount)
+
+        if (!_continuous)
         {
-            await RenderContinuousAsync();
+            await StopWatchingPagesAsync(ContinuousWatchKey);
+            await ReleaseAllContinuousAsync();
+            return;
+        }
+
+        if (_handle is null) return;
+
+        // Erstes Fenster, bevor der Observer das erste Mal meldet — sonst bliebe
+        // die Ansicht bis zur ersten Bildlaufbewegung leer.
+        await SetContinuousWindowAsync(1, Math.Min(_handle.PageCount, 1 + ContinuousBuffer));
+
+        // Die Platzhalter müssen im DOM stehen, bevor sie beobachtet werden können.
+        await InvokeAsync(StateHasChanged);
+        await WatchPagesAsync(ContinuousWatchKey, "#pb-continuous", nameof(OnVisiblePagesChangedAsync));
+    }
+
+    private const string ContinuousWatchKey = "continuous";
+
+    private async Task WatchPagesAsync(string key, string rootSelector, string method)
+    {
+        if (_dotNetRef is null) return;
+        try
+        {
+            await JS.InvokeAsync<bool>(
+                "pageboundPdf.observeVisiblePages", key, rootSelector, _dotNetRef, method);
+        }
+        catch (JSException)
+        {
+            // Ohne Observer bleibt das Fenster auf dem Startwert stehen: die
+            // ersten Seiten sind zu sehen, weitere nicht. Unschön, aber nicht
+            // kaputt — und besser als ein Abbruch der ganzen Ansicht.
         }
     }
 
-    private async Task RenderContinuousAsync()
+    private async Task StopWatchingPagesAsync(string key)
     {
-        if (_handle is null || _continuousRendering) return;
+        try
+        {
+            await JS.InvokeVoidAsync("pageboundPdf.stopObservingPages", key);
+        }
+        catch (JSException) { /* Seite schon weg */ }
+        catch (JSDisconnectedException) { /* Verbindung schon weg */ }
+    }
+
+    /// <summary>
+    /// Seitenverhältnis als CSS, damit der Platzhalter die richtige Höhe hält.
+    /// Bekannte Seiten nehmen ihr eigenes Maß, unbekannte das zuletzt gesehene —
+    /// in fast jedem Dokument sind alle Seiten gleich groß.
+    /// </summary>
+    private string PageAspectStyle(int page)
+    {
+        var aspect = _pageAspect.TryGetValue(page, out var a) && a > 0 ? a : _lastKnownAspect;
+        return string.Format(CultureInfo.InvariantCulture, "aspect-ratio: 1 / {0:0.####}", aspect);
+    }
+
+    /// <summary>
+    /// Meldung des IntersectionObservers: DIESE Seiten sind im Blick. Daraus
+    /// ergibt sich das Fenster — der Browser weiß es, eine Rechnung über
+    /// Scroll-Position und geschätzte Höhen wüsste es nur ungefähr.
+    /// </summary>
+    [JSInvokable]
+    public async Task OnVisiblePagesChangedAsync(int[] pages)
+    {
+        if (_handle is null || pages is null) return;
+        var (from, to) = PageWindow.Compute(pages, ContinuousBuffer, _handle.PageCount);
+        if (to < from) return;
+        await SetContinuousWindowAsync(from, to).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Das Fenster setzen: alles ausserhalb freigeben, alles darin rendern.
+    /// Die Freigabe kommt zuerst — sie ist der Punkt der Übung.
+    /// </summary>
+    private async Task SetContinuousWindowAsync(int from, int to)
+    {
+        if (_handle is null) return;
+        _continuousFrom = from;
+        _continuousTo = to;
+
+        // Scrollt der Nutzer weiter, während noch gerendert wird, ist der alte
+        // Auftrag wertlos: ein Bild fertigstellen, das niemand mehr sieht, kostet
+        // nur Zeit und Speicher.
+        _continuousCts?.Cancel();
+        _continuousCts?.Dispose();
+        _continuousCts = new CancellationTokenSource();
+        var token = _continuousCts.Token;
+
+        await EvictOutsideAsync(from, to).ConfigureAwait(false);
+        await InvokeAsync(StateHasChanged);
+
+        if (_continuousRendering) return;
         _continuousRendering = true;
         try
         {
-            for (var p = 1; p <= _handle.PageCount; p++)
+            // Von der Mitte nach aussen: die sichtbare Seite zuerst, der Puffer danach.
+            foreach (var p in PageWindow.RenderOrder(from, to))
             {
+                if (token.IsCancellationRequested) break;
+                // Das Fenster kann sich während des Renderns verschoben haben.
+                if (p < _continuousFrom || p > _continuousTo) continue;
                 if (_continuousPages.ContainsKey(p)) continue;
-                var rendered = await Renderer.RenderPageAsync(
-                    _handle, p, new RenderOptions(Scale: 1.5), CancellationToken.None).ConfigureAwait(false);
-                _continuousPages[p] = $"data:{rendered.RasterFormat};base64,{Convert.ToBase64String(rendered.RasterBytes)}";
+
+                var image = await Renderer.RenderPageToUrlAsync(
+                    _handle, p, new RenderOptions(Scale: 1.5), token).ConfigureAwait(false);
+
+                // Zwischen Auftrag und Antwort kann die Seite aus dem Fenster
+                // gelaufen sein — dann wird das Bild gar nicht erst aufgenommen,
+                // sondern sofort wieder freigegeben.
+                if (p < _continuousFrom || p > _continuousTo)
+                {
+                    await Renderer.ReleasePageImageAsync(image).ConfigureAwait(false);
+                    continue;
+                }
+
+                _continuousPages[p] = image;
+                RememberAspect(p, image);
                 _continuousRenderedCount = _continuousPages.Count;
                 await InvokeAsync(StateHasChanged);
             }
+        }
+        catch (OperationCanceledException)
+        {
+            // Erwartet: der Nutzer hat weitergescrollt.
         }
         finally
         {
             _continuousRendering = false;
         }
+    }
+
+    /// <summary>Alles ausserhalb des Fensters freigeben — URL widerrufen, Eintrag weg.</summary>
+    private async Task EvictOutsideAsync(int from, int to)
+    {
+        foreach (var p in PageWindow.Outside(_continuousPages.Keys, from, to))
+        {
+            if (!_continuousPages.Remove(p, out var image)) continue;
+            await Renderer.ReleasePageImageAsync(image).ConfigureAwait(false);
+        }
+        _continuousRenderedCount = _continuousPages.Count;
+    }
+
+    /// <summary>Alle Seitenbilder freigeben (Dateiwechsel, Ansicht aus, Entsorgen).</summary>
+    private async Task ReleaseAllContinuousAsync()
+    {
+        _continuousCts?.Cancel();
+        _continuousCts?.Dispose();
+        _continuousCts = null;
+
+        foreach (var image in _continuousPages.Values)
+        {
+            await Renderer.ReleasePageImageAsync(image).ConfigureAwait(false);
+        }
+        _continuousPages.Clear();
+        _continuousRenderedCount = 0;
+    }
+
+    /// <summary>Alle Vorschaubilder freigeben.</summary>
+    private async Task ReleaseAllThumbnailsAsync()
+    {
+        foreach (var image in _thumbnails.Values)
+        {
+            await Renderer.ReleasePageImageAsync(image).ConfigureAwait(false);
+        }
+        _thumbnails.Clear();
+        _thumbnailsProgress = 0;
+    }
+
+    private void RememberAspect(int page, PageImage image)
+    {
+        if (image.PageWidthPt <= 0 || image.PageHeightPt <= 0) return;
+        var aspect = image.PageHeightPt / image.PageWidthPt;
+        _pageAspect[page] = aspect;
+        _lastKnownAspect = aspect;
     }
 
     // Echte Redaktion anwenden: rasterisiert die betroffenen Seiten und brennt die
@@ -4495,6 +4735,14 @@
 
     public async ValueTask DisposeAsync()
     {
+        // Die Beobachter halten eine Referenz auf diese Komponente; sie gehen
+        // zuerst, bevor _dotNetRef entsorgt wird. Die Blob-URLs selbst widerruft
+        // die JS-Seite in unload(handleId), das weiter unten läuft.
+        _continuousCts?.Cancel();
+        _thumbnailsCts?.Cancel();
+        await StopWatchingPagesAsync(ContinuousWatchKey);
+        await StopWatchingPagesAsync(ThumbnailWatchKey);
+
         if (_shortcutsRegistered)
         {
             try

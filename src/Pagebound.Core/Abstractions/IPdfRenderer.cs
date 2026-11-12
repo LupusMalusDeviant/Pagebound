@@ -14,11 +14,35 @@ public interface IPdfRenderer
         LoadOptions options,
         CancellationToken cancellationToken);
 
+    /// <summary>
+    /// Rendert eine Seite und gibt die ROHBYTES zurück. Richtig für Aufrufer,
+    /// die die Bytes wirklich brauchen — Schwärzen, Audit, Export, Weitergabe an
+    /// pdf-lib. Für die bloße Anzeige ist
+    /// <see cref="RenderPageToUrlAsync"/> der günstigere Weg: hier reist das
+    /// Raster als base64 durch den WASM-Heap.
+    /// </summary>
     Task<RenderedPage> RenderPageAsync(
         PdfDocumentHandle handle,
         int pageNumber,
         RenderOptions options,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Rendert eine Seite als Bild-URL für die ANZEIGE. Das Raster bleibt in
+    /// JavaScript und landet NICHT im WASM-Heap.
+    ///
+    /// Die URL ist eine Ressource, kein String: wer sie vergisst, ohne
+    /// <see cref="ReleasePageImageAsync"/> zu rufen, leckt den Blob für die
+    /// Lebensdauer der Seite. Siehe <c>docs/contracts/seitenbilder-speicher.md</c>.
+    /// </summary>
+    Task<PageImage> RenderPageToUrlAsync(
+        PdfDocumentHandle handle,
+        int pageNumber,
+        RenderOptions options,
+        CancellationToken cancellationToken);
+
+    /// <summary>Gibt eine mit <see cref="RenderPageToUrlAsync"/> erzeugte Bild-URL frei.</summary>
+    Task ReleasePageImageAsync(PageImage image);
 
     Task<IReadOnlyList<TextItem>> ExtractTextAsync(
         PdfDocumentHandle handle,

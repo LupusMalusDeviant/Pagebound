@@ -31,6 +31,28 @@ public sealed record RenderedPage(
     double PageWidthPt,
     double PageHeightPt);
 
+/// <summary>
+/// Ein gerendertes Seitenbild, das als URL in der Anzeige hängt — die Rasterdaten
+/// liegen in der JS-Schicht, nicht im verwalteten Speicher.
+/// <para>
+/// <see cref="Url"/> ist eine Ressource, kein Wert: sie muss über
+/// <c>IPdfRenderer.ReleasePageImageAsync</c> freigegeben werden, sobald das Bild
+/// nicht mehr angezeigt wird. Siehe <c>docs/contracts/seitenbilder-speicher.md</c>.
+/// </para>
+/// <para>
+/// <see cref="PageWidthPt"/>/<see cref="PageHeightPt"/> sind die Maße der
+/// ungezoomten Seite — damit kann ein Platzhalter die richtige Höhe reservieren,
+/// bevor das Bild da ist oder nachdem es verdrängt wurde.
+/// </para>
+/// </summary>
+public sealed record PageImage(
+    int PageNumber,
+    string Url,
+    int WidthPx,
+    int HeightPx,
+    double PageWidthPt,
+    double PageHeightPt);
+
 public sealed record TextItem(
     string Text,
     double X,
