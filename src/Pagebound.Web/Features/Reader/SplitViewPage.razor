@@ -50,8 +50,12 @@
                     @L.T("split.narrow.paneB")
                 </button>
             </div>
+            @* `btn sm` statt freihändiger Tailwind-Klassen: ohne eine
+               Hausklasse greift keine der Telefon-Regeln in app.src.css, und
+               der Knopf blieb auf gemessenen 85×26 px stehen — zu klein für
+               einen Finger. *@
             <button type="button"
-                    class="rounded border border-pb-border px-2.5 py-1 text-xs text-pb-fg-muted hover:text-pb-fg disabled:opacity-40"
+                    class="btn sm rounded border border-pb-border px-2.5 text-xs text-pb-fg-muted hover:text-pb-fg disabled:opacity-40"
                     disabled="@_diffBusy" @onclick="CompareAsync" title="@L.T("split.compare.title")">
                 @(_diffBusy ? L.T("compare.running") : L.T("split.compare.button"))
             </button>

@@ -73,6 +73,12 @@ function applyZoom(): void {
     z = (parseInt(zoomMode, 10) || 100) / 100;
   }
   (wrap.style as unknown as { zoom: string }).zoom = z === 1 ? "" : z.toFixed(3);
+
+  // Derselbe Wert nochmal als Variable: `zoom` lässt sich in CSS nicht
+  // auslesen, und die Seiten-Kopfleiste muss gegenrechnen können. Ohne das
+  // schrumpfen ihre Knöpfe auf dem Telefon mit der Seite mit — bei
+  // Auto-Fit auf einem 375-px-Schirm auf gemessene 18 px Kantenlänge.
+  wrap.style.setProperty("--pb-zoom", z.toFixed(3));
 }
 
 /** Setzt den Zoom-Modus ("auto" | "50" … "150") und die aktuelle Seitenbreite in mm. */

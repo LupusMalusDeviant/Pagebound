@@ -551,6 +551,35 @@ input[type="file"]:hover::-webkit-file-upload-button {
   .pb-editor-toolbar .btn-fmt { min-width: 44px; min-height: 44px; }
   .pb-editor-toolbar select { min-height: 44px; }
 
+  /* --- Seiten-Kopfleiste gegen den Zoom rechnen --------------------------
+     Die Leiste über jedem Blatt (Seitenname, „nach oben", „löschen") liegt
+     INNERHALB von `.pb-zoom`. Auf dem Telefon passt der Auto-Fit eine
+     A4-Seite auf 375 px ein — gemessen zoom: 0.442 —, und die Knöpfe
+     schrumpfen mit: 18 px Kantenlänge statt der 40 px, die ihre
+     `min-width`-Regel vorgibt. `getComputedStyle` meldet dabei brav 40 px,
+     nur `getBoundingClientRect` zeigt die Wahrheit; wer mit der ersten
+     Methode misst, sieht den Fehler nicht.
+
+     `zoom` ist aus CSS nicht auslesbar, deshalb schreibt
+     `pageboundWysiwyg.applyZoom` denselben Wert zusätzlich als `--pb-zoom`
+     auf dieselbe Hülle. Geteilt wird hier, nicht multipliziert: 44 / 0.442
+     ergibt rund 100 px im gezoomten Raum, also wieder 44 px auf dem Schirm. */
+  .pb-page-head {
+    /* Über dem Blatt verankern statt es zu überlagern: die Leiste wird jetzt
+       höher, und `-top-6` würde sie in die Seite hineinwachsen lassen. */
+    top: auto;
+    bottom: 100%;
+    margin-bottom: calc(4px / var(--pb-zoom, 1));
+    font-size: calc(0.75rem / var(--pb-zoom, 1));
+    line-height: 1.2;
+  }
+  .pb-page-head .btn-fmt {
+    min-width: calc(44px / var(--pb-zoom, 1));
+    min-height: calc(44px / var(--pb-zoom, 1));
+  }
+  /* Der Abstand zwischen den Blättern muss die höhere Leiste tragen. */
+  .pb-zoom { gap: calc(56px / var(--pb-zoom, 1)); }
+
   /* Die dreizehn festen Farbfelder wären auf 44 px rund 570 px Scrollweg nur
      für Farben. Auf dem Telefon bleiben die beiden Farbwähler — sie können
      ohnehin jede Farbe, nicht nur die Voreinstellungen. */
@@ -832,7 +861,11 @@ body.pb-app-bg { background: var(--bg-base); }
   /* --- Touch-Targets ------------------------------------------------------- */
   .btn { min-height: 44px; }
   .btn.sm { min-height: 40px; }
-  .btn-side { min-height: 40px; }
+  /* 40 px Höhe ist die bewusste Hausgröße (eine Zeile mehr Liste pro Schirm).
+     Die BREITE war aber ungeregelt: die vier Seiten-Aktionen in der
+     Werkzeug-Schublade kamen mit `px-1` auf gemessene 29 px und waren damit
+     schmaler als eine Fingerkuppe. */
+  .btn-side { min-height: 40px; min-width: 44px; }
   .btn-fmt { min-width: 40px; min-height: 40px; }
   .theme-toggle button { min-height: 44px; }
   .nav-sub .nav-item { min-height: 44px; }
