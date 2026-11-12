@@ -73,7 +73,7 @@ public sealed class AnnotationServiceTests
         var svc = new AnnotationService(new InMemoryStorage());
         var ann = await svc.CreateAsync(NewAnn(), Ct);
 
-        await svc.DeleteAsync(ann.Id, Ct);
+        await svc.DeleteAsync(Pdf, ann.Id, Ct);
 
         (await svc.GetForDocumentAsync(Pdf, Ct)).ShouldBeEmpty();
     }
@@ -84,7 +84,40 @@ public sealed class AnnotationServiceTests
         var svc = new AnnotationService(new InMemoryStorage());
         await svc.CreateAsync(NewAnn(), Ct);
 
-        await Should.NotThrowAsync(() => svc.DeleteAsync(new AnnotationId("nope"), Ct));
+        await Should.NotThrowAsync(() => svc.DeleteAsync(Pdf, new AnnotationId("nope"), Ct));
+    }
+
+    // -------------------------------------------------------------------------
+    // Codex-Runde 3, Befund 1: seit ImportAsync die Id aus dem /NM-Feld der PDF
+    // übernimmt, sind Ids NICHT mehr dokumentübergreifend eindeutig. Dieser
+    // Test scheitert an der alten Fassung (Suche über alle geladenen Puffer) —
+    // genau der Fehler, den er finden soll.
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task Delete_SameIdInTwoDocuments_RemovesOnlyTheNamedOne()
+    {
+        var svc = new AnnotationService(new InMemoryStorage());
+        var a = new PdfId("pdf-a");
+        var b = new PdfId("pdf-b");
+
+        // Beide PDFs bringen eine Annotation namens „note1" mit — ein völlig
+        // gewöhnlicher /NM-Wert.
+        var kollision = new AnnotationId("note1");
+        static Annotation Mit(AnnotationId id, PdfId pdf) =>
+            new(id, pdf, AnnotationType.StickyNote, 1,
+                DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch,
+                new Dictionary<string, object?> { ["content"] = pdf.Value });
+
+        await svc.ImportAsync(Mit(kollision, a), Ct);
+        await svc.ImportAsync(Mit(kollision, b), Ct);
+
+        await svc.DeleteAsync(b, kollision, Ct);
+
+        (await svc.GetForDocumentAsync(b, Ct)).ShouldBeEmpty();
+        var uebrig = await svc.GetForDocumentAsync(a, Ct);
+        uebrig.Count.ShouldBe(1);
+        uebrig[0].Payload["content"].ShouldBe("pdf-a");
     }
 
     [Fact]

@@ -282,3 +282,27 @@ Die Datenschutzzusage: alles davon ist lokale Dateiarbeit, kein Netzaufruf,
 `privacy-check.mjs` bleibt unberührt. Der Krypto-Layer und die
 Interface-First-DI-Struktur ebenso — die neuen Methoden hängen an den
 bestehenden `IXxx`-Schnittstellen.
+
+## Nachtrag 4: Löschen braucht die `PdfId` (dritte Codex-Runde, 2026-11-13)
+
+**Änderung an der Schnittstelle:**
+`IAnnotationService.DeleteAsync(AnnotationId)` → `DeleteAsync(PdfId, AnnotationId)`.
+
+Dieser Vertrag hat die Identität umgedreht: die `AnnotationId` kommt seit
+`ImportAsync` **aus der Datei** (`/NM`), statt in `CreateAsync` vergeben zu
+werden. Das hat eine Eigenschaft gekippt, auf die sich das Löschen stillschweigend
+verliess.
+
+Vorher war jede Id ein `AnnotationId.NewId()` und damit dokumentübergreifend
+eindeutig; `DeleteAsync` durfte alle geladenen Puffer durchsuchen und den ersten
+Treffer nehmen. Eine mitgebrachte Id ist dagegen das, was der Erzeuger der PDF
+hineingeschrieben hat — `note1`, `Annotation 1`, `0`. Zwei offene Dokumente mit
+demselben Wert, und das Löschen im einen traf das andere, dauerhaft, inklusive
+Persistenz.
+
+**Festlegung: jede Löschung nennt das Dokument.** Die `/NM`-Werte bleiben
+unverändert erhalten, damit der Export sie zurückschreiben kann — eindeutig sind
+sie nur innerhalb ihres Dokuments, und genau so werden sie jetzt behandelt.
+
+Nachgewiesen in `AnnotationServiceTests.Delete_SameIdInTwoDocuments_RemovesOnlyTheNamedOne`,
+am alten Verhalten zuerst scheitern gelassen.

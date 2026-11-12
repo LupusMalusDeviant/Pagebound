@@ -577,8 +577,21 @@ input[type="file"]:hover::-webkit-file-upload-button {
     min-width: calc(44px / var(--pb-zoom, 1));
     min-height: calc(44px / var(--pb-zoom, 1));
   }
-  /* Der Abstand zwischen den Blättern muss die höhere Leiste tragen. */
-  .pb-zoom { gap: calc(56px / var(--pb-zoom, 1)); }
+  /* Der Abstand zwischen den Blättern muss die höhere Leiste tragen.
+
+     Der Selektor ist absichtlich zweiteilig. `print-document.css` steht in
+     `index.html` NACH `app.css` und setzt dort `.pb-zoom { gap: 40px }` —
+     gleiche Spezifität, späteres Blatt, also gewinnt es. Eine Medienabfrage
+     zählt für die Spezifität nicht mit. Die Regel hier war damit wirkungslos:
+     bei zoom 0.442 blieben rund 18 px zwischen zwei Blättern, während die
+     vergrösserte Kopfleiste 48 px braucht — sie lief in das Blatt darüber.
+     `.pb-zoom` liegt immer direkt in `.pb-doc-stage` (DesignerPage.razor),
+     also hebt der Elternteil die Spezifität, ohne das Telefon-Layout aus
+     `app.src.css` herauszunehmen.
+
+     Gemessen wird das in `MobilePageGapTests` — mit `getBoundingClientRect`
+     am echten Abstand, nicht mit `getComputedStyle` am Wunschwert. */
+  .pb-doc-stage .pb-zoom { gap: calc(56px / var(--pb-zoom, 1)); }
 
   /* Die dreizehn festen Farbfelder wären auf 44 px rund 570 px Scrollweg nur
      für Farben. Auf dem Telefon bleiben die beiden Farbwähler — sie können

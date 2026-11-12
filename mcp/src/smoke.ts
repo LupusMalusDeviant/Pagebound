@@ -82,12 +82,49 @@ async function makeDirtySample(): Promise<Uint8Array> {
   katalog.set(PDFName.of("OpenAction"), ctx.register(
     ctx.obj({ Type: PDFName.of("Action"), S: PDFName.of("JavaScript"), JS: PDFString.of("app.alert('offen');") })));
 
-  // /AA am Katalog: beim Schliessen noch ein Skript.
+  // /AA am Katalog: DREI Auslöser, jeder mit eigenem Skript. Die Zahl ist der
+  // Punkt — ein Bündel mit drei Skripten meldete früher `javascript: 1`.
+  // /WS trägt sein Skript als indirekten STROM statt als String: genau der
+  // Fall, in dem das blosse Abhängen den Quelltext in der Datei stehenliess.
   katalog.set(PDFName.of("AA"), ctx.register(ctx.obj({
     WC: ctx.register(ctx.obj({ S: PDFName.of("JavaScript"), JS: PDFString.of("app.alert('zu');") })),
+    WS: ctx.register(ctx.obj({ S: PDFName.of("JavaScript"), JS: ctx.register(ctx.stream("strom.geheim();")) })),
+    DS: ctx.register(ctx.obj({ S: PDFName.of("JavaScript"), JS: PDFString.of("app.alert('speichern');") })),
   })));
 
-  // Zwei Annotationen: eine mit /Launch, eine mit einem gewöhnlichen Link.
+  // Ein Formularfeld mit Kindern: sein /AA /K hängt NICHT an der Seite,
+  // sondern nur unter /AcroForm /Fields. Dort lief der Säuberer vorbei.
+  const widget = ctx.obj({
+    Type: PDFName.of("Annot"), Subtype: PDFName.of("Widget"),
+    Rect: ctx.obj([200, 400, 360, 420]), F: 4,
+  });
+  const widgetRef = ctx.register(widget);
+  const feld = ctx.obj({
+    FT: PDFName.of("Tx"), T: PDFString.of("kunde"),
+    Kids: ctx.obj([widgetRef]),
+    AA: ctx.register(ctx.obj({
+      K: ctx.register(ctx.obj({ S: PDFName.of("JavaScript"), JS: PDFString.of("feldskript.geheim();") })),
+    })),
+  });
+  const feldRef = ctx.register(feld);
+  widget.set(PDFName.of("Parent"), feldRef);
+  katalog.set(PDFName.of("AcroForm"), ctx.register(ctx.obj({ Fields: ctx.obj([feldRef]) })));
+
+  // Ein Lesezeichen, das beim Klick ein Programm startet. Auch kein Teil der
+  // Seiten, auch vorher nie besucht.
+  const lesezeichen = ctx.obj({
+    Title: PDFString.of("Kapitel"),
+    A: ctx.register(ctx.obj({ S: PDFName.of("Launch"), F: PDFString.of("C:/Windows/notepad.exe") })),
+  });
+  const lzRef = ctx.register(lesezeichen);
+  const outRef = ctx.register(ctx.obj({ Type: PDFName.of("Outlines"), First: lzRef, Last: lzRef, Count: 1 }));
+  lesezeichen.set(PDFName.of("Parent"), outRef);
+  katalog.set(PDFName.of("Outlines"), outRef);
+
+  // Drei Annotationen: eine mit /Launch, eine mit einem gewöhnlichen Link —
+  // und eine, die wie ein Link aussieht und das Skript im /Next nachschiebt.
+  // `externalLinks` steht per Vorgabe AUS, also blieb der Link stehen, und mit
+  // ihm sein Nachfolger.
   const launch = ctx.obj({
     Type: PDFName.of("Annot"), Subtype: PDFName.of("Link"), Rect: ctx.obj([10, 10, 60, 30]),
     A: ctx.register(ctx.obj({ S: PDFName.of("Launch"), F: PDFString.of("C:/Windows/System32/calc.exe") })),
@@ -96,11 +133,31 @@ async function makeDirtySample(): Promise<Uint8Array> {
     Type: PDFName.of("Annot"), Subtype: PDFName.of("Link"), Rect: ctx.obj([70, 10, 160, 30]),
     A: ctx.register(ctx.obj({ S: PDFName.of("URI"), URI: PDFString.of("https://example.invalid/") })),
   });
-  page.node.set(PDFName.of("Annots"), ctx.obj([ctx.register(launch), ctx.register(link)]));
+  const tarnung = ctx.obj({
+    Type: PDFName.of("Annot"), Subtype: PDFName.of("Link"), Rect: ctx.obj([170, 10, 260, 30]),
+    A: ctx.register(ctx.obj({
+      S: PDFName.of("URI"), URI: PDFString.of("https://harmlos.invalid/"),
+      Next: ctx.register(ctx.obj({ S: PDFName.of("JavaScript"), JS: PDFString.of("tarnung.geheim();") })),
+    })),
+  });
+  page.node.set(PDFName.of("Annots"),
+    ctx.obj([ctx.register(launch), ctx.register(link), ctx.register(tarnung), widgetRef]));
 
   doc.setTitle("Geheimer Titel");
   doc.setAuthor("Verräterischer Autor");
   doc.setKeywords(["intern", "nicht weitergeben"]);
+
+  // Ein eigenes /Info-Feld. Eine feste Feldliste liess genau so etwas stehen.
+  const info = ctx.lookup(ctx.trailerInfo.Info);
+  if (!(info instanceof PDFDict)) throw new Error("Probe ohne /Info");
+  info.set(PDFName.of("Customer"), PDFString.of("KUNDE_GEHEIM"));
+
+  // Der XMP-Strom — die zweite Hälfte der Metadaten, im Klartext-XML.
+  katalog.set(PDFName.of("Metadata"), ctx.register(ctx.stream(
+    '<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?><x:xmpmeta xmlns:x="adobe:ns:meta/">'
+    + '<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description>'
+    + "<dc:title>XMP_GEHEIM</dc:title></rdf:Description></rdf:RDF></x:xmpmeta><?xpacket end=\"w\"?>",
+    { Type: PDFName.of("Metadata"), Subtype: PDFName.of("XML") })));
 
   return doc.save({ useObjectStreams: true });
 }
@@ -506,6 +563,51 @@ async function main() {
     const detB = (await sanitize.sanitize(schmutzig)).bytes;
     check("sanitize: zweimal gesaeubert ergibt byte-gleich (mit 1,2 s Abstand)",
       Buffer.from(detA).equals(Buffer.from(detB)));
+
+    // SCHRITT 8 — die sechs Wege, auf denen die dritte Codex-Runde am
+    // Säuberer vorbeikam. Jeder erst am schmutzigen Eingang nachgewiesen,
+    // dann am gesäuberten vermisst: eine Nadel, die vorher nicht da ist,
+    // prüft nichts.
+    const nadeln: Array<[string, string]> = [
+      ["das Skript hinter einem /URI im /Next", "tarnung.geheim"],
+      ["das /AA /K eines Formularfeldes mit Kindern", "feldskript.geheim"],
+      ["die /Launch-Aktion eines Lesezeichens", "notepad.exe"],
+      ["der Skriptstrom (/JS als indirekter Strom)", "strom.geheim"],
+      ["das eigene /Info-Feld /Customer", "KUNDE_GEHEIM"],
+      ["der XMP-Strom am Katalog", "XMP_GEHEIM"],
+    ];
+    for (const [was, nadel] of nadeln) {
+      check(`sanitize: ${was} ist vorher da`, await imKlartext(schmutzig, nadel), nadel);
+      check(`sanitize: ${was} ist nachher fort`, !(await imKlartext(sauber.bytes, nadel)), nadel);
+    }
+
+    // Die Zahlen genau, nicht „mindestens": 2 im Namensbaum + 1 /OpenAction
+    // + 3 im /AA-Bündel + 1 hinter dem /URI + 1 am Formularfeld = 8. Ein
+    // „>=" würde das Doppelzählen des Widgets (Seite UND /AcroForm) nicht
+    // sehen, und genau das ist hier die Gefahr.
+    check("sanitize: jedes Skript einzeln gezaehlt, keins doppelt (genau 8)",
+      sauber.removed.javascript === 8, JSON.stringify(sauber.removed));
+    check("sanitize: beide /Launch-Aktionen gezaehlt (Annotation und Lesezeichen)",
+      sauber.removed.launchActions === 2, JSON.stringify(sauber.removed));
+
+    // Ein `/Next`, das im Kreis zeigt, ist laut Format erlaubt. Ohne
+    // Zyklusbremse endet die Kettenprüfung im Stapelüberlauf.
+    const zyklus = await (async () => {
+      const d = await PDFDocument.create();
+      d.addPage([200, 200]);
+      const c = d.context;
+      const a1 = c.obj({ S: PDFName.of("GoTo") });
+      const r1 = c.register(a1);
+      const a2 = c.obj({ S: PDFName.of("GoTo"), Next: r1 });
+      a1.set(PDFName.of("Next"), c.register(a2));
+      d.catalog.set(PDFName.of("OpenAction"), r1);
+      return d.save({ useObjectStreams: false });
+    })();
+    let zyklusOk = false;
+    let zyklusFehler = "";
+    try { await sanitize.sanitize(zyklus); zyklusOk = true; }
+    catch (e) { zyklusFehler = e instanceof Error ? e.message : String(e); }
+    check("sanitize: ein /Next-Zyklus laeuft nicht in den Stapelueberlauf", zyklusOk, zyklusFehler);
   }
 
   // forms

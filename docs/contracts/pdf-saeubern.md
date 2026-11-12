@@ -34,6 +34,43 @@ hat „Sanitize PDF"; dem Datenschutz-Produkt fehlt es.
 >    was Schritt 1 der Gegenprobe jedes Mal zeigt. Für JavaScript bleibt
 >    PDF.js der Zeuge; dort findet es die Skripte zuverlässig.
 
+> **Nachtrag 2 (nach der dritten Codex-Runde, 2026-11-13).** Fünf der acht
+> Befunde trafen diesen Vertrag. Alle fünf waren Fälle, in denen der Code
+> weniger tat, als hier steht — nicht Fälle, in denen der Vertrag falsch war.
+> Festgehalten, weil die Zusage jetzt weiter reicht als die erste Umsetzung:
+>
+> 1. **Die `/Next`-Kette wird immer geprüft, nicht nur bis zum ersten Treffer.**
+>    Eine Aktion, die aus eigenem Recht bleiben darf, kann einen Nachfolger
+>    haben, der es nicht darf. `externalLinks` steht per Vorgabe AUS — ein
+>    `/URI` mit JavaScript im `/Next` ging deshalb **im Normalbetrieb** durch,
+>    und jeder Posten meldete dabei 0. Ein `/Next`, das im Kreis zeigt, ist
+>    erlaubt und endete vorher im Stapelüberlauf; die Kette hat jetzt ein
+>    Gedächtnis.
+> 2. **Formularfelder und Lesezeichen gehören zum Umfang.** Die Tabelle nennt
+>    „Aktionen an Formularfeldern" seit dem Entwurf, besucht wurden aber nur
+>    Katalog, Seiten und Seiten-Annotationen. Ein Feld mit Kindern steht nur
+>    unter `/AcroForm /Fields`, nicht in `/Annots` — sein `/AA /K` blieb aktiv.
+>    Lesezeichen (`/Outlines`) standen überhaupt nicht im Vertrag; ein
+>    Lesezeichen mit `/Launch` startet beim Klick ein Programm. **Festlegung:**
+>    beide Bäume werden begangen. An einem Lesezeichen fällt nur, was aus
+>    eigenem Recht fällt — ein `/GoTo` ist das, wofür Lesezeichen da sind.
+> 3. **Nachtrag 1, Punkt 1 reicht tiefer, als er beschrieben war.** Gelöscht
+>    wurde das Aktionsobjekt und der Strom unter `/EF`. Ein `/JS` als
+>    indirekter **Strom**, die Objekte einer `/Next`-Kette und der XMP-Strom am
+>    Katalog blieben als Klartext stehen. Gelöscht wird jetzt entlang der
+>    Schlüssel `/JS`, `/Next`, `/F`, `/UF`, `/D`, `/Win` und `/EF`.
+> 4. **`/Info` heisst alle Schlüssel, nicht eine Liste.** Die Umsetzung hatte
+>    acht feste Feldnamen. `/Customer`, `/Matter`, `/SAP_DocID` sind erlaubte
+>    eigene Felder — sie blieben stehen und wurden mit 0 gemeldet. Gelaufen
+>    wird jetzt über die tatsächlichen Schlüssel.
+> 5. **Gezählt wird je Aktion, nicht je Träger.** Ein `/AA`-Bündel mit drei
+>    Skripten meldete `javascript: 1`. Eine Zahl, die nicht zählt, verfehlt
+>    den erklärten Zweck des Berichts. Damit fällt auch die frühere
+>    Festlegung „entfernt wird das ganze Bündel, sobald einer davon fällt":
+>    **jeder Auslöser wird einzeln geprüft, einzeln entfernt und einzeln
+>    gezählt.** Harmlose Auslöser an Katalog und Seite bleiben stehen. Ein
+>    Widget, das in `/Annots` UND in `/AcroForm /Fields` steht, zählt einmal.
+
 ## Das Problem
 
 Eine PDF kann weit mehr mitbringen als Seiten: JavaScript, das beim Öffnen
@@ -46,11 +83,11 @@ Dokumente. Wer eine PDF weitergibt, gibt das alles mit — und sieht es nicht.
 
 | Posten | Vorgabe | Was dahinter steckt |
 |---|---|---|
-| `javascript` | **an** | `/Names /JavaScript` (Namensbaum), `/OpenAction` mit `/S /JavaScript`, `/AA` am Katalog und an Seiten |
+| `javascript` | **an** | `/Names /JavaScript` (Namensbaum), `/OpenAction` mit `/S /JavaScript`, `/AA` am Katalog, an Seiten, an Annotationen und an Formularfeldern |
 | `embeddedFiles` | **an** | `/Names /EmbeddedFiles`, `/FileAttachment`-Annotationen, `/EF` an Dateianlagen |
-| `metadata` | **an** | alle `/Info`-Felder ausser `/Producer`, dazu der XMP-Strom `/Metadata` am Katalog |
-| `annotationActions` | **an** | `/A` und `/AA` an Annotationen und Formularfeldern (nicht die Annotation selbst) |
-| `launchActions` | **an** | `/Launch`, `/GoToR`, `/SubmitForm`, `/ImportData` — alles, was aus der Datei herausgreift |
+| `metadata` | **an** | **alle** `/Info`-Schlüssel ausser `/Producer` (auch eigene wie `/Customer`), dazu der XMP-Strom `/Metadata` am Katalog |
+| `annotationActions` | **an** | `/A` und `/AA` an Annotationen und Formularfeldern, ausser `/GoTo` und `/URI` (nicht die Annotation selbst) |
+| `launchActions` | **an** | `/Launch`, `/GoToR`, `/SubmitForm`, `/ImportData` — alles, was aus der Datei herausgreift, auch an Lesezeichen |
 | `externalLinks` | **aus** | `/URI`-Aktionen. Bewusst standardmässig AUS: ein Link ist meist gewollter Inhalt, kein Angriff |
 
 **Was ausdrücklich bleibt:** der Seiteninhalt, die Annotationen selbst (nur

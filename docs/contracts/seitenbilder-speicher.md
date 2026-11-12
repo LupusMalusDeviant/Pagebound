@@ -200,3 +200,25 @@ Die Datenschutzzusage: Blob-URLs sind lokal, kein Netzaufruf, `connect-src
 'self'` bleibt gültig und `privacy-check.mjs` unberührt. Die
 Interface-First-DI-Struktur bleibt: die neuen Methoden hängen an `IPdfRenderer`,
 die Umsetzung bleibt in `PdfJsRenderer`.
+
+## Nachtrag: der Zähler ist das einzige Abbruchsignal (dritte Codex-Runde, 2026-11-13)
+
+Dieser Vertrag hat zwei Dinge zugleich festgelegt, und erst zusammen ergeben sie
+eine Lücke:
+
+1. Die Renderschleifen horchen **nicht** mehr auf ein `CancellationToken`. Ein
+   abgebrochenes Interop-Warten hätte das JS-Rendern ohnehin nicht gestoppt und
+   nur eine Blob-URL ohne Eigentümer hinterlassen.
+2. Gültig ist, was im **Fenster** liegt; der Generationszähler sagt, ob ein
+   fertiges Bild noch jemandem gehört.
+
+`ResetAnnotationState` — der Pfad, über den sechs Stellen den Dokumentwechsel
+anzeigen — drehte daraufhin weiterhin nur das alte Signal: es brach das Token ab
+und leerte die Sammlung. Den Zähler liess es stehen und das Fenster, wie es war.
+Eine laufende Schleife legte ihre Bilder deshalb in genau das Verzeichnis zurück,
+das gerade geleert worden war: Bilder des **alten** Dokuments, in einer Ansicht,
+die zu ist — und niemand gab sie frei.
+
+**Festlegung: jeder Pfad, der das Dokument wechselt oder eine Ansicht schliesst,
+dreht beide Zähler weiter UND stellt beide Fenster auf leer.** Das Abbrechen des
+Tokens bleibt als Höflichkeit stehen, trägt aber nichts mehr.

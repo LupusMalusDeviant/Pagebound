@@ -106,24 +106,22 @@ public sealed class AnnotationService : IAnnotationService
         }
     }
 
-    public async Task DeleteAsync(AnnotationId id, CancellationToken cancellationToken)
+    public async Task DeleteAsync(PdfId pdfId, AnnotationId id, CancellationToken cancellationToken)
     {
         await _lock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            // Wir wissen nicht, zu welcher PdfId die Annotation gehört. Suche in
-            // jedem geladenen Cache und persistiere den betroffenen Bucket.
-            foreach (var (pdfId, list) in _cache)
-            {
-                var idx = list.FindIndex(a => a.Id.Value == id.Value);
-                if (idx < 0) continue;
-                list.RemoveAt(idx);
-                await PersistAsync(pdfId, cancellationToken).ConfigureAwait(false);
-                return;
-            }
-            // Annotation gehört zu einer noch nicht geladenen PDF — selten,
-            // aber möglich (UI hat den Pin aus einem vorherigen Mount im DOM).
-            // Wir lassen den Aufruf still verpuffen.
+            // Nur im Puffer DIESES Dokuments suchen. Die frühere Suche über
+            // alle geladenen Puffer war harmlos, solange jede Id aus
+            // AnnotationId.NewId() kam. Seit ImportAsync die Id aus dem
+            // /NM-Feld der PDF übernimmt, ist sie das nicht mehr: zwei
+            // Dokumente mit `note1` darin, und das Löschen im einen traf das
+            // andere.
+            if (!_cache.TryGetValue(pdfId, out var list)) return;
+            var idx = list.FindIndex(a => a.Id.Value == id.Value);
+            if (idx < 0) return;
+            list.RemoveAt(idx);
+            await PersistAsync(pdfId, cancellationToken).ConfigureAwait(false);
         }
         finally
         {

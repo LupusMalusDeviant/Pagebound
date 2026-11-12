@@ -33,7 +33,19 @@ public interface IAnnotationService
 
     Task<Annotation> UpdateAsync(Annotation annotation, CancellationToken cancellationToken);
 
-    Task DeleteAsync(AnnotationId id, CancellationToken cancellationToken);
+    /// <summary>
+    /// Löscht eine Annotation aus GENAU dem Dokument, zu dem sie gehört.
+    /// <para>
+    /// Die <see cref="PdfId"/> ist Pflicht, seit <see cref="ImportAsync"/> die
+    /// Id aus dem <c>/NM</c>-Feld der PDF übernimmt. Vorher vergab nur
+    /// <see cref="CreateAsync"/> Ids, die waren eindeutig, und ein Löschen über
+    /// die Id allein konnte nur den richtigen Eintrag treffen. Eine
+    /// mitgebrachte Id ist dagegen das, was der Erzeuger der PDF hineinschrieb
+    /// — <c>note1</c>, <c>Annotation 1</c>, <c>0</c>. Zwei offene Dokumente mit
+    /// demselben Wert, und eine Suche über alle Puffer löschte im falschen.
+    /// </para>
+    /// </summary>
+    Task DeleteAsync(PdfId pdfId, AnnotationId id, CancellationToken cancellationToken);
 
     Task<IReadOnlyList<Annotation>> GetForDocumentAsync(PdfId pdfId, CancellationToken cancellationToken);
 

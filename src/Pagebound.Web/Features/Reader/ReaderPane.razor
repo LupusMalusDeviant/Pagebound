@@ -2280,6 +2280,21 @@
         // Handle, und die JS-Seite widerruft sie in unload(handleId) — das läuft
         // beim Dokumentwechsel (LoadPdfBytesAsync) und beim Entsorgen. Was hier
         // bleibt, ist das Aufräumen der verwalteten Seite.
+        // Beide Zähler weiterdrehen UND beide Fenster auf „leer" stellen. Die
+        // Renderschleifen horchen seit dem Fenster-Umbau NICHT mehr auf das
+        // CancellationToken — ein abgebrochenes Interop-Warten hätte das
+        // JS-Rendern ohnehin nicht gestoppt und nur eine Blob-URL ohne
+        // Eigentümer hinterlassen. Der Zähler ist jetzt das einzige Signal.
+        // Ohne ihn legte eine noch laufende Schleife ihre Bilder in das gerade
+        // geleerte Verzeichnis zurück: Bilder des ALTEN Dokuments, in einer
+        // Ansicht, die zu ist.
+        _continuousGeneration++;
+        _continuousFrom = 1;
+        _continuousTo = 0;
+        _thumbGeneration++;
+        _thumbFrom = 1;
+        _thumbTo = 0;
+
         _continuousCts?.Cancel();
         _continuousPages.Clear();
         _continuousRenderedCount = 0;
@@ -3478,7 +3493,7 @@
     {
         if (_editingDrawing is null) return;
         var id = _editingDrawing.Id;
-        await Annotations.DeleteAsync(id, CancellationToken.None);
+        await Annotations.DeleteAsync(_editingDrawing.PdfId, id, CancellationToken.None);
         RemoveAnnotation(id);
         _editingDrawing = null;
     }
@@ -3708,7 +3723,7 @@
     {
         if (_editingAnnotation is null) return;
         var idToRemove = _editingAnnotation.Id;
-        await Annotations.DeleteAsync(idToRemove, CancellationToken.None);
+        await Annotations.DeleteAsync(_editingAnnotation.PdfId, idToRemove, CancellationToken.None);
         RemoveAnnotation(idToRemove);
         _editingAnnotation = null;
         _editingContent = string.Empty;
@@ -3846,7 +3861,7 @@
             return;
         }
         var idToRemove = _editingFreeText.Id;
-        await Annotations.DeleteAsync(idToRemove, CancellationToken.None);
+        await Annotations.DeleteAsync(_editingFreeText.PdfId, idToRemove, CancellationToken.None);
         RemoveAnnotation(idToRemove);
         _editingFreeText = null;
         _editingFreeTextContent = string.Empty;
@@ -4077,7 +4092,7 @@
 
     private async Task DeleteSignatureAsync(Annotation signature)
     {
-        await Annotations.DeleteAsync(signature.Id, CancellationToken.None);
+        await Annotations.DeleteAsync(signature.PdfId, signature.Id, CancellationToken.None);
         RemoveAnnotation(signature.Id);
         _signatureStatuses.Remove(signature.Id.Value);
         await RecomputeSignatureStatusesAsync();
@@ -4808,7 +4823,7 @@
     {
         if (_editingHighlight is null) return;
         var id = _editingHighlight.Id;
-        await Annotations.DeleteAsync(id, CancellationToken.None);
+        await Annotations.DeleteAsync(_editingHighlight.PdfId, id, CancellationToken.None);
         RemoveAnnotation(id);
         _editingHighlight = null;
         await RecomputeSignatureStatusesAsync();

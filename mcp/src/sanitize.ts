@@ -7,11 +7,14 @@
 // eingebettete Dateien, Aktionen an Formularfeldern, Verweise auf fremde
 // Dokumente. Wer sie weitergibt, gibt das alles mit — und sieht es nicht.
 //
-// Zwei Festlegungen, die hier sichtbar werden:
+// Drei Festlegungen, die hier sichtbar werden:
 //   * Je Posten eine ZAHL zurück, kein „fertig". Wer zwölf Anhänge vermutet
-//     und drei entfernt bekommt, muss das sehen.
+//     und drei entfernt bekommt, muss das sehen. Gezählt wird je ENTFERNTER
+//     AKTION, nicht je Träger (Nachtrag 2 im Vertrag).
 //   * Der Seiteninhalt bleibt. Säubern ist kein Flachklopfen: Annotationen,
 //     Formularfelder und Lesezeichen überleben, nur ihre Aktionen gehen.
+//   * Entfernt heisst gelöscht, nicht abgehängt. Ein abgehängter Datenstrom
+//     steht weiter lesbar in der Datei (Nachtrag 1 im Vertrag).
 //
 // Reproduzierbarkeit (MCP-Zusage seit 2.0.0): keine Systemuhr, keine
 // Zufalls-Ids, `updateMetadata: false` beim Laden.
@@ -52,53 +55,130 @@ export interface SanitizeResult {
 /** Aktionstypen, die aus der Datei herausgreifen. */
 const HERAUSGREIFEND = ["Launch", "GoToR", "SubmitForm", "ImportData"];
 
-/** `/Info`-Felder, die beim Säubern fallen. `/Producer` bleibt (siehe Vertrag). */
-const INFO_FELDER = ["Title", "Author", "Subject", "Keywords", "Creator", "CreationDate", "ModDate", "Trapped"];
+/**
+ * Aktionstypen, die an einer Annotation oder einem Feld stehen bleiben, auch
+ * wenn `annotationActions` an ist: ein Sprung im eigenen Dokument und ein Link
+ * sind gewollter Inhalt, kein Angriff.
+ */
+const BLEIBT_AM_FELD = ["GoTo", "URI"];
+
+/**
+ * Schlüssel, unter denen eine Aktion oder eine Dateianlage ihre Nutzlast oder
+ * ihren Nachfolger hält. `loescheTief` folgt genau diesen — das ist die Liste,
+ * an der entscheidet, ob am Ende noch Klartext in der Datei steht.
+ *
+ *   /JS   Quelltext des Skripts (Strom ODER String, oft indirekt)
+ *   /Next nachgeschaltete Aktion(en) — die eigentliche Falle (Befund 2)
+ *   /F    Dateiangabe einer /Launch-Aktion bzw. der Strom in einem /EF
+ *   /UF   dasselbe in Unicode
+ *   /D    Ziel einer /GoToR-Aktion
+ *   /Win  Windows-Teil einer /Launch-Aktion (enthält den Programmpfad)
+ *   /EF   die eingebetteten Ströme einer Dateianlage
+ */
+const NUTZLAST = ["JS", "Next", "F", "UF", "D", "Win", "EF"];
+
+/** `/Info`-Feld, das als einziges stehen bleibt (siehe Vertrag). */
+const INFO_BLEIBT = "/Producer";
+
+type Grund = "javascript" | "launchActions" | "externalLinks";
 
 function dictOrNull(value: unknown): PDFDict | null {
   return value instanceof PDFDict ? value : null;
 }
 
-/** Den `/Type /Action`-Typ einer Aktion lesen, falls vorhanden. */
+/** Den `/S`-Typ einer Aktion lesen, falls vorhanden. */
 function aktionsTyp(action: PDFDict): string | null {
   const s = action.lookup(PDFName.of("S"));
   return s instanceof PDFName ? s.asString().replace(/^\//, "") : null;
 }
 
-/**
- * Entscheidet, ob eine Aktion fällt. Folgt `/Next` NICHT selbst — die Kette
- * wird von der Aufrufstelle her mitgeprüft, weil sonst eine Aktion stehen
- * bliebe, deren Nachfolger das Verbotene tut.
- */
-function faelltWeg(action: PDFDict, opt: Required<SanitizeOptions>): "javascript" | "launchActions" | "externalLinks" | null {
+/** Der Grund, aus dem eine Aktion aus eigenem Recht fällt — ohne die Kette. */
+function eigenerGrund(action: PDFDict, opt: Required<SanitizeOptions>): Grund | null {
   const typ = aktionsTyp(action);
   if (typ === "JavaScript") return opt.javascript ? "javascript" : null;
   if (typ && HERAUSGREIFEND.includes(typ)) return opt.launchActions ? "launchActions" : null;
   if (typ === "URI") return opt.externalLinks ? "externalLinks" : null;
+  return null;
+}
 
-  // Eine Aktion ohne eigenen Grund fällt trotzdem, wenn ihr Nachfolger fällt —
-  // sonst bliebe ein Vorspann stehen, der das Verbotene gleich nachlädt.
+/**
+ * Entscheidet, ob eine Aktion fällt — aus eigenem Recht oder weil ihr
+ * Nachfolger fällt.
+ *
+ * Die `/Next`-Kette wird IMMER weiterverfolgt, auch wenn die Aktion selbst
+ * bleiben dürfte. Vorher brach die Prüfung beim ersten erkannten Typ ab, und
+ * genau das war der Weg an der Vorgabe vorbei: `externalLinks` steht per
+ * Vorgabe AUS, also blieb ein `/URI` stehen — und mit ihm das JavaScript in
+ * seinem `/Next`. Jeder Posten meldete dabei 0.
+ *
+ * `gesehen` bricht Zyklen ab: `/Next` darf laut Format auf eine Aktion zeigen,
+ * die schon in der Kette steht, und eine solche Datei würde den Säuberer sonst
+ * bis zum Stapelüberlauf im Kreis schicken.
+ */
+function faelltWeg(
+  action: PDFDict,
+  opt: Required<SanitizeOptions>,
+  gesehen: Set<PDFDict> = new Set()
+): Grund | null {
+  if (gesehen.has(action)) return null;
+  gesehen.add(action);
+
+  const eigen = eigenerGrund(action, opt);
+  if (eigen) return eigen;
+
   const next = action.lookup(PDFName.of("Next"));
-  if (next instanceof PDFDict) return faelltWeg(next, opt);
+  if (next instanceof PDFDict) return faelltWeg(next, opt, gesehen);
   if (next instanceof PDFArray) {
     for (let i = 0; i < next.size(); i++) {
       const d = dictOrNull(next.lookup(i));
-      if (d && faelltWeg(d, opt)) return faelltWeg(d, opt);
+      const grund = d ? faelltWeg(d, opt, gesehen) : null;
+      if (grund) return grund;
     }
   }
   return null;
 }
 
 /**
- * Räumt einen Namensbaum ab: zählt die Einträge UND löscht die Objekte, auf
- * die sie zeigen.
+ * Löscht ein Objekt samt allem, was unter {@link NUTZLAST} daran hängt.
  *
- * Den Baum bloss abzuhängen genügt nicht. Der eingebettete Datenstrom bliebe
- * als verwaistes Objekt in der Datei stehen — `strings` findet ihn, jedes
- * Reparaturwerkzeug hängt ihn wieder ein. Für ein Werkzeug, dessen ganzer
+ * Den Verweis bloss zu entfernen genügt nicht. Der eingebettete Datenstrom,
+ * der Skriptquelltext und der Programmpfad einer `/Launch`-Aktion blieben als
+ * verwaiste Objekte in der Datei stehen — `strings` findet sie, jedes
+ * Reparaturwerkzeug hängt sie wieder ein. Für ein Werkzeug, dessen ganzer
  * Zweck „das ist jetzt raus" ist, wäre das die falsche Art von Sauberkeit.
- * (Nachgewiesen: die Klartextprüfung im Selbsttest fand `notiz.txt` nach dem
- * blossen Abhängen weiterhin.)
+ *
+ * `gesehen` verhindert, dass ein von zwei Seiten verwendetes Objekt zweimal
+ * besucht wird (und bricht Zyklen ab).
+ */
+function loescheTief(doc: PDFDocument, wert: unknown, gesehen: Set<string> = new Set()): void {
+  if (wert instanceof PDFRef) {
+    const schluessel = wert.toString();
+    if (gesehen.has(schluessel)) return;
+    gesehen.add(schluessel);
+    loescheInhalt(doc, doc.context.lookup(wert), gesehen);
+    doc.context.delete(wert);
+    return;
+  }
+  // Ein direktes (nicht indirektes) Dict hat kein eigenes Objekt, seine Kinder
+  // aber oft schon — der Strom unter /EF etwa.
+  loescheInhalt(doc, wert, gesehen);
+}
+
+function loescheInhalt(doc: PDFDocument, ziel: unknown, gesehen: Set<string>): void {
+  if (ziel instanceof PDFArray) {
+    for (let i = 0; i < ziel.size(); i++) loescheTief(doc, ziel.get(i), gesehen);
+    return;
+  }
+  if (!(ziel instanceof PDFDict)) return;
+  for (const name of NUTZLAST) {
+    const wert = ziel.get(PDFName.of(name));
+    if (wert !== undefined) loescheTief(doc, wert, gesehen);
+  }
+}
+
+/**
+ * Räumt einen Namensbaum ab: zählt die Einträge UND löscht die Objekte, auf
+ * die sie zeigen (siehe {@link loescheTief}).
  */
 function raeumeNamensbaum(doc: PDFDocument, wurzel: PDFDict | null): number {
   if (!wurzel) return 0;
@@ -124,27 +204,6 @@ function raeumeNamensbaum(doc: PDFDocument, wurzel: PDFDict | null): number {
 }
 
 /**
- * Löscht ein Objekt und, bei einer Dateianlage, den daran hängenden
- * Datenstrom. Tiefer als eine Ebene wird nicht gegraben: alles, was hier
- * vorkommt, ist entweder eine Aktion (flach) oder ein `/Filespec` mit `/EF`.
- */
-function loescheTief(doc: PDFDocument, wert: unknown): void {
-  if (!(wert instanceof PDFRef)) return;
-  const ziel = doc.context.lookup(wert);
-
-  if (ziel instanceof PDFDict) {
-    const ef = dictOrNull(ziel.lookup(PDFName.of("EF")));
-    if (ef) {
-      for (const key of ef.keys()) {
-        const stromRef = ef.get(key);
-        if (stromRef instanceof PDFRef) doc.context.delete(stromRef);
-      }
-    }
-  }
-  doc.context.delete(wert);
-}
-
-/**
  * Säubert eine PDF. Jeder Posten ist einzeln abwählbar; die Vorgaben stehen
  * im Vertrag.
  */
@@ -166,6 +225,60 @@ export async function sanitize(input: Uint8Array, options: SanitizeOptions = {})
 
   const katalog = doc.catalog;
   const names = dictOrNull(katalog.lookup(PDFName.of("Names")));
+
+  /**
+   * Säubert `/A` und `/AA` an einem Träger.
+   *
+   * `alsFeld` unterscheidet die zwei Sorten von Trägern: an einer Annotation
+   * oder einem Formularfeld fällt unter `annotationActions` auch eine Aktion
+   * ohne eigenen Grund (ausser Sprung und Link). Am Katalog, an einer Seite
+   * und an einem Lesezeichen fällt nur, was aus eigenem Recht fällt — dort
+   * ist ein `/O`-Auslöser mit einem Sprung normales Verhalten.
+   *
+   * Gezählt wird je Aktion, nicht je Bündel: ein `/AA` mit drei Skripten
+   * meldete vorher `javascript: 1`. Eine Zahl, die nicht zählt, ist der
+   * Hauptzweck des Berichts verfehlt.
+   */
+  const aktionenSaeubern = (traeger: PDFDict, alsFeld: boolean): void => {
+    const a = dictOrNull(traeger.lookup(PDFName.of("A")));
+    if (a) {
+      const grund = faelltWeg(a, opt);
+      const unterAnnotationActions =
+        !grund && alsFeld && opt.annotationActions && !BLEIBT_AM_FELD.includes(aktionsTyp(a) ?? "");
+      if (grund || unterAnnotationActions) {
+        if (grund) removed[grund]++; else removed.annotationActions++;
+        loescheTief(doc, traeger.get(PDFName.of("A")));
+        traeger.delete(PDFName.of("A"));
+      }
+    }
+
+    const aa = dictOrNull(traeger.lookup(PDFName.of("AA")));
+    if (!aa) return;
+    for (const key of [...aa.keys()]) {
+      const eintrag = dictOrNull(aa.lookup(key));
+      if (!eintrag) continue;
+      const grund = faelltWeg(eintrag, opt);
+      if (grund) removed[grund]++;
+      else if (alsFeld && opt.annotationActions) removed.annotationActions++;
+      else continue; // harmloser Auslöser an Katalog/Seite/Lesezeichen: bleibt
+      loescheTief(doc, aa.get(key));
+      aa.delete(key);
+    }
+    if (aa.keys().length === 0) {
+      loescheTief(doc, traeger.get(PDFName.of("AA")));
+      traeger.delete(PDFName.of("AA"));
+    }
+  };
+
+  // Ein Widget steht in `/Annots` der Seite UND in `/AcroForm /Fields`. Ohne
+  // dieses Gedächtnis zählte derselbe Fund zweimal.
+  const besucht = new Set<PDFDict>();
+  const einmal = (knoten: PDFDict, alsFeld: boolean): boolean => {
+    if (besucht.has(knoten)) return false;
+    besucht.add(knoten);
+    aktionenSaeubern(knoten, alsFeld);
+    return true;
+  };
 
   // --- Namensbäume: /JavaScript und /EmbeddedFiles --------------------------
   if (names) {
@@ -202,38 +315,12 @@ export async function sanitize(input: Uint8Array, options: SanitizeOptions = {})
     }
   }
 
-  // --- /AA (zusätzliche Aktionen) am Katalog und an den Seiten --------------
-  // /AA ist ein Bündel von Auslösern (WC = beim Schliessen, WS = beim
-  // Speichern …). Entfernt wird das ganze Bündel, sobald einer davon fällt —
-  // ein halbes Bündel wäre schwerer zu erklären als keins.
-  const aaSaeubern = (traeger: PDFDict): void => {
-    const aa = dictOrNull(traeger.lookup(PDFName.of("AA")));
-    if (!aa) return;
-    let grund: "javascript" | "launchActions" | "externalLinks" | null = null;
-    for (const key of aa.keys()) {
-      const d = dictOrNull(aa.lookup(key));
-      if (d) grund = faelltWeg(d, opt) ?? grund;
-    }
-    if (grund) {
-      removed[grund]++;
-      for (const key of aa.keys()) loescheTief(doc, aa.get(key));
-      loescheTief(doc, traeger.get(PDFName.of("AA")));
-      traeger.delete(PDFName.of("AA"));
-    }
-  };
-  aaSaeubern(katalog);
-
-  // --- /AcroForm: /XFA und die Aktionen der Felder --------------------------
-  const acro = dictOrNull(katalog.lookup(PDFName.of("AcroForm")));
-  if (acro && opt.javascript) {
-    // /CO (calculation order) zeigt auf Felder mit Rechen-Skripten; ohne die
-    // Skripte ist die Liste bedeutungslos.
-    acro.delete(PDFName.of("CO"));
-  }
+  // --- /AA am Katalog -------------------------------------------------------
+  aktionenSaeubern(katalog, false);
 
   // --- Seiten: /AA und die Annotationen -------------------------------------
   for (const page of doc.getPages()) {
-    aaSaeubern(page.node);
+    aktionenSaeubern(page.node, false);
 
     const annots = page.node.lookup(PDFName.of("Annots"));
     if (!(annots instanceof PDFArray)) continue;
@@ -251,32 +338,62 @@ export async function sanitize(input: Uint8Array, options: SanitizeOptions = {})
         removed.embeddedFiles++;
         const ref = annots.get(i);
         annots.remove(i);
+        besucht.add(annot);
         if (ref instanceof PDFRef) doc.context.delete(ref);
         continue;
       }
 
-      // Sonst fällt nur die Aktion, nicht die Annotation.
-      const a = dictOrNull(annot.lookup(PDFName.of("A")));
-      if (a) {
-        const grund = faelltWeg(a, opt);
-        if (grund) {
-          removed[grund]++;
-          loescheTief(doc, annot.get(PDFName.of("A")));
-          annot.delete(PDFName.of("A"));
-        } else if (opt.annotationActions && aktionsTyp(a) !== "URI" && aktionsTyp(a) !== "GoTo") {
-          // Alles, was weder ein Sprung im Dokument noch ein Link ist.
-          removed.annotationActions++;
-          loescheTief(doc, annot.get(PDFName.of("A")));
-          annot.delete(PDFName.of("A"));
+      einmal(annot, true);
+    }
+  }
+
+  // --- /AcroForm: /XFA, /CO und die Aktionen der Felder ---------------------
+  // Ein Feld mit `/AA /K` (Tastendruck) oder `/AA /V` (Prüfung) ist KEINE
+  // Annotation der Seite, wenn es Kinder hat — es steht nur hier. Vorher lief
+  // der Säuberer an diesem ganzen Teilbaum vorbei.
+  const acro = dictOrNull(katalog.lookup(PDFName.of("AcroForm")));
+  if (acro) {
+    if (opt.javascript) {
+      // /CO (calculation order) zeigt auf Felder mit Rechen-Skripten; ohne die
+      // Skripte ist die Liste bedeutungslos.
+      acro.delete(PDFName.of("CO"));
+    }
+    const felder = acro.lookup(PDFName.of("Fields"));
+    if (felder instanceof PDFArray) {
+      const stapel: PDFDict[] = [];
+      for (let i = 0; i < felder.size(); i++) {
+        const f = dictOrNull(felder.lookup(i));
+        if (f) stapel.push(f);
+      }
+      while (stapel.length > 0) {
+        const knoten = stapel.pop()!;
+        if (!einmal(knoten, true)) continue;
+        const kids = knoten.lookup(PDFName.of("Kids"));
+        if (kids instanceof PDFArray) {
+          for (let i = 0; i < kids.size(); i++) {
+            const k = dictOrNull(kids.lookup(i));
+            if (k) stapel.push(k);
+          }
         }
       }
+    }
+  }
 
-      const vorher = removed.javascript + removed.launchActions + removed.externalLinks;
-      aaSaeubern(annot);
-      const nachher = removed.javascript + removed.launchActions + removed.externalLinks;
-      if (nachher === vorher && opt.annotationActions && annot.lookup(PDFName.of("AA"))) {
-        removed.annotationActions++;
-        annot.delete(PDFName.of("AA"));
+  // --- Lesezeichen ----------------------------------------------------------
+  // Ein Lesezeichen mit `/Launch` startet beim Klick ein Programm. Es ist
+  // weder Annotation noch Feld, also fällt hier NUR, was aus eigenem Recht
+  // fällt — ein `/GoTo` ist das, wofür Lesezeichen da sind.
+  const outlines = dictOrNull(katalog.lookup(PDFName.of("Outlines")));
+  if (outlines) {
+    const stapel: PDFDict[] = [];
+    const erstes = dictOrNull(outlines.lookup(PDFName.of("First")));
+    if (erstes) stapel.push(erstes);
+    while (stapel.length > 0) {
+      const knoten = stapel.pop()!;
+      if (!einmal(knoten, false)) continue;
+      for (const kante of ["First", "Next"]) {
+        const n = dictOrNull(knoten.lookup(PDFName.of(kante)));
+        if (n) stapel.push(n);
       }
     }
   }
@@ -285,15 +402,21 @@ export async function sanitize(input: Uint8Array, options: SanitizeOptions = {})
   if (opt.metadata) {
     const info = doc.context.lookup(doc.context.trailerInfo.Info);
     if (info instanceof PDFDict) {
-      for (const feld of INFO_FELDER) {
-        if (info.lookup(PDFName.of(feld)) !== undefined) {
-          info.delete(PDFName.of(feld));
-          removed.metadata++;
-        }
+      // Über die tatsächlichen Schlüssel laufen, nicht über eine feste Liste:
+      // `/Customer`, `/Matter`, `/SAP_DocID` sind erlaubte eigene Felder, und
+      // der Vertrag sagt „alle ausser /Producer". Eine feste Liste liess genau
+      // die Felder stehen, die niemand erwartet — und meldete dafür 0.
+      for (const key of [...info.keys()]) {
+        if (key.asString() === INFO_BLEIBT) continue;
+        loescheTief(doc, info.get(key));
+        info.delete(key);
+        removed.metadata++;
       }
     }
-    // Der XMP-Strom am Katalog ist die zweite, oft vergessene Hälfte.
-    if (katalog.lookup(PDFName.of("Metadata")) !== undefined) {
+    // Der XMP-Strom am Katalog ist die zweite, oft vergessene Hälfte — und er
+    // muss gelöscht werden, nicht abgehängt: sein Inhalt ist Klartext-XML.
+    if (katalog.get(PDFName.of("Metadata")) !== undefined) {
+      loescheTief(doc, katalog.get(PDFName.of("Metadata")));
       katalog.delete(PDFName.of("Metadata"));
       removed.metadata++;
     }
