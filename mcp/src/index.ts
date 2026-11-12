@@ -36,6 +36,7 @@ import * as pdfua from "./pdfua.js";
 import * as sign from "./sign.js";
 import { encryptPdf } from "./encrypt.js";
 import * as annots from "./annots.js";
+import * as sanitize from "./sanitize.js";
 import { annotItem } from "./annot-schema.js";
 
 const CHARACTER_LIMIT = 25_000;
@@ -471,6 +472,50 @@ Eingabe: 'path'/'dataBase64'. Ändert nichts.`,
     return ok(
       { annotations: r.items, count: r.items.length, unsupported: r.unsupported },
       `${r.items.length} Annotation(en) gelesen, ${r.unsupported} ohne Entsprechung.`);
+  }));
+
+  server.registerTool("pdf_sanitize", {
+    title: "PDF säubern (Skripte, Anhänge, Metadaten)",
+    description: `Entfernt aus einer PDF, was beim Weitergeben mitreist, ohne dass man es sieht: JavaScript (/Names /JavaScript, /OpenAction, /AA), eingebettete Dateien, Aktionen an Annotationen und Formularfeldern, herausgreifende Aktionen (/Launch, /GoToR, /SubmitForm, /ImportData) und Metadaten (/Info plus XMP).
+Jeder Posten ist einzeln abwählbar. 'externalLinks' ist standardmäßig AUS — ein Link ist meist gewollter Inhalt.
+Der Seiteninhalt bleibt: Annotationen, Formularfelder und Lesezeichen überleben, nur ihre Aktionen gehen. Säubern ist kein Flachklopfen.
+Zurück kommt je Posten eine ZAHL ('removed'), kein bloßes "fertig" — wer zwölf Anhänge vermutet und drei entfernt bekommt, soll das sehen.
+Reproduzierbar: keine Systemuhr, keine Zufalls-IDs.
+Eingabe: 'path'/'dataBase64'. Ausgabe: 'outputPath' oder 'dataBase64'.`,
+    inputSchema: {
+      ...srcIn,
+      javascript: z.boolean().nullish().describe("JavaScript entfernen (Default: true)."),
+      embeddedFiles: z.boolean().nullish().describe("Eingebettete Dateien und Dateianlagen entfernen (Default: true)."),
+      metadata: z.boolean().nullish().describe("/Info-Felder (außer /Producer) und XMP entfernen (Default: true)."),
+      annotationActions: z.boolean().nullish().describe("Aktionen an Annotationen/Feldern entfernen (Default: true)."),
+      launchActions: z.boolean().nullish().describe("/Launch, /GoToR, /SubmitForm, /ImportData entfernen (Default: true)."),
+      externalLinks: z.boolean().nullish().describe("Auch /URI-Links entfernen (Default: FALSE)."),
+      ...outOpt,
+    },
+    annotations: writeAnn,
+  }, guard(async (a: {
+    path?: string; dataBase64?: string; outputPath?: string;
+    javascript?: boolean | null; embeddedFiles?: boolean | null; metadata?: boolean | null;
+    annotationActions?: boolean | null; launchActions?: boolean | null; externalLinks?: boolean | null;
+  }) => {
+    const quelle = await loadPdf(a);
+    await pdf.assertLoadable(quelle);
+    const r = await sanitize.sanitize(quelle, {
+      javascript: a.javascript ?? undefined,
+      embeddedFiles: a.embeddedFiles ?? undefined,
+      metadata: a.metadata ?? undefined,
+      annotationActions: a.annotationActions ?? undefined,
+      launchActions: a.launchActions ?? undefined,
+      externalLinks: a.externalLinks ?? undefined,
+    });
+    const gesamt = Object.values(r.removed).reduce((s, n) => s + n, 0);
+    const posten = Object.entries(r.removed)
+      .filter(([, n]) => n > 0)
+      .map(([k, n]) => `${k}: ${n}`)
+      .join(", ");
+    return ok(
+      { removed: r.removed, ...(await emitPdf(r.bytes, a.outputPath)) },
+      gesamt === 0 ? "Nichts zu entfernen — die PDF war schon sauber." : `${gesamt} Posten entfernt (${posten}).`);
   }));
 
   server.registerTool("pdf_encrypt", {

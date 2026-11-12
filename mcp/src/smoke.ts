@@ -14,7 +14,11 @@ import * as pdfua from "./pdfua.js";
 import * as sign from "./sign.js";
 import { encryptPdf } from "./encrypt.js";
 import * as annots from "./annots.js";
+import * as sanitize from "./sanitize.js";
 import { annotItem } from "./annot-schema.js";
+// PDF.js als FREMDER Leser für die Säuberungs-Gegenprobe: der eigene
+// Entferner kann nicht bezeugen, dass nichts mehr da ist.
+import * as pdfjs from "pdfjs-dist/legacy/build/pdf.mjs";
 
 let failures = 0;
 function check(name: string, cond: boolean, detail = "") {
@@ -34,6 +38,71 @@ async function makeSample(pageCount: number, label: string): Promise<Uint8Array>
     p.drawText(`${label} Seite ${i} Pagebound Test`, { x: 40, y: 540, size: 18, font, color: rgb(0, 0, 0) });
   }
   return doc.save();
+}
+
+/**
+ * Eine PDF, die wirklich schmutzig ist: JavaScript im Namensbaum, JavaScript
+ * als /OpenAction, eine eingebettete Datei, eine /Launch-Aktion und ein
+ * gewöhnlicher Link.
+ *
+ * Gebaut wird das mit den ECHTEN Strukturen (Namensbaum, Aktionsdicts), nicht
+ * mit einer Attrappe — sonst wäre die anschließende Säuberung ein Nachweis
+ * über die Attrappe und nicht über PDFs. Dass die Datei tatsächlich schmutzig
+ * ist, prüft der Selbsttest unten VOR dem Säubern mit PDF.js nach.
+ */
+async function makeDirtySample(): Promise<Uint8Array> {
+  // Erst die Anlage, dann speichern, dann neu laden: pdf-lib hängt den
+  // /EmbeddedFiles-Baum erst beim Speichern in den Katalog. Vorher gäbe es
+  // kein /Names, an das sich der JavaScript-Baum setzen liesse.
+  const vorstufe = await PDFDocument.create();
+  {
+    const font = await vorstufe.embedFont(StandardFonts.Helvetica);
+    const p = vorstufe.addPage([400, 600]);
+    p.drawText("Schmutzige Seite Pagebound Test", { x: 40, y: 540, size: 16, font, color: rgb(0, 0, 0) });
+    await vorstufe.attach(new TextEncoder().encode("geheim"), "notiz.txt", { mimeType: "text/plain" });
+  }
+  const doc = await PDFDocument.load(await vorstufe.save({ useObjectStreams: true }), { updateMetadata: false });
+  const page = doc.getPage(0);
+
+  const ctx = doc.context;
+  const katalog = doc.catalog;
+
+  // /Names /JavaScript — der Namensbaum, aus dem Betrachter beim Öffnen laufen lassen.
+  const jsAktion = ctx.obj({ Type: PDFName.of("Action"), S: PDFName.of("JavaScript"), JS: PDFString.of("app.alert('hallo');") });
+  const jsBaum = ctx.obj({ Names: ctx.obj([PDFString.of("PageboundProbe"), ctx.register(jsAktion)]) });
+  const efAktion = ctx.obj({ Type: PDFName.of("Action"), S: PDFName.of("JavaScript"), JS: PDFString.of("this.print();") });
+  const jsBaum2 = ctx.obj({ Names: ctx.obj([PDFString.of("Zweites"), ctx.register(efAktion)]) });
+  const beide = ctx.obj({ Kids: ctx.obj([ctx.register(jsBaum), ctx.register(jsBaum2)]) });
+
+  const names = katalog.lookup(PDFName.of("Names"));
+  if (!(names instanceof PDFDict)) throw new Error("Probe ohne /Names — der Anhang ist nicht angekommen");
+  names.set(PDFName.of("JavaScript"), ctx.register(beide));
+
+  // /OpenAction mit JavaScript.
+  katalog.set(PDFName.of("OpenAction"), ctx.register(
+    ctx.obj({ Type: PDFName.of("Action"), S: PDFName.of("JavaScript"), JS: PDFString.of("app.alert('offen');") })));
+
+  // /AA am Katalog: beim Schliessen noch ein Skript.
+  katalog.set(PDFName.of("AA"), ctx.register(ctx.obj({
+    WC: ctx.register(ctx.obj({ S: PDFName.of("JavaScript"), JS: PDFString.of("app.alert('zu');") })),
+  })));
+
+  // Zwei Annotationen: eine mit /Launch, eine mit einem gewöhnlichen Link.
+  const launch = ctx.obj({
+    Type: PDFName.of("Annot"), Subtype: PDFName.of("Link"), Rect: ctx.obj([10, 10, 60, 30]),
+    A: ctx.register(ctx.obj({ S: PDFName.of("Launch"), F: PDFString.of("C:/Windows/System32/calc.exe") })),
+  });
+  const link = ctx.obj({
+    Type: PDFName.of("Annot"), Subtype: PDFName.of("Link"), Rect: ctx.obj([70, 10, 160, 30]),
+    A: ctx.register(ctx.obj({ S: PDFName.of("URI"), URI: PDFString.of("https://example.invalid/") })),
+  });
+  page.node.set(PDFName.of("Annots"), ctx.obj([ctx.register(launch), ctx.register(link)]));
+
+  doc.setTitle("Geheimer Titel");
+  doc.setAuthor("Verräterischer Autor");
+  doc.setKeywords(["intern", "nicht weitergeben"]);
+
+  return doc.save({ useObjectStreams: true });
 }
 
 async function makeFormSample(): Promise<Uint8Array> {
@@ -295,6 +364,148 @@ async function main() {
     check("Nr. 15: /M mit Z bleibt unverändert",
       annots.fromPdfDate("D:20261112100000Z") === "2026-11-12T10:00:00.000Z",
       String(annots.fromPdfDate("D:20261112100000Z")));
+  }
+
+  // --- PDF säubern (Vertrag: docs/contracts/pdf-saeubern.md) ----------------
+  // Gelesen wird mit PDF.js, NICHT mit pdf-lib: der eigene Entferner ist kein
+  // Nachweis dafür, dass nichts mehr da ist. Und die Prüfung läuft zuerst
+  // gegen die SCHMUTZIGE Datei — fände sie dort schon nichts, wäre ihr
+  // späteres "sauber" wertlos.
+  {
+    const liesMitPdfJs = async (bytes: Uint8Array) => {
+      const task = pdfjs.getDocument({ data: new Uint8Array(bytes), useSystemFonts: false, disableFontFace: true });
+      const d = await task.promise;
+      const js = await d.getJSActions();
+      const anhaenge = await d.getAttachments();
+      const page = await d.getPage(1);
+      const seitenJs = await page.getJSActions();
+      const annots = await page.getAnnotations({ intent: "display" });
+      const text = (await page.getTextContent()).items.map((i: any) => i.str ?? "").join("");
+      const info = await d.getMetadata();
+      const out = {
+        dokumentJs: js ? Object.keys(js).length : 0,
+        seitenJs: seitenJs ? Object.keys(seitenJs).length : 0,
+        anhaenge: anhaenge ? Object.keys(anhaenge).length : 0,
+        annots: annots.length,
+        links: annots.filter((a: any) => a.url || a.unsafeUrl).length,
+        titel: (info.info as any)?.Title ?? "",
+        autor: (info.info as any)?.Author ?? "",
+        seiten: d.numPages,
+        text,
+      };
+      await task.destroy();
+      return out;
+    };
+
+    const schmutzig = await makeDirtySample();
+    const vorher = await liesMitPdfJs(schmutzig);
+
+    // SCHRITT 1 — der bekannt schlechte Eingang. Ohne diesen Nachweis sagt
+    // "nachher sauber" nichts aus.
+    check("sanitize: die Probe ist vorher wirklich schmutzig (PDF.js findet JavaScript)",
+      vorher.dokumentJs > 0, `dokumentJs=${vorher.dokumentJs}`);
+    const diagDoc = await PDFDocument.load(schmutzig, { updateMetadata: false });
+    const diagNames = diagDoc.catalog.lookup(PDFName.of("Names"));
+    let diagBaum = "(kein /Names)";
+    if (diagNames instanceof PDFDict) {
+      const ef = diagNames.lookup(PDFName.of("EmbeddedFiles"));
+      if (ef instanceof PDFDict) {
+        const arr = ef.lookup(PDFName.of("Names"));
+        const kids = ef.lookup(PDFName.of("Kids"));
+        const erstes = arr instanceof PDFArray && arr.size() > 1 ? arr.lookup(1) : null;
+        diagBaum = `EF-Schluessel=${ef.keys().map((k) => k.asString()).join(",")}`
+          + ` NamesGroesse=${arr instanceof PDFArray ? arr.size() : "-"}`
+          + ` Kids=${kids instanceof PDFArray ? kids.size() : "-"}`
+          + ` Spec=${erstes instanceof PDFDict ? erstes.keys().map((k) => k.asString()).join("|") : typeof erstes}`;
+      } else {
+        diagBaum = `kein /EmbeddedFiles, Schluessel=${diagNames.keys().map((k) => k.asString()).join(",")}`;
+      }
+    }
+    // --- Zeuge für den Anhang: NICHT PDF.js ---------------------------------
+    // Gemessen am 2026-11-13: `getAttachments()` liefert für eine PDF, die
+    // pdf-lib mit `attach()` geschrieben hat, ein leeres Objekt — auch ohne
+    // Objektströme und ohne jedes Zutun von uns. PDF.js ist hier also kein
+    // Zeuge: ein "nachher keine Anhänge" wäre eine Prüfung, die den Fehler
+    // strukturell nicht sehen kann und bei JEDER Eingabe bestünde.
+    //
+    // Stattdessen wird die Datei unkomprimiert aufgeschrieben und im Klartext
+    // nachgesehen. Das ist schwächer als ein zweiter Parser, aber unabhängig
+    // von sanitize.ts — und es kann fehlschlagen, was SCHRITT 1 unten zeigt.
+    const imKlartext = async (bytes: Uint8Array, nadel: string): Promise<boolean> => {
+      const d = await PDFDocument.load(bytes, { updateMetadata: false });
+      const flach = await d.save({ useObjectStreams: false });
+      return Buffer.from(flach).toString("latin1").includes(nadel);
+    };
+
+    check("sanitize: die Probe hat vorher wirklich einen Anhang (im Klartext auffindbar)",
+      await imKlartext(schmutzig, "/EmbeddedFiles") && await imKlartext(schmutzig, "notiz.txt"),
+      diagBaum);
+    check("sanitize: die Probe hat vorher Titel und Autor",
+      vorher.titel === "Geheimer Titel" && vorher.autor === "Verräterischer Autor",
+      `${vorher.titel} / ${vorher.autor}`);
+
+    // SCHRITT 2 — säubern und mit demselben fremden Leser nachsehen.
+    const sauber = await sanitize.sanitize(schmutzig);
+    const nachher = await liesMitPdfJs(sauber.bytes);
+
+    check("sanitize: PDF.js findet danach kein JavaScript mehr",
+      nachher.dokumentJs === 0 && nachher.seitenJs === 0,
+      `dokumentJs=${nachher.dokumentJs} seitenJs=${nachher.seitenJs}`);
+    check("sanitize: der Anhang ist danach auch im Klartext fort",
+      !(await imKlartext(sauber.bytes, "/EmbeddedFiles"))
+      && !(await imKlartext(sauber.bytes, "notiz.txt")));
+    check("sanitize: auch der Quelltext der Skripte ist fort, nicht nur der Verweis",
+      await imKlartext(schmutzig, "app.alert") && !(await imKlartext(sauber.bytes, "app.alert")));
+    check("sanitize: der Pfad der /Launch-Aktion ist fort",
+      await imKlartext(schmutzig, "calc.exe") && !(await imKlartext(sauber.bytes, "calc.exe")));
+    check("sanitize: Titel und Autor sind fort",
+      !nachher.titel && !nachher.autor, `${nachher.titel} / ${nachher.autor}`);
+    check("sanitize: die Zahlen je Posten stimmen und sind nicht null",
+      sauber.removed.javascript >= 3 && sauber.removed.embeddedFiles >= 1
+      && sauber.removed.metadata >= 3 && sauber.removed.launchActions >= 1,
+      JSON.stringify(sauber.removed));
+
+    // SCHRITT 3 — der Inhalt bleibt. Säubern ist kein Flachklopfen.
+    check("sanitize: Seitenzahl und Text bleiben unberührt",
+      nachher.seiten === vorher.seiten && nachher.text === vorher.text,
+      `${nachher.seiten}/${vorher.seiten}`);
+    check("sanitize: der gewöhnliche Link bleibt (externalLinks ist per Vorgabe aus)",
+      nachher.links >= 1, `links=${nachher.links}`);
+
+    // SCHRITT 4 — Abwählbarkeit. Wer javascript:false sagt, muss sein Skript behalten.
+    const mitJs = await sanitize.sanitize(schmutzig, { javascript: false });
+    const nochDa = await liesMitPdfJs(mitJs.bytes);
+    check("sanitize: javascript:false lässt das Skript nachweisbar stehen",
+      nochDa.dokumentJs > 0 && mitJs.removed.javascript === 0,
+      `dokumentJs=${nochDa.dokumentJs} gezaehlt=${mitJs.removed.javascript}`);
+    check("sanitize: javascript:false entfernt den Anhang trotzdem",
+      mitJs.removed.embeddedFiles >= 1);
+
+    // SCHRITT 5 — auch Links, wenn man es ausdrücklich will.
+    const ohneLinks = await sanitize.sanitize(schmutzig, { externalLinks: true });
+    check("sanitize: externalLinks:true entfernt den Link",
+      (await liesMitPdfJs(ohneLinks.bytes)).links === 0 && ohneLinks.removed.externalLinks >= 1,
+      JSON.stringify(ohneLinks.removed));
+
+    // SCHRITT 6 — eine PDF ohne Skripte und Anhänge: nur die Metadaten fallen.
+    // "Überall null" wäre die falsche Erwartung: pdf-lib schreibt in jede
+    // erzeugte Datei /Creator, /CreationDate und /ModDate.
+    const schonSauber = await sanitize.sanitize(await makeSample(1, "Rein"));
+    const { metadata: _m, ...ohneMeta } = schonSauber.removed;
+    check("sanitize: an einer PDF ohne Skripte und Anhaenge faellt nur Metadatum",
+      Object.values(ohneMeta).every((n) => n === 0) && schonSauber.removed.metadata > 0,
+      JSON.stringify(schonSauber.removed));
+    check("sanitize: mit metadata:false bleibt dieselbe PDF voellig unberuehrt",
+      Object.values((await sanitize.sanitize(await makeSample(1, "Rein"), { metadata: false })).removed)
+        .every((n) => n === 0));
+
+    // SCHRITT 7 — Reproduzierbarkeit mit Abstand (dieselbe Falle wie bei den
+    // Annotationen: /ModDate hat Sekundenauflösung).
+    const detA = (await sanitize.sanitize(schmutzig)).bytes;
+    await new Promise((r) => setTimeout(r, 1200));
+    const detB = (await sanitize.sanitize(schmutzig)).bytes;
+    check("sanitize: zweimal gesaeubert ergibt byte-gleich (mit 1,2 s Abstand)",
+      Buffer.from(detA).equals(Buffer.from(detB)));
   }
 
   // forms
