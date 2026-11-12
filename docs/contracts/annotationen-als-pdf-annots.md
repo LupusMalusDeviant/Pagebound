@@ -22,6 +22,40 @@ Anlass: `docs/findings/WETTBEWERB-2026-11-12-vergleich.md`, Befund 1.
 > Port allein der Annotationen hätte auf gedrehten Seiten bekannt falsch
 > gelegen. Deshalb sind **zwei** Dateien portiert: `mcp/src/geometry.ts` und
 > `mcp/src/annots.ts`, beide mit einem Kopf, der die Quelle nennt.
+>
+> **Nachtrag 3 (nach dem Codex-Review, 2026-11-12).** Fünfzehn Befunde, davon
+> acht am Annotations-Motor. Vertragsrelevant sind drei:
+>
+> 1. **Das Ersetzen wird gezählt und gemeldet.** Der Vertrag sagte schon
+>    „importierte Annotationen ersetzen die vorgefundenen (gleiche `/NM`)",
+>    die erste Umsetzung hängte aber immer nur an. `WriteAnnotationsResult`
+>    bekommt dafür ein drittes Feld **`replaced`**, und `pdf_annotations_write`
+>    gibt es mit aus. Ohne diese Zahl bliebe für den Aufrufer ununterscheidbar,
+>    ob zwölf Anmerkungen zwölf neue Objekte wurden oder zwölf alte ersetzt
+>    haben.
+> 2. **Text wird als `PDFHexString` geschrieben** (UTF-16BE mit BOM), gelesen
+>    über `decodeText()`. `PDFString.of` maskiert weder Klammern noch
+>    Backslashes und kann kein Unicode: `Grüße 😀 中` kam als `Grüße =\0 -`
+>    zurück, und eine unbalancierte Klammer im Text zerlegte das
+>    Annotationsobjekt.
+> 3. **`/FreeText` bekommt `/Rotate`**, und sein Rechteck wird mit den echten
+>    Helvetica-Maßen aus pdf-lib ausgemessen statt geschätzt (zehn `W` bei
+>    16 pt brauchen 151 pt, die Schätzung gab 96 pt). Ohne das brach ein
+>    Betrachter Text um, der im Reader waagerecht hineinpasste.
+>
+> Dazu eine Festlegung am Rand des Vertrags: **der Export lädt als Strom
+> herunter, nicht als base64.** `pageboundShortcuts.downloadStream` nimmt eine
+> `DotNetStreamReference`; `Convert.ToBase64String` hätte das ganze Dokument
+> ein weiteres Mal als .NET-string im WASM-Heap liegen (ein Drittel Aufschlag
+> durch base64, als UTF-16 nochmal doppelt — bei 100 MB Ausgabe rund 267 MB
+> obendrauf). Das ist genau der base64-Round-Trip, den die Leitplanken dieses
+> Projekts für grosse PDFs verbieten.
+>
+> Die übrigen fünf Motor-Befunde (Systemuhr im `/ModDate`, Zeitzone im `/M`,
+> Notizmarke auf gedrehten Seiten, Ink-Teilverlust, `null` im MCP-Schema) sind
+> Umsetzungsfehler gegen diesen Vertrag, keine Änderungen an ihm.
+> `mcp/src/annots.ts` ist seither eine **buchstäbliche Kopie** von
+> `pdf-annots.ts` — abweichend nur in Kopfzeile und Importpfad.
 
 ## Der Ist-Stand, belegt
 

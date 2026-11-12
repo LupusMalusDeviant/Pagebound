@@ -26,11 +26,13 @@ import {
   PDFDocument,
   PDFArray,
   PDFDict,
+  PDFHexString,
   PDFName,
   PDFNumber,
   PDFString,
   PDFPage,
   PDFRef,
+  StandardFonts,
 } from "pdf-lib";
 import {
   normPointsToUser,
@@ -40,6 +42,14 @@ import {
   boundsOfUserPoints,
   displaySize,
 } from "./page-geometry";
+
+/**
+ * pdf-lib schreibt beim Laden von sich aus ein frisches `/ModDate` aus der
+ * Systemuhr. Das bricht die Zusage „gleiche Eingabe → byte-gleiche Ausgabe"
+ * (MCP seit 2.0.0) — zwei identische Läufe mit mehr als einer Sekunde Abstand
+ * ergeben verschiedene Dateien. Jeder Ladevorgang hier schaltet das ab.
+ */
+const NO_METADATA_BUMP = { updateMetadata: false } as const;
 
 // -----------------------------------------------------------------------------
 // Der gemeinsame Item-Typ
@@ -62,11 +72,13 @@ export interface AnnotItem {
   rects?: { x: number; y: number; w: number; h: number }[] | null;
   strokes?: { x: number; y: number }[][] | null;
   shape?: "rectangle" | "line" | "arrow" | null;
-  startX?: number; startY?: number; endX?: number; endY?: number;
+  // null erlaubt: ein über MCP gelesenes Ergebnis darf unverändert wieder in
+  // den Schreiber. `?? 0` unten fängt beides ab.
+  startX?: number | null; startY?: number | null; endX?: number | null; endY?: number | null;
   text?: string | null;
   /** Schriftgröße als Anteil der Seitenhöhe (Freitext, wie im Reader via cqh). */
   fontSize?: number | null;
-  x?: number; y?: number;
+  x?: number | null; y?: number | null;
   imageBase64?: string | null;
   width?: number; height?: number;
   /** Stabile Id der Annotation → /NM. Nur für den /Annots-Weg. */
@@ -79,6 +91,8 @@ export interface WriteAnnotationsResult {
   bytes: Uint8Array;
   written: number;
   skipped: number;
+  /** Wie viele vorgefundene Annotationen mit gleichem /NM dabei ersetzt wurden. */
+  replaced: number;
 }
 
 export interface ReadAnnotationsResult {
@@ -88,6 +102,59 @@ export interface ReadAnnotationsResult {
 
 /** Kantenlänge des Notiz-Markers in Punkten — wie bei Acrobat üblich. */
 const NOTE_ICON_SIZE = 20;
+
+/** Zeilenabstand als Vielfaches der Schriftgröße (wie im Reader). */
+const LINE_HEIGHT = 1.25;
+
+// -----------------------------------------------------------------------------
+// Helvetica ausmessen statt schätzen
+// -----------------------------------------------------------------------------
+// Die Maße kommen aus pdf-lib selbst, über ein WEGWERF-Dokument: eingebettet
+// würde die Schrift sonst als unreferenziertes Objekt in jeder Ausgabedatei
+// landen. Einmal geladen, dann gemerkt.
+// -----------------------------------------------------------------------------
+
+let helveticaPromise: Promise<{ widthOfTextAtSize(t: string, s: number): number }> | null = null;
+let helvetica: { widthOfTextAtSize(t: string, s: number): number } | null = null;
+
+async function loadHelvetica() {
+  if (helvetica) return helvetica;
+  helveticaPromise ??= PDFDocument.create(NO_METADATA_BUMP)
+    .then((scratch) => scratch.embedFont(StandardFonts.Helvetica));
+  helvetica = await helveticaPromise;
+  return helvetica;
+}
+
+function helveticaWidth(text: string, size: number): number {
+  if (!helvetica) return text.length * size * 0.5; // sollte nie eintreten
+  try {
+    return helvetica.widthOfTextAtSize(text, size);
+  } catch {
+    // WinAnsi kennt nicht jedes Zeichen; dann lieber grosszügig schätzen als
+    // werfen — ein zu breites Rechteck schneidet wenigstens nichts ab.
+    return text.length * size * 0.6;
+  }
+}
+
+/**
+ * Text auf eine Breite umbrechen, wie es ein Betrachter täte. Ohne das meldet
+ * das Rechteck eine Höhe für eine Zeile, während der Betrachter drei braucht.
+ */
+function wrapToWidth(text: string, size: number, maxWidth: number): string[] {
+  const out: string[] = [];
+  for (const para of (text ?? "").split("\n")) {
+    const words = para.split(/\s+/).filter(Boolean);
+    if (words.length === 0) { out.push(""); continue; }
+    let line = "";
+    for (const w of words) {
+      const trial = line ? `${line} ${w}` : w;
+      if (line && helveticaWidth(trial, size) > maxWidth) { out.push(line); line = w; }
+      else line = trial;
+    }
+    if (line) out.push(line);
+  }
+  return out.length > 0 ? out : [""];
+}
 
 /**
  * Markdown auf Klartext herunterbrechen. Wird an zwei Stellen gebraucht —
@@ -145,14 +212,29 @@ export function toPdfDate(iso: string | null | undefined): string | null {
     `${p(d.getUTCHours())}${p(d.getUTCMinutes())}${p(d.getUTCSeconds())}Z`;
 }
 
-/** D:YYYYMMDDHHmmSS… → ISO-8601, oder null. */
-function fromPdfDate(raw: string | null): string | null {
+/**
+ * D:YYYYMMDDHHmmSS mit Zeitzone → ISO-8601, oder null.
+ *
+ * Die Zone gehört dazu: `D:20261112100000+02'00'` ist 08:00 UTC, nicht 10:00.
+ * Wer den Zusatz überliest, verschiebt beim Hin und Her das Änderungsdatum.
+ * Form laut PDF 32000-1: `D:YYYYMMDDHHmmSSOHH'mm'` mit O aus `+`, `-` oder `Z`.
+ */
+export function fromPdfDate(raw: string | null): string | null {
   if (!raw) return null;
-  const m = /^D?:?(\d{4})(\d{2})?(\d{2})?(\d{2})?(\d{2})?(\d{2})?/.exec(raw.trim());
+  const m = /^D?:?(\d{4})(\d{2})?(\d{2})?(\d{2})?(\d{2})?(\d{2})?\s*([+-Z])?(\d{2})?'?(\d{2})?'?/
+    .exec(raw.trim());
   if (!m) return null;
-  const [, y, mo = "01", d = "01", h = "00", mi = "00", s = "00"] = m;
-  const t = Date.UTC(+y, +mo - 1, +d, +h, +mi, +s);
-  return Number.isFinite(t) ? new Date(t).toISOString() : null;
+  const [, y, mo = "01", d = "01", h = "00", mi = "00", s = "00", sign, offH = "00", offM = "00"] = m;
+
+  let t = Date.UTC(+y, +mo - 1, +d, +h, +mi, +s);
+  if (!Number.isFinite(t)) return null;
+  if (sign === "+" || sign === "-") {
+    // Der Zusatz sagt, wie weit die ÖRTLICHE Zeit der UTC voraus ist —
+    // zum Zurückrechnen also abziehen statt addieren.
+    const offset = (+offH * 60 + +offM) * 60_000;
+    t += sign === "+" ? -offset : offset;
+  }
+  return new Date(t).toISOString();
 }
 
 function numbers(doc: PDFDocument, values: readonly number[]): PDFArray {
@@ -170,13 +252,29 @@ function dictOf(doc: PDFDocument, entries: Record<string, any>): PDFDict {
   return dict;
 }
 
+/**
+ * Beliebigen Text als PDF-Zeichenkette.
+ *
+ * Immer HEX (UTF-16BE mit BOM), nie literal. Ein literaler String muss
+ * Klammern und Rückstriche maskieren; `PDFString.of` tut das NICHT. Eine
+ * Notiz mit dem Text „unfinished (" erzeugte so eine Datei, in der die
+ * Zeichenkette nie endet — der Betrachter meldet „End of file inside
+ * dictionary" und liest KEINE Annotation mehr, während der Aufrufer „1
+ * geschrieben" gemeldet bekam. Ausserdem kennt ein literaler String kein
+ * Unicode: „中" wurde zu „-", ein Rückstrich verschwand.
+ */
+function pdfText(value: string): PDFHexString {
+  return PDFHexString.fromText(value ?? "");
+}
+
+/**
+ * Zeichenkette lesen — literal ODER hex. `decodeText()` beherrscht beide und
+ * macht die Maskierung rückgängig; `asString()` liefert die rohe, noch
+ * maskierte Form und wäre hier falsch.
+ */
 function strOrNull(dict: PDFDict, key: string): string | null {
   const v = dict.lookup(PDFName.of(key));
-  if (v instanceof PDFString) return v.asString();
-  // PDFHexString hat ebenfalls decodeText(); über das Interface statt instanceof,
-  // damit beide Schreibweisen (literal und hex) gelesen werden.
-  const anyV = v as any;
-  if (anyV && typeof anyV.decodeText === "function") return anyV.decodeText();
+  if (v instanceof PDFString || v instanceof PDFHexString) return v.decodeText();
   return null;
 }
 
@@ -190,6 +288,29 @@ function numsOrNull(dict: PDFDict, key: string): number[] | null {
     out.push(n.asNumber());
   }
   return out;
+}
+
+/**
+ * Entfernt alle vorhandenen Annotationen mit diesem /NM aus dem ganzen
+ * Dokument und liefert ihre Zahl. Über alle Seiten, weil eine Annotation beim
+ * erneuten Schreiben auf einer anderen Seite landen kann als beim Import.
+ * Annotationen ohne oder mit anderem /NM bleiben unangetastet.
+ */
+function removeByName(doc: PDFDocument, name: string): number {
+  let removed = 0;
+  for (const page of doc.getPages()) {
+    const annots = page.node.lookup(PDFName.of("Annots"));
+    if (!(annots instanceof PDFArray)) continue;
+    // Rückwärts, damit das Entfernen die noch zu prüfenden Indizes nicht verschiebt.
+    for (let i = annots.size() - 1; i >= 0; i--) {
+      const dict = annots.lookup(i);
+      if (!(dict instanceof PDFDict)) continue;
+      if (strOrNull(dict, "NM") !== name) continue;
+      annots.remove(i);
+      removed++;
+    }
+  }
+  return removed;
 }
 
 /** /Annots der Seite, bei Bedarf neu angelegt. */
@@ -224,8 +345,8 @@ function baseAnnot(
     Rect: numbers(doc, [rect.x, rect.y, rect.x + rect.width, rect.y + rect.height]),
     F: PDFNumber.of(4),
     C: comps ? numbers(doc, comps) : undefined,
-    NM: it.id ? PDFString.of(it.id) : undefined,
-    M: date ? PDFString.of(date) : undefined,
+    NM: it.id ? pdfText(it.id) : undefined,
+    M: date ? pdfText(date) : undefined,
     ...extra,
   });
 }
@@ -240,13 +361,15 @@ export async function writeAnnotations(
   items: AnnotItem[]
 ): Promise<WriteAnnotationsResult> {
   if (!items || items.length === 0) {
-    return { bytes: pdfBytes, written: 0, skipped: 0 };
+    return { bytes: pdfBytes, written: 0, skipped: 0, replaced: 0 };
   }
 
-  const doc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
+  const doc = await PDFDocument.load(pdfBytes, { ...NO_METADATA_BUMP, ignoreEncryption: true });
+  await loadHelvetica();
   const pages = doc.getPages();
   let written = 0;
   let skipped = 0;
+  let replaced = 0;
 
   for (const it of items) {
     const page = pages[it.pageNumber - 1];
@@ -254,6 +377,12 @@ export async function writeAnnotations(
 
     // Signaturen gehen diesen Weg laut Vertrag nicht mit.
     if (it.kind === "signature") { skipped++; continue; }
+
+    // Vertrag: „importierte Annotationen ersetzen die vorgefundenen (gleiche
+    // /NM), nicht importierte bleiben unangetastet." Ohne diesen Schritt
+    // entstünde bei importieren → ändern → speichern eine Dublette: das alte
+    // Objekt bliebe stehen und das neue käme daneben.
+    if (it.id) replaced += removeByName(doc, it.id);
 
     const { width: dw, height: dh } = displaySize(page);
     const thickness = Math.max(0.5, (it.strokeWidth ?? 0.004) * dw);
@@ -265,7 +394,7 @@ export async function writeAnnotations(
   }
 
   const bytes = await doc.save({ useObjectStreams: false });
-  return { bytes, written, skipped };
+  return { bytes, written, skipped, replaced };
 }
 
 function buildAnnot(
@@ -299,7 +428,7 @@ function buildAnnot(
     const opacity = it.opacity ?? null;
     return baseAnnot(doc, "Highlight", rect, it, {
       QuadPoints: numbers(doc, quad),
-      Contents: it.text ? PDFString.of(it.text) : undefined,
+      Contents: it.text ? pdfText(it.text) : undefined,
       CA: opacity !== null ? PDFNumber.of(Number(opacity.toFixed(4))) : undefined,
       ...P,
     });
@@ -355,14 +484,20 @@ function buildAnnot(
   }
 
   if (it.kind === "note") {
-    const [p] = normPointsToUser(page, [{ x: it.x ?? 0, y: it.y ?? 0 }]);
-    // Der Marker hat eine feste Größe; der Punkt ist seine obere linke Ecke.
-    const rect = { x: p.x, y: p.y - NOTE_ICON_SIZE, width: NOTE_ICON_SIZE, height: NOTE_ICON_SIZE };
+    // Den ganzen Marker durch die Abbildung schicken, nicht nur seinen Anker:
+    // ein danach auf ungedrehten Achsen gebautes Quadrat landet auf einer um
+    // 90° gedrehten Seite um seine Kantenlänge daneben.
+    const rect = normRectToUser(page, {
+      x: it.x ?? 0,
+      y: it.y ?? 0,
+      width: NOTE_ICON_SIZE / dw,
+      height: NOTE_ICON_SIZE / dh,
+    });
     return baseAnnot(doc, "Text", rect, it, {
       Name: PDFName.of("Comment"),
       // /Contents ist Klartext — Markdown rendert dort kein Betrachter
       // (Vertrag, Festlegung 1). Das Sidecar behält die Markdown-Fassung.
-      Contents: PDFString.of(stripMarkdown(it.text ?? "")),
+      Contents: pdfText(stripMarkdown(it.text ?? "")),
       ...P,
     });
   }
@@ -370,11 +505,13 @@ function buildAnnot(
   if (it.kind === "text") {
     const size = Math.max(1, (it.fontSize ?? 0.02) * dh);
     const text = it.text ?? "";
-    const lines = text.split("\n");
-    // Breite grob aus der Zeichenzahl — Helvetica liegt im Mittel bei ~0,5 em.
-    const widthPt = Math.min(dw, Math.max(...lines.map((l) => l.length)) * size * 0.5 + size);
-    const heightPt = Math.max(size * 1.25, lines.length * size * 1.25);
-    const rect = normRectToUser(page, {
+    // Gemessen statt geschätzt: zehn „W" in Helvetica bei 16 pt brauchen
+    // 151 pt, die alte Schätzung (0,5 em je Zeichen) gab 96 pt frei. Ein
+    // Betrachter muss dann umbrechen oder abschneiden, was im Reader passte.
+    const lines = wrapToWidth(text, size, dw - size);
+    const widthPt = Math.min(dw, Math.max(size, ...lines.map((l) => helveticaWidth(l, size))) + size);
+    const heightPt = Math.min(dh, Math.max(1, lines.length) * size * LINE_HEIGHT + size * 0.5);
+    const placed = normRectToUser(page, {
       x: it.x ?? 0,
       y: it.y ?? 0,
       width: widthPt / dw,
@@ -383,10 +520,16 @@ function buildAnnot(
     const c = hexToComponents(it.color) ?? [0, 0, 0];
     // /DA ist der Bauplan, aus dem Betrachter das Erscheinungsbild erzeugen.
     const da = `/Helv ${size.toFixed(2)} Tf ${c[0].toFixed(3)} ${c[1].toFixed(3)} ${c[2].toFixed(3)} rg`;
-    return baseAnnot(doc, "FreeText", rect, it, {
-      Contents: PDFString.of(text),
-      DA: PDFString.of(da),
+    return baseAnnot(doc, "FreeText", placed, it, {
+      Contents: pdfText(text),
+      DA: pdfText(da),
       Q: PDFNumber.of(0),
+      // Ohne /Rotate richtet sich der Text am ungedrehten Userspace aus und
+      // steht auf einer gedrehten Seite quer im schmalen Rechteck. Denselben
+      // Schlüssel schreibt auch der Annotationseditor von PDF.js.
+      // Kein eigenes /AP (Vertrag, Festlegung 3) — mehr als diesen Hinweis
+      // können wir einem Betrachter nicht geben.
+      Rotate: placed.rotation !== 0 ? PDFNumber.of(placed.rotation) : undefined,
       ...P,
     });
   }
@@ -405,7 +548,7 @@ function buildAnnot(
  * liegen blieb.
  */
 export async function readAnnotations(pdfBytes: Uint8Array): Promise<ReadAnnotationsResult> {
-  const doc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
+  const doc = await PDFDocument.load(pdfBytes, { ...NO_METADATA_BUMP, ignoreEncryption: true });
   const pages = doc.getPages();
   const items: AnnotItem[] = [];
   let unsupported = 0;
@@ -477,15 +620,22 @@ function readOne(
     const strokes: { x: number; y: number }[][] = [];
     for (let i = 0; i < list.size(); i++) {
       const raw = list.lookup(i);
-      if (!(raw instanceof PDFArray)) continue;
+      // Alles oder nichts: ein übersprungener Strich oder eine abgeschnittene
+      // Koordinate wäre ein stiller Verlust. Vorher kam eine gekürzte
+      // Annotation zurück und 'unsupported' blieb auf 0 — der Aufrufer hätte
+      // nie erfahren, dass die Hälfte fehlt.
+      if (!(raw instanceof PDFArray)) return null;
       const flat: number[] = [];
       for (let j = 0; j < raw.size(); j++) {
         const n = raw.lookup(j);
-        if (n instanceof PDFNumber) flat.push(n.asNumber());
+        if (!(n instanceof PDFNumber)) return null;
+        flat.push(n.asNumber());
       }
+      // Ungerade Zahl von Werten heisst: die letzte Koordinate hat keinen Partner.
+      if (flat.length === 0 || flat.length % 2 !== 0) return null;
       const pts: { x: number; y: number }[] = [];
       for (let j = 0; j + 1 < flat.length; j += 2) pts.push({ x: flat[j], y: flat[j + 1] });
-      if (pts.length > 0) strokes.push(userPointsToNorm(page, pts));
+      strokes.push(userPointsToNorm(page, pts));
     }
     if (strokes.length === 0) return null;
     return { kind: "ink", ...common, strokes, strokeWidth };
@@ -522,9 +672,14 @@ function readOne(
   if (subtype === "Text") {
     const r = numsOrNull(dict, "Rect");
     if (!r || r.length < 4) return null;
-    // Beim Schreiben ist der Punkt die obere linke Ecke des Markers.
-    const [p] = userPointsToNorm(page, [{ x: Math.min(r[0], r[2]), y: Math.max(r[1], r[3]) }]);
-    return { kind: "note", ...common, x: p.x, y: p.y, text: contents ?? "" };
+    // Spiegelbild des Schreibens: das ganze Rechteck zurückrechnen und seine
+    // obere linke Ecke nehmen. Nur den Eckpunkt zu drehen ginge auf gedrehten
+    // Seiten um die Kantenlänge daneben.
+    const n = userRectToNorm(page, {
+      x: Math.min(r[0], r[2]), y: Math.min(r[1], r[3]),
+      width: Math.abs(r[2] - r[0]), height: Math.abs(r[3] - r[1]),
+    });
+    return { kind: "note", ...common, x: n.x, y: n.y, text: contents ?? "" };
   }
 
   if (subtype === "FreeText") {

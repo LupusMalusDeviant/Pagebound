@@ -94,6 +94,7 @@ async function annotationsInDisplay(bytes) {
         y: Math.min(y0, y1) / vp.height,
         w: Math.abs(x1 - x0) / vp.width,
         h: Math.abs(y1 - y0) / vp.height,
+        W: vp.width, H: vp.height,
         raw: a,
       };
     });
@@ -285,6 +286,193 @@ test("fremde Subtypen werden gezählt statt still verworfen", async () => {
   const back = await annots.readAnnotations(await doc.save({ useObjectStreams: false }));
   assert.equal(back.items.length, 0);
   assert.ok(back.unsupported >= 1, "das Widget muss in 'unsupported' auftauchen");
+});
+
+// =============================================================================
+// Rückfälle aus dem Codex-Review vom 2026-11-12. Jede Prüfung hier ist an dem
+// Eingang gescheitert, bevor der Fix kam — das ist der Grund, warum sie
+// dasteht.
+// =============================================================================
+
+test("Befund 1: auch mit Abstand bleibt die Ausgabe byte-gleich", async () => {
+  // Die alte Prüfung schrieb zweimal unmittelbar hintereinander und sah
+  // deshalb nichts: /ModDate hat Sekundenauflösung. pdf-lib schreibt es beim
+  // Laden von sich aus neu, wenn man es nicht abschaltet.
+  const items = [{
+    kind: "highlight", pageNumber: 1, rects: [{ x: 0.2, y: 0.3, w: 0.25, h: 0.05 }],
+    id: "ann-stable01", modified: "2026-11-12T10:00:00.000Z",
+  }];
+  const input = await makePdf({});
+  const a = await annots.writeAnnotations(input, items);
+  await new Promise((r) => setTimeout(r, 1200));
+  const b = await annots.writeAnnotations(input, items);
+
+  assert.deepEqual(Buffer.from(a.bytes), Buffer.from(b.bytes),
+    "die Systemuhr ist in die Datei gelaufen");
+
+  // Und der Grund dafür ausdrücklich: das /ModDate der Eingabe bleibt stehen,
+  // statt beim Laden überschrieben zu werden. (Ein /ModDate GIBT es, es stammt
+  // aus PDFDocument.create() beim Bau der Testdatei.)
+  const moddate = (bytes) =>
+    (/\/ModDate\s*[(<]([^)>]*)[)>]/.exec(Buffer.from(bytes).toString("latin1")) || [])[1];
+  assert.equal(moddate(a.bytes), moddate(input), "/ModDate wurde neu geschrieben");
+});
+
+test("Befund 4: Klammern, Rückstriche und Unicode überleben", async () => {
+  // Eine unbalancierte Klammer in einer literalen Zeichenkette beendet sie
+  // nie — der Betrachter las danach GAR KEINE Annotation mehr, während der
+  // Aufrufer „1 geschrieben" bekam.
+  const faelle = [
+    "unfinished (",
+    "mit ) Klammer",
+    "beides ( und )",
+    "back\\slash",
+    "Grüße 中 😀",
+  ];
+  for (const text of faelle) {
+    const w = await annots.writeAnnotations(await makePdf({}), [
+      { kind: "note", pageNumber: 1, x: 0.5, y: 0.5, text },
+    ]);
+    const found = await annotationsInDisplay(w.bytes);
+    assert.equal(found.length, 1, `Datei kaputt bei ${JSON.stringify(text)}`);
+    assert.equal(found[0].contents, text, `Text verändert bei ${JSON.stringify(text)}`);
+  }
+});
+
+test("Befund 5: gleiche /NM ersetzt statt verdoppelt", async () => {
+  const base = await makePdf({});
+  const erst = await annots.writeAnnotations(base, [{
+    kind: "highlight", pageNumber: 1, id: "ann-eins",
+    rects: [{ x: 0.1, y: 0.1, w: 0.2, h: 0.03 }],
+  }]);
+
+  // Importieren, ändern, wieder schreiben — der klassische Weg zur Dublette.
+  const gelesen = await annots.readAnnotations(erst.bytes);
+  assert.equal(gelesen.items.length, 1);
+  assert.equal(gelesen.items[0].id, "ann-eins", "die Identität muss das Lesen überleben");
+
+  const geaendert = { ...gelesen.items[0], rects: [{ x: 0.5, y: 0.5, w: 0.2, h: 0.03 }] };
+  const zweit = await annots.writeAnnotations(erst.bytes, [geaendert]);
+
+  assert.equal(zweit.replaced, 1, "das vorgefundene Objekt muss ersetzt werden");
+  const found = await annotationsInDisplay(zweit.bytes);
+  assert.equal(found.length, 1, "es darf keine Dublette entstehen");
+  near(found[0].x, 0.5, 0.002, "die neue Position zählt");
+});
+
+test("Befund 5: fremde Annotationen bleiben beim Ersetzen stehen", async () => {
+  const mitZwei = await annots.writeAnnotations(await makePdf({}), [
+    { kind: "highlight", pageNumber: 1, id: "ann-meins", rects: [{ x: 0.1, y: 0.1, w: 0.2, h: 0.03 }] },
+    { kind: "highlight", pageNumber: 1, id: "ann-fremd", rects: [{ x: 0.1, y: 0.5, w: 0.2, h: 0.03 }] },
+  ]);
+  const neu = await annots.writeAnnotations(mitZwei.bytes, [
+    { kind: "highlight", pageNumber: 1, id: "ann-meins", rects: [{ x: 0.6, y: 0.1, w: 0.2, h: 0.03 }] },
+  ]);
+  assert.equal(neu.replaced, 1);
+  const found = await annotationsInDisplay(neu.bytes);
+  assert.equal(found.length, 2, "die fremde Annotation darf nicht mitgehen");
+});
+
+test("Befund 5: zweimal dasselbe Schreiben ergibt kein zweites Objekt", async () => {
+  const item = {
+    kind: "highlight", pageNumber: 1, id: "ann-idem",
+    rects: [{ x: 0.1, y: 0.1, w: 0.2, h: 0.03 }],
+  };
+  const a = await annots.writeAnnotations(await makePdf({}), [item]);
+  const b = await annots.writeAnnotations(a.bytes, [item]);
+  assert.equal((await annotationsInDisplay(b.bytes)).length, 1);
+});
+
+for (const c of CASES) {
+  test(`Befund 10: der Notiz-Marker sitzt an der angezeigten Stelle (${c.name})`, async () => {
+    const w = await annots.writeAnnotations(await makePdf(c), [
+      { kind: "note", pageNumber: 1, x: 0.4, y: 0.25, text: "hier" },
+    ]);
+    const [a] = await annotationsInDisplay(w.bytes);
+    assert.equal(a.subtype, "Text");
+
+    // Achtung, Eigenheit des Prüfers: PDF.js schreibt bei /Text das Rechteck
+    // auf seine eigene Symbolgröße von 22 pt um (gemessen: aus 20×20 wird
+    // 22×22, verankert links/oben im UNGEDREHTEN Userspace). Auf gedrehten
+    // Seiten schlägt dieser Unterschied in x oder y durch. Der Vergleich
+    // bekommt deshalb 3 pt Spielraum — der alte Fehler lag bei 20 pt und
+    // fällt hier trotzdem durch.
+    const tolX = 3 / (a.W ?? 600);
+    const tolY = 3 / (a.H ?? 800);
+    near(a.x, 0.4, Math.max(tolX, tolY), "x");
+    near(a.y, 0.25, Math.max(tolX, tolY), "y");
+
+    // Der genaue Nachweis läuft über das rohe Rechteck, nicht über PDF.js.
+    const back = await annots.readAnnotations(w.bytes);
+    near(back.items[0].x, 0.4, 0.0005, "Round-Trip x");
+    near(back.items[0].y, 0.25, 0.0005, "Round-Trip y");
+  });
+
+  test(`Befund 8: Freitext trägt die Drehung der Seite (${c.name})`, async () => {
+    const w = await annots.writeAnnotations(await makePdf(c), [
+      { kind: "text", pageNumber: 1, x: 0.2, y: 0.3, text: "Hallo", fontSize: 0.03 },
+    ]);
+    const [a] = await annotationsInDisplay(w.bytes);
+    const erwartet = ((c.rotate ?? 0) % 360 + 360) % 360;
+    assert.equal(a.raw.rotation ?? 0, erwartet,
+      `ohne /Rotate steht der Text auf einer um ${erwartet}° gedrehten Seite quer`);
+  });
+}
+
+test("Befund 9: das Freitext-Rechteck wird gemessen, nicht geschätzt", async () => {
+  // Zehn „W" bei 16 pt brauchen in Helvetica 151 pt; die alte Schätzung
+  // (0,5 em je Zeichen) gab 96 pt frei und der Betrachter musste abschneiden.
+  const fontSize = 16 / 800; // 16 pt auf einer 800 pt hohen Seite
+  const w = await annots.writeAnnotations(await makePdf({}), [
+    { kind: "text", pageNumber: 1, x: 0.05, y: 0.3, text: "WWWWWWWWWW", fontSize },
+  ]);
+  const [a] = await annotationsInDisplay(w.bytes);
+  const breitePt = a.w * 600;
+  assert.ok(breitePt >= 151, `Rechteck zu schmal: ${breitePt.toFixed(1)} pt, nötig sind 151`);
+});
+
+test("Befund 9: mehrzeiliger Text bekommt die Höhe für alle Zeilen", async () => {
+  const fontSize = 16 / 800;
+  const w = await annots.writeAnnotations(await makePdf({}), [
+    { kind: "text", pageNumber: 1, x: 0.05, y: 0.1, text: "eins\nzwei\ndrei", fontSize },
+  ]);
+  const [a] = await annotationsInDisplay(w.bytes);
+  const hoehePt = a.h * 800;
+  assert.ok(hoehePt >= 3 * 16, `Rechteck zu flach für drei Zeilen: ${hoehePt.toFixed(1)} pt`);
+});
+
+test("Befund 12: eine kaputte /InkList wird gemeldet, nicht gekürzt", async () => {
+  const w = await annots.writeAnnotations(await makePdf({}), [
+    { kind: "ink", pageNumber: 1, strokes: [[{ x: 0.1, y: 0.1 }, { x: 0.2, y: 0.2 }]] },
+  ]);
+  const doc = await PDFDocument.load(w.bytes);
+  const arr = doc.getPage(0).node.lookup(PDFName.of("Annots"));
+  const list = arr.lookup(0).lookup(PDFName.of("InkList"));
+  // Ein zweiter Strich mit einer überzähligen Koordinate.
+  const krumm = PDFArray.withContext(doc.context);
+  for (const v of [50, 60, 70]) krumm.push(PDFNumber.of(v));
+  list.push(krumm);
+
+  const back = await annots.readAnnotations(await doc.save({ useObjectStreams: false }));
+  assert.equal(back.items.length, 0, "eine halbe Linie ist schlechter als keine");
+  assert.equal(back.unsupported, 1, "der Verlust muss gemeldet werden");
+});
+
+test("Befund 15: Zeitzonen im /M werden umgerechnet", () => {
+  assert.equal(annots.fromPdfDate("D:20261112100000+02'00'"), "2026-11-12T08:00:00.000Z");
+  assert.equal(annots.fromPdfDate("D:20261112100000-05'00'"), "2026-11-12T15:00:00.000Z");
+  assert.equal(annots.fromPdfDate("D:20261112100000Z"), "2026-11-12T10:00:00.000Z");
+  assert.equal(annots.fromPdfDate("D:20261112100000"), "2026-11-12T10:00:00.000Z");
+  assert.equal(annots.fromPdfDate("Unsinn"), null);
+});
+
+test("Befund 15: /M überlebt den Round-Trip mit Zeitzone", async () => {
+  const w = await annots.writeAnnotations(await makePdf({}), [{
+    kind: "highlight", pageNumber: 1, rects: [{ x: 0.1, y: 0.1, w: 0.2, h: 0.03 }],
+    id: "ann-zeit", modified: "2026-11-12T08:00:00.000Z",
+  }]);
+  const back = await annots.readAnnotations(w.bytes);
+  assert.equal(back.items[0].modified, "2026-11-12T08:00:00.000Z");
 });
 
 test("leere Eingabe lässt die PDF unangetastet", async () => {

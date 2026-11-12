@@ -135,6 +135,29 @@ Ein `IntersectionObserver` auf den Platzhaltern meldet nach C#, welche Seiten im
 Blick sind; daraus ergibt sich das Fenster. Keine Scroll-Rechnerei in C#, keine
 Annahme über Seitenhöhen.
 
+> **Nachtrag 1 (nach dem Codex-Review, 2026-11-12).** Der Beobachter meldet in
+> aller Regel **mehrere** Seiten gleichzeitig — das sagte der Ursprungsstand
+> nicht, und die erste Umsetzung spannte das Fenster über die ganze gemeldete
+> Spanne plus beide Puffer. Drei sichtbare Seiten ergaben damit sieben Bilder
+> statt der zugesagten fünf, womit die Obergrenze, um die es bei dieser ganzen
+> Übung geht, stillschweigend weg war.
+>
+> **Festlegung: das Fenster hängt an genau EINER Seite**, dem *unteren Median*
+> der gemeldeten sichtbaren Seiten (in der Mitte des Blickfelds, bei gerader
+> Anzahl eindeutig statt gerundet). Damit gilt `Fenster ≤ 2·Puffer+1` immer.
+>
+> **Der Preis, ausdrücklich:** sind mehr Seiten sichtbar als das Fenster breit
+> ist — stark herausgezoomt —, bleiben die Ränder des Blickfelds leer. Das ist
+> die gewollte Seite der Abwägung: die Speichergrenze steht über der
+> Lückenlosigkeit. Wer das ändern will, ändert zuerst diesen Vertrag.
+>
+> **Ebenfalls hierher gehörend:** Beobachter-Schlüssel und DOM-Wurzel sind
+> **je Komponenteninstanz**, nicht dokumentweit. Zwei Reader nebeneinander
+> (Split-View) klemmten einander sonst den Beobachter ab, und der zweite bekam
+> die Sichtbarkeitsmeldungen des ersten. Der Platzhalter der **Vorschaubilder**
+> hält seine Maße genauso wie der der grossen Seiten — vorher fiel er beim
+> Verdrängen auf ein festes 3:4 zurück und verschob die Bildlaufgeometrie.
+
 **Das Rendern bleibt abbrechbar.** Das Vorhandene (`_thumbnailsCts`) ist das
 Vorbild: scrollt der Nutzer weiter, während ein Rendern läuft, wird der Auftrag
 abgebrochen, statt ein Bild fertigzustellen, das niemand mehr sieht.

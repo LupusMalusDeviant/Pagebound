@@ -722,7 +722,7 @@
 
         @if (_thumbsOpen)
         {
-            <aside id="pb-thumbs" class="w-44 shrink-0 rounded-lg pb-glass p-2 max-h-[80vh] overflow-y-auto"
+            <aside @ref="_thumbsRoot" class="w-44 shrink-0 rounded-lg pb-glass p-2 max-h-[80vh] overflow-y-auto"
                    aria-label="@L.T("reader.thumbs.heading")">
                 <div class="flex items-center justify-between mb-2 px-1">
                     <h3 class="text-sm font-medium">@L.T("reader.thumbs.heading")</h3>
@@ -747,17 +747,23 @@
                                         title="@L.T("reader.thumbs.pageAria", new Dictionary<string, object> { ["page"] = pageNum })"
                                         aria-label="@L.T("reader.thumbs.pageAria", new Dictionary<string, object> { ["page"] = pageNum })"
                                         @onclick="@(() => GoToPageAsync(pageNum))">
-                                    @if (thumb is not null)
-                                    {
-                                        <img src="@thumb.Url"
-                                             alt="@L.T("reader.thumbs.pageLabel", new Dictionary<string, object> { ["page"] = pageNum })"
-                                             draggable="false"
-                                             class="block w-full h-auto bg-pb-bg shadow-sm" />
-                                    }
-                                    else
-                                    {
-                                        <div class="w-full aspect-[3/4] bg-pb-bg animate-pulse"></div>
-                                    }
+                                    @* Die Höhe trägt der Rahmen, nicht das Bild: wird ein
+                                       Vorschaubild verdrängt, darf die Zeile nicht die Höhe
+                                       wechseln — sonst springt der Streifen beim Scrollen
+                                       zwischen geladenem Bild und Platzhalter hin und her. *@
+                                    <div class="w-full bg-pb-bg" style="@PageAspectStyle(pageNum)">
+                                        @if (thumb is not null)
+                                        {
+                                            <img src="@thumb.Url"
+                                                 alt="@L.T("reader.thumbs.pageLabel", new Dictionary<string, object> { ["page"] = pageNum })"
+                                                 draggable="false"
+                                                 class="block h-full w-full shadow-sm" />
+                                        }
+                                        else
+                                        {
+                                            <div class="h-full w-full animate-pulse bg-pb-bg"></div>
+                                        }
+                                    </div>
                                     <span class="text-xs text-pb-fg-muted tabular-nums">@pageNum</span>
                                 </button>
                             </li>
@@ -771,7 +777,7 @@
         {
             @* Fortlaufende Leseansicht (FA Reader-Komfort): alle Seiten gestapelt,
                scrollbar. Read-only (Annotieren/Schwärzen im Einzelseiten-Modus). *@
-            <div id="pb-continuous" class="flex-1 min-w-0 overflow-auto rounded-lg border border-pb-border bg-pb-bg p-4"
+            <div @ref="_continuousRoot" class="flex-1 min-w-0 overflow-auto rounded-lg border border-pb-border bg-pb-bg p-4"
                  style="max-height: calc(100vh - 230px)">
                 <div class="mx-auto flex w-full max-w-3xl flex-col items-center gap-4">
                     @for (var p = 1; p <= _handle.PageCount; p++)
@@ -1804,6 +1810,33 @@
     /// <summary>Letztes bekanntes Verhältnis — bessere Schätzung als ein festes A4.</summary>
     private double _lastKnownAspect = 1.414;
 
+    /// <summary>
+    /// Kennung DIESER Komponenteninstanz. Der Split-View stellt zwei Reader
+    /// nebeneinander; mit festen Schlüsseln klemmte der zweite den Beobachter
+    /// des ersten ab.
+    /// </summary>
+    private readonly string _paneId = Guid.NewGuid().ToString("N");
+
+    /// <summary>Wurzeln der beiden beobachteten Bereiche — Element, nicht id.</summary>
+    private ElementReference _continuousRoot;
+    private ElementReference _thumbsRoot;
+
+    /// <summary>
+    /// Beobachter erst anhängen, wenn der Bereich wirklich im DOM steht: die
+    /// ElementReference ist vor dem Render leer.
+    /// </summary>
+    private bool _watchContinuousPending;
+    private bool _watchThumbsPending;
+
+    /// <summary>
+    /// Zählt die Dokumentwechsel. Wer vor dem Wechsel losgelaufen ist, vergleicht
+    /// nach der Rückkehr und schweigt, wenn inzwischen ein anderes Dokument offen ist.
+    /// </summary>
+    private int _docGeneration;
+
+    /// <summary>Laufender Import der vorhandenen /Annots — beim Dateiwechsel abgebrochen.</summary>
+    private CancellationTokenSource? _annotsImportCts;
+
     private CancellationTokenSource? _continuousCts;
     private int _continuousFrom = 1;
     private int _continuousTo;
@@ -1959,6 +1992,13 @@
 
         _currentFilename = filename;
         _originalPdfBytes = bytes;
+
+        // Neues Dokument: laufende Importe gehören zum alten (siehe
+        // ResetAnnotationState — dieser Pfad läuft nicht zwingend darüber).
+        _docGeneration++;
+        _annotsImportCts?.Cancel();
+        _annotsImportCts?.Dispose();
+        _annotsImportCts = null;
 
         await using var buffer = new MemoryStream(bytes, writable: false);
         var hash = await Hasher.ComputeAsync(buffer, HashAlgorithm.Sha256, CancellationToken.None).ConfigureAwait(false);
@@ -2210,6 +2250,13 @@
 
     private void ResetAnnotationState()
     {
+        // Ab hier ist ein ANDERES Dokument im Reader. Alles, was noch für das
+        // alte unterwegs ist, darf sein Ergebnis nicht mehr hier abliefern.
+        _docGeneration++;
+        _annotsImportCts?.Cancel();
+        _annotsImportCts?.Dispose();
+        _annotsImportCts = null;
+
         _annotations = Array.Empty<Annotation>();
         _currentPdfId = null;
         _currentFilename = null;
@@ -2476,11 +2523,11 @@
             Math.Max(1, _currentPage - ThumbnailBuffer),
             Math.Min(_handle.PageCount, _currentPage + ThumbnailBuffer));
 
+        _watchThumbsPending = true;
         await InvokeAsync(StateHasChanged);
-        await WatchPagesAsync(ThumbnailWatchKey, "#pb-thumbs", nameof(OnVisibleThumbnailsChangedAsync));
     }
 
-    private const string ThumbnailWatchKey = "thumbs";
+    private string ThumbnailWatchKey => $"thumbs:{_paneId}";
 
     [JSInvokable]
     public async Task OnVisibleThumbnailsChangedAsync(int[] pages)
@@ -2535,6 +2582,7 @@
                 }
 
                 _thumbnails[i] = image;
+                RememberAspect(i, image);
                 _thumbnailsProgress = _thumbnails.Count;
                 await InvokeAsync(StateHasChanged);
                 // Browser-Frame Zeit zum Atmen geben — sonst friert die UI ein,
@@ -3019,20 +3067,21 @@
         // die Ansicht bis zur ersten Bildlaufbewegung leer.
         await SetContinuousWindowAsync(1, Math.Min(_handle.PageCount, 1 + ContinuousBuffer));
 
-        // Die Platzhalter müssen im DOM stehen, bevor sie beobachtet werden können.
+        // Die Platzhalter müssen im DOM stehen, bevor sie beobachtet werden
+        // können — angehängt wird erst nach dem Render (OnAfterRenderAsync).
+        _watchContinuousPending = true;
         await InvokeAsync(StateHasChanged);
-        await WatchPagesAsync(ContinuousWatchKey, "#pb-continuous", nameof(OnVisiblePagesChangedAsync));
     }
 
-    private const string ContinuousWatchKey = "continuous";
+    private string ContinuousWatchKey => $"continuous:{_paneId}";
 
-    private async Task WatchPagesAsync(string key, string rootSelector, string method)
+    private async Task WatchPagesAsync(string key, ElementReference root, string method)
     {
-        if (_dotNetRef is null) return;
+        if (_dotNetRef is null || root.Id is null) return;
         try
         {
             await JS.InvokeAsync<bool>(
-                "pageboundPdf.observeVisiblePages", key, rootSelector, _dotNetRef, method);
+                "pageboundPdf.observeVisiblePages", key, root, _dotNetRef, method);
         }
         catch (JSException)
         {
@@ -4072,10 +4121,17 @@
             using var ms = new MemoryStream(_originalPdfBytes);
             var result = await Manipulator.WriteAnnotationsAsync(ms, _annotations, CancellationToken.None);
 
+            // Als Strom, nicht als base64: `Convert.ToBase64String` hätte das
+            // ganze Dokument nochmal als .NET-string im WASM-Heap liegen —
+            // ein Drittel größer als die Datei und als UTF-16 nochmal doppelt,
+            // bei 100 MB Ausgabe rund 267 MB zusätzlich. Genau der
+            // base64-Round-Trip, den die Leitplanken verbieten.
+            using var outStream = new MemoryStream(result.Bytes, writable: false);
+            using var streamRef = new DotNetStreamReference(outStream, leaveOpen: true);
             await JS.InvokeVoidAsync(
-                "pageboundShortcuts.downloadBytes",
+                "pageboundShortcuts.downloadStream",
                 $"{SafeBaseName()}.annotiert.pdf",
-                Convert.ToBase64String(result.Bytes),
+                streamRef,
                 "application/pdf");
 
             // Übersprungenes wird GENANNT, nicht geschluckt: wer zwölf Markierungen
@@ -4107,16 +4163,34 @@
         _isReadingAnnots = true;
         _errorMessage = null;
         _annotsNotice = null;
+
+        // Lesen und Speichern dauern; ein Dateiwechsel dazwischen ist kein
+        // Sonderfall, sondern der Normalfall bei einem Reader. Ohne diese
+        // Fessel landeten die Annotationen von A in der Liste von B — und von
+        // dort beim nächsten Export in B hinein.
+        _annotsImportCts?.Cancel();
+        _annotsImportCts?.Dispose();
+        _annotsImportCts = new CancellationTokenSource();
+        var ct = _annotsImportCts.Token;
+        var generation = _docGeneration;
+        var pdfId = _currentPdfId.Value;
+
         try
         {
             using var ms = new MemoryStream(_originalPdfBytes);
-            var result = await Manipulator.ReadAnnotationsAsync(ms, _currentPdfId.Value, CancellationToken.None);
+            var result = await Manipulator.ReadAnnotationsAsync(ms, pdfId, ct);
+            if (generation != _docGeneration) return;
 
             var imported = new List<Annotation>(result.Annotations.Count);
             foreach (var item in result.Annotations)
             {
-                imported.Add(await Annotations.CreateAsync(item, CancellationToken.None));
+                ct.ThrowIfCancellationRequested();
+                imported.Add(await Annotations.CreateAsync(item, ct));
             }
+
+            // Letzte Gegenprobe VOR dem Veröffentlichen: zwischen der letzten
+            // Speicherung und hier kann das Dokument gewechselt haben.
+            if (generation != _docGeneration) return;
             if (imported.Count > 0) _annotations = _annotations.Concat(imported).ToList();
 
             _annotsNotice = result.Annotations.Count == 0 && result.Unsupported == 0
@@ -4124,9 +4198,16 @@
                 : L.T("reader.annots.importDone", new Dictionary<string, object>
                     { ["imported"] = result.Annotations.Count, ["unsupported"] = result.Unsupported });
         }
+        catch (OperationCanceledException)
+        {
+            // Erwartet: das Dokument wurde während des Imports gewechselt.
+        }
         catch (Exception ex)
         {
-            _errorMessage = $"Vorhandene PDF-Anmerkungen konnten nicht gelesen werden:\n{Describe(ex)}";
+            if (generation == _docGeneration)
+            {
+                _errorMessage = $"Vorhandene PDF-Anmerkungen konnten nicht gelesen werden:\n{Describe(ex)}";
+            }
         }
         finally
         {
@@ -4657,6 +4738,21 @@
             StateHasChanged();
         }
 
+        // Beobachter anhängen, sobald der jeweilige Bereich im DOM steht. Vor
+        // dem Render ist die ElementReference leer, ein Selektor wäre wieder
+        // dokumentweit und träfe im Split-View den falschen Bereich.
+        if (_watchContinuousPending && _continuousRoot.Id is not null)
+        {
+            _watchContinuousPending = false;
+            await WatchPagesAsync(ContinuousWatchKey, _continuousRoot, nameof(OnVisiblePagesChangedAsync));
+        }
+
+        if (_watchThumbsPending && _thumbsRoot.Id is not null)
+        {
+            _watchThumbsPending = false;
+            await WatchPagesAsync(ThumbnailWatchKey, _thumbsRoot, nameof(OnVisibleThumbnailsChangedAsync));
+        }
+
         // Drawing-Capture (FA-013/014): Page-Wechsel rendert das Canvas neu —
         // unsere pointer-Listener leben aber auf dem alten DOM-Element. Wenn ein
         // Zeichenmodus aktiv ist und die Page wechselte, JS-Capture neu attachen.
@@ -4740,6 +4836,9 @@
         // die JS-Seite in unload(handleId), das weiter unten läuft.
         _continuousCts?.Cancel();
         _thumbnailsCts?.Cancel();
+        _annotsImportCts?.Cancel();
+        _annotsImportCts?.Dispose();
+        _annotsImportCts = null;
         await StopWatchingPagesAsync(ContinuousWatchKey);
         await StopWatchingPagesAsync(ThumbnailWatchKey);
 

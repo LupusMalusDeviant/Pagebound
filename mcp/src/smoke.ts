@@ -1,6 +1,6 @@
 // Smoke test for the PDF operations (run after `npm run build`: `node dist/smoke.js`).
 // Bytes-in/bytes-out — no temp files; exercises every operation end-to-end.
-import { PDFArray, PDFBool, PDFDict, PDFDocument, PDFName, PDFString, StandardFonts, rgb } from "pdf-lib";
+import { PDFArray, PDFBool, PDFDict, PDFDocument, PDFName, PDFNumber, PDFString, StandardFonts, rgb } from "pdf-lib";
 import { readFile, readdir } from "node:fs/promises";
 import { unzipSync, strFromU8 } from "fflate";
 import forge from "node-forge";
@@ -14,6 +14,7 @@ import * as pdfua from "./pdfua.js";
 import * as sign from "./sign.js";
 import { encryptPdf } from "./encrypt.js";
 import * as annots from "./annots.js";
+import { annotItem } from "./annot-schema.js";
 
 let failures = 0;
 function check(name: string, cond: boolean, detail = "") {
@@ -208,6 +209,92 @@ async function main() {
 
     check("pdf_annotations_read meldet fremde Subtypen statt sie zu schlucken",
       (await annots.readAnnotations(await makeFormSample())).unsupported >= 1);
+
+    // ---- Rückfälle aus dem Codex-Review vom 2026-11-12 ----------------------
+
+    // Nr. 11: Das Gelesene muss unverändert wieder ins SCHEMA des Schreibers
+    // passen. Der Motor nahm es immer an; gescheitert ist zod an "color": null.
+    const backIn = ar.items
+      .filter((i) => i.kind !== "signature")
+      .map((i) => annotItem.safeParse(i));
+    check("Nr. 11: pdf_annotations_read-Ergebnis passt ins Schema von _write",
+      backIn.every((r) => r.success),
+      backIn.filter((r) => !r.success).map((r) => JSON.stringify(r.error?.issues?.[0])).join(" | "));
+
+    // Nr. 4: Klammern, Backslash und Unicode. PDFString.of hat nichts maskiert
+    // und kein UTF-16 gekonnt — "Grüße 😀 中" kam als "Grüße =\0 -" zurück.
+    const tricky = "unfinished ( finished ) back\\slash — Grüße 😀 中";
+    const tw = await annots.writeAnnotations(await makeSample(1, "Esc"), [
+      { kind: "note", pageNumber: 1, x: 0.3, y: 0.3, text: tricky },
+    ]);
+    const tr = await annots.readAnnotations(tw.bytes);
+    check("Nr. 4: Klammern, Backslash und Unicode überleben den Round-Trip",
+      tr.items[0]?.text === tricky, JSON.stringify(tr.items[0]?.text));
+
+    // Nr. 5: Gleiche /NM zweimal geschrieben ersetzt, statt zu verdoppeln.
+    const once = await annots.writeAnnotations(await makeSample(1, "NM"), [
+      { kind: "note", pageNumber: 1, x: 0.3, y: 0.3, text: "erste Fassung", id: "ann-same" },
+    ]);
+    const again = await annots.writeAnnotations(once.bytes, [
+      { kind: "note", pageNumber: 1, x: 0.3, y: 0.3, text: "zweite Fassung", id: "ann-same" },
+    ]);
+    const afterTwo = await annots.readAnnotations(again.bytes);
+    check("Nr. 5: gleiche /NM ersetzt statt zu verdoppeln",
+      afterTwo.items.length === 1 && afterTwo.items[0].text === "zweite Fassung" && again.replaced === 1,
+      `items=${afterTwo.items.length} replaced=${again.replaced} text=${JSON.stringify(afterTwo.items[0]?.text)}`);
+
+    // Nr. 9: Zehn Helvetica-W bei 16 pt brauchen 151 pt, nicht 96. Gemessen
+    // wird am Rechteck der geschriebenen Annotation.
+    const wideSrc = await makeSample(1, "Wide");
+    const wideInfo = await pdf.getInfo(wideSrc);
+    const pageW = wideInfo.pages[0].widthPt, pageH = wideInfo.pages[0].heightPt;
+    const ww = await annots.writeAnnotations(wideSrc, [
+      { kind: "text", pageNumber: 1, x: 0.05, y: 0.2, text: "WWWWWWWWWW", fontSize: 16 / pageH },
+    ]);
+    // Das /Rect direkt aus der Datei: pdf_annotations_read gibt beim Freitext
+    // nur den Ankerpunkt zurück, die Breite ist genau das Gesuchte.
+    const wDoc = await PDFDocument.load(ww.bytes, { updateMetadata: false });
+    const wRect = (() => {
+      const arr = wDoc.getPage(0).node.Annots();
+      for (let i = 0; i < (arr?.size() ?? 0); i++) {
+        const d = arr!.lookup(i, PDFDict);
+        if ((d.lookup(PDFName.of("Subtype")) as PDFName)?.asString() !== "/FreeText") continue;
+        const r = d.lookup(PDFName.of("Rect"), PDFArray);
+        return [0, 1, 2, 3].map((k) => (r.lookup(k) as PDFNumber).asNumber());
+      }
+      return null;
+    })();
+    const wPt = wRect ? Math.abs(wRect[2] - wRect[0]) : 0;
+    check("Nr. 9: Freitext-Rechteck ist so breit, wie Helvetica es braucht",
+      wPt > 140 && wPt <= pageW, `Breite=${wPt.toFixed(1)}pt (nötig ≈151, Seite ${pageW.toFixed(0)}pt)`);
+
+    // Nr. 10: Die Notizmarke auf /Rotate 90 — bei einer Drehung um die Ecke
+    // statt um das ganze Rechteck lag die Marke 20 pt daneben.
+    const rot90 = await pdf.rotatePages(await makeSample(1, "Note90"), "1", 90);
+    const nw = await annots.writeAnnotations(rot90.bytes, [
+      { kind: "note", pageNumber: 1, x: 0.4, y: 0.35, text: "Marke" },
+    ]);
+    const nr = await annots.readAnnotations(nw.bytes);
+    const nItem = nr.items.find((i) => i.kind === "note");
+    const ndx = Math.abs((nItem?.x ?? 0) - 0.4), ndy = Math.abs((nItem?.y ?? 0) - 0.35);
+    check("Nr. 10: Notizmarke trifft ihre Stelle auch auf /Rotate 90",
+      ndx < 0.01 && ndy < 0.01, `dx=${ndx.toFixed(4)} dy=${ndy.toFixed(4)}`);
+
+    // Nr. 12 (kaputte /InkList wird gemeldet statt still gekürzt) und Nr. 8
+    // (Freitext-Drehung) prüft die Web-Suite in tests-js/annots.test.mjs
+    // gegen dieselbe Datei — annots.ts hier und pdf-annots.ts dort sind bis
+    // auf Kopfzeile und Importpfad identisch.
+
+    // Nr. 15: Zeitzone im /M. `D:...+02'00'` ist zwei Stunden VOR UTC.
+    check("Nr. 15: /M mit positivem Versatz wird nach UTC gerechnet",
+      annots.fromPdfDate("D:20261112100000+02'00'") === "2026-11-12T08:00:00.000Z",
+      String(annots.fromPdfDate("D:20261112100000+02'00'")));
+    check("Nr. 15: /M mit negativem Versatz wird nach UTC gerechnet",
+      annots.fromPdfDate("D:20261112100000-05'00'") === "2026-11-12T15:00:00.000Z",
+      String(annots.fromPdfDate("D:20261112100000-05'00'")));
+    check("Nr. 15: /M mit Z bleibt unverändert",
+      annots.fromPdfDate("D:20261112100000Z") === "2026-11-12T10:00:00.000Z",
+      String(annots.fromPdfDate("D:20261112100000Z")));
   }
 
   // forms
@@ -716,11 +803,22 @@ async function main() {
     check("determinism: pdf_reorder_pages", await twice(async () => (await pdf.reorderPages(detSrc, [3, 1, 2])).bytes));
     check("determinism: pdf_stamp", await twice(async () => (await pdf.stamp(detSrc, { watermarkText: "ENTWURF", pageNumbers: true })).bytes));
     // /M und /NM dürfen NICHT aus Uhr oder Zufall kommen, sonst bricht die Zusage.
-    check("determinism: pdf_annotations_write", await twice(async () =>
-      (await annots.writeAnnotations(detSrc, [{
-        kind: "highlight", pageNumber: 1, rects: [{ x: 0.2, y: 0.3, w: 0.25, h: 0.05 }],
-        id: "ann-stable01", modified: "2026-11-12T10:00:00.000Z",
-      }])).bytes));
+    //
+    // MIT PAUSE (Codex-Review 2026-11-12, Nr. 1): `twice` schreibt zweimal
+    // unmittelbar hintereinander. Das /ModDate, das pdf-lib beim Laden von
+    // sich aus setzte, hat Sekundenauflösung — zwei Läufe innerhalb derselben
+    // Sekunde waren deshalb byte-gleich, obwohl die Uhr sehr wohl mitschrieb.
+    // Eine Prüfung, die den Fehler strukturell nicht sehen kann, ist kein
+    // Nachweis; 1,2 s Abstand sieht ihn.
+    const annotBytes = async () => (await annots.writeAnnotations(detSrc, [{
+      kind: "highlight" as const, pageNumber: 1, rects: [{ x: 0.2, y: 0.3, w: 0.25, h: 0.05 }],
+      id: "ann-stable01", modified: "2026-11-12T10:00:00.000Z",
+    }])).bytes;
+    const detA = await annotBytes();
+    await new Promise((r) => setTimeout(r, 1200));
+    const detB = await annotBytes();
+    check("determinism: pdf_annotations_write (mit 1,2 s Abstand)",
+      Buffer.from(detA).equals(Buffer.from(detB)));
     check("determinism: pdf_set_metadata", await twice(async () => (await pdf.setMetadata(detSrc, { title: "Fest" })).bytes));
     check("determinism: pdf_to_pdfa (part 2)", await twice(async () => (await pdfa.toPdfA(detSrc, {})).bytes));
     check("determinism: pdf_to_pdfa (part 3 mit Anhang)", await twice(async () =>

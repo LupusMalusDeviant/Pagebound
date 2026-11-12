@@ -785,6 +785,41 @@ export function downloadBytes(
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+/**
+ * Herunterladen OHNE base64 — die Bytes kommen als Strom aus .NET.
+ *
+ * `downloadBytes` oben braucht eine base64-Zeichenkette. Die entsteht in C#
+ * (ein Drittel grösser als die Datei), reist als .NET-string durch den
+ * WASM-Heap (UTF-16, also nochmal doppelt) und wird hier wieder zu Bytes
+ * dekodiert. Bei 100 MB Ausgabe sind das rund 267 MB zusätzlicher Speicher
+ * neben Original, Ergebnis und Blob — genau der base64-Umweg, den die
+ * Leitplanken dieses Projekts für grosse PDFs verbieten.
+ *
+ * `streamRef` ist eine `DotNetStreamReference`; Blazor gibt ihr hier ein
+ * `arrayBuffer()`.
+ */
+export async function downloadStream(
+  filename: string,
+  streamRef: { arrayBuffer(): Promise<ArrayBuffer> },
+  mimeType: string
+): Promise<void> {
+  const buffer = await streamRef.arrayBuffer();
+  const blob = new Blob([buffer], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  try {
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  } finally {
+    // Nicht sofort: manche Browser brauchen die URL noch, während der
+    // Download anläuft.
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Signatur-Pad: freihändiges Zeichnen einer Unterschrift auf einem <canvas>.
 // Pointer-Events werden hier (JS) verarbeitet — pro Strich einen Interop-Call

@@ -128,6 +128,36 @@ export interface PageImageResult {
 /** Offene Blob-URLs je Handle — damit ein vergessener Pfad die Sitzung nicht leckt. */
 const pageImageUrls = new Map<string, Set<string>>();
 
+/**
+ * Zählt je Handle hoch, sobald es entladen wird.
+ *
+ * Nötig, weil ein Abbruch auf der C#-Seite nur das WARTEN beendet, nicht die
+ * Arbeit hier: der Lauf rendert zu Ende, erzeugt eine URL und trägt sie ein —
+ * notfalls in ein Set für ein Handle, das es nicht mehr gibt, und legt dieses
+ * Set damit neu an. Die Nummer entscheidet, ob ein fertiges Ergebnis noch
+ * jemandem gehört.
+ */
+const handleGenerations = new Map<string, number>();
+
+/** Laufende Renderaufträge je Handle — beim Entladen werden sie abgebrochen. */
+const inFlightRenders = new Map<string, Set<{ cancel(): void }>>();
+
+function generationOf(handleId: string): number {
+  return handleGenerations.get(handleId) ?? 0;
+}
+
+function trackRender(handleId: string, task: { cancel(): void }): () => void {
+  let set = inFlightRenders.get(handleId);
+  if (!set) { set = new Set(); inFlightRenders.set(handleId, set); }
+  set.add(task);
+  return () => {
+    const s = inFlightRenders.get(handleId);
+    if (!s) return;
+    s.delete(task);
+    if (s.size === 0) inFlightRenders.delete(handleId);
+  };
+}
+
 /** Nur für Prüfungen: wie viele Blob-URLs sind gerade offen? */
 export function openPageImageCount(handleId?: string): number {
   if (handleId !== undefined) return pageImageUrls.get(handleId)?.size ?? 0;
@@ -142,6 +172,11 @@ export async function renderPageToUrl(
   scale: number
 ): Promise<PageImageResult> {
   const doc = requireDoc(handleId);
+  // Stand zu Beginn merken: alles, was danach entladen wird, macht dieses
+  // Ergebnis herrenlos.
+  const generation = generationOf(handleId);
+  const stale = () => !documents.has(handleId) || generationOf(handleId) !== generation;
+
   const page: PDFPageProxy = await doc.getPage(pageNumber);
   const viewport = page.getViewport({ scale });
   const baseViewport = page.getViewport({ scale: 1 });
@@ -153,37 +188,73 @@ export async function renderPageToUrl(
   canvas.height = heightPx;
   const ctx = canvas.getContext("2d", { alpha: false });
   if (!ctx) {
+    // Die Leinwand auch hier abräumen — ein früher Ausstieg ist der Pfad, auf
+    // dem Aufräumen am leichtesten vergessen wird.
+    canvas.width = 0;
+    canvas.height = 0;
     throw new Error("Pagebound: failed to get 2D rendering context.");
   }
 
-  await page.render({ canvasContext: ctx, viewport, canvas }).promise;
+  try {
+    const task = page.render({ canvasContext: ctx, viewport, canvas });
+    const untrack = trackRender(handleId, task);
+    try {
+      await task.promise;
+    } finally {
+      untrack();
+    }
 
-  const blob = await new Promise<Blob | null>((resolve) =>
-    canvas.toBlob(resolve, "image/png")
-  );
-  if (!blob) {
-    throw new Error("Pagebound: canvas.toBlob lieferte kein Bild.");
+    // Zwischen Auftrag und Fertigstellung kann das Dokument entladen worden
+    // sein. Dann wird gar keine URL erzeugt: eine, die niemandem gehört,
+    // wird auch von niemandem widerrufen.
+    if (stale()) {
+      throw new StaleRenderError(handleId, pageNumber);
+    }
+
+    const blob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob(resolve, "image/png")
+    );
+    if (!blob) {
+      throw new Error("Pagebound: canvas.toBlob lieferte kein Bild.");
+    }
+    // toBlob ist asynchron — noch einmal prüfen, sonst entsteht die URL doch
+    // nach dem Entladen.
+    if (stale()) {
+      throw new StaleRenderError(handleId, pageNumber);
+    }
+
+    const url = URL.createObjectURL(blob);
+    let set = pageImageUrls.get(handleId);
+    if (!set) { set = new Set(); pageImageUrls.set(handleId, set); }
+    set.add(url);
+
+    return {
+      url,
+      pageNumber,
+      widthPx,
+      heightPx,
+      pageWidthPt: baseViewport.width,
+      pageHeightPt: baseViewport.height
+    };
+  } finally {
+    // Immer, auf jedem Pfad: ohne das bleibt der dekodierte Puffer hängen, bis
+    // der Sammler vorbeikommt — bei einem Fenster über viele Seiten ist das
+    // genau der Druck, den dieser Weg vermeiden soll.
+    canvas.width = 0;
+    canvas.height = 0;
   }
-  const url = URL.createObjectURL(blob);
+}
 
-  let set = pageImageUrls.get(handleId);
-  if (!set) { set = new Set(); pageImageUrls.set(handleId, set); }
-  set.add(url);
-
-  // Die Leinwand selbst freigeben: ohne das bleibt der dekodierte Puffer
-  // hängen, bis der Sammler vorbeikommt — bei einem Fenster über viele Seiten
-  // ist das genau der Druck, den dieser Weg vermeiden soll.
-  canvas.width = 0;
-  canvas.height = 0;
-
-  return {
-    url,
-    pageNumber,
-    widthPx,
-    heightPx,
-    pageWidthPt: baseViewport.width,
-    pageHeightPt: baseViewport.height
-  };
+/**
+ * Das Dokument wurde entladen oder gewechselt, während gerendert wurde. Kein
+ * Fehler im Sinne von „kaputt": der Aufrufer wollte das Bild nicht mehr.
+ */
+export class StaleRenderError extends Error {
+  readonly isStale = true;
+  constructor(handleId: string, pageNumber: number) {
+    super(`Pagebound: Seite ${pageNumber} von '${handleId}' wurde während des Renderns entladen.`);
+    this.name = "StaleRenderError";
+  }
 }
 
 /** Eine Blob-URL widerrufen und vergessen. Unbekannte URLs sind kein Fehler. */
@@ -226,15 +297,23 @@ interface PageWatch {
 
 const pageWatches = new Map<string, PageWatch>();
 
+/**
+ * `root` ist das Element SELBST, nicht ein Selektor, und `key` muss je
+ * Komponenteninstanz eindeutig sein.
+ *
+ * Vorher waren es feste Schlüssel und eine dokumentweite id. Der Split-View
+ * hält zwei Reader nebeneinander: der zweite klemmte den Beobachter des ersten
+ * ab und bekam obendrein dessen DOM-Wurzel untergeschoben — er sah damit die
+ * Sichtbarkeitsmeldungen des anderen Bereichs.
+ */
 export function observeVisiblePages(
   key: string,
-  rootSelector: string,
+  root: HTMLElement | null,
   dotNetRef: { invokeMethodAsync: (name: string, ...args: unknown[]) => Promise<unknown> },
   method: string
 ): boolean {
   stopObservingPages(key);
-  const root = document.querySelector(rootSelector) as HTMLElement | null;
-  if (!root) return false;
+  if (!root || typeof root.querySelectorAll !== "function") return false;
 
   const watch: PageWatch = { observer: null as unknown as IntersectionObserver, visible: new Set(), scheduled: false };
 
@@ -365,9 +444,19 @@ export async function getOutline(handleId: string): Promise<OutlineEntryDto[]> {
 }
 
 export async function unload(handleId: string): Promise<void> {
-  // Immer zuerst: die Blob-URLs haben kein Verfallsdatum und überleben das
-  // Dokument, wenn sie niemand widerruft — auch dann, wenn kein Dokument
-  // mehr unter diesem Handle liegt.
+  // Reihenfolge zählt. Erst die Nummer hochzählen, damit jeder laufende
+  // Renderauftrag sein Ergebnis als herrenlos erkennt und gar keine URL mehr
+  // erzeugt; dann die Aufträge abbrechen; dann die offenen URLs widerrufen.
+  handleGenerations.set(handleId, generationOf(handleId) + 1);
+
+  const running = inFlightRenders.get(handleId);
+  if (running) {
+    for (const task of running) {
+      try { task.cancel(); } catch { /* war schon fertig */ }
+    }
+    inFlightRenders.delete(handleId);
+  }
+
   releaseAllPageImages(handleId);
   const doc = documents.get(handleId);
   if (!doc) return;

@@ -36,6 +36,7 @@ import * as pdfua from "./pdfua.js";
 import * as sign from "./sign.js";
 import { encryptPdf } from "./encrypt.js";
 import * as annots from "./annots.js";
+import { annotItem } from "./annot-schema.js";
 
 const CHARACTER_LIMIT = 25_000;
 
@@ -176,6 +177,7 @@ const srcIn = {
 const outOpt = {
   outputPath: z.string().optional().describe("Wenn gesetzt: Ergebnis dorthin schreiben; sonst als 'dataBase64' zurückgeben."),
 };
+
 
 // --- tool registration -------------------------------------------------------
 
@@ -425,27 +427,6 @@ Seitenzahl-Format z. B. "{n} / {total}" oder "Bates {n}"; Position unten links/m
   // Der Unterschied zum Einbrennen ist der ganze Punkt: /Annots bleiben in
   // jedem Betrachter anwählbar und löschbar. Vertrag:
   // docs/contracts/annotationen-als-pdf-annots.md
-  const annotPoint = z.object({ x: z.number(), y: z.number() });
-  const annotItem = z.object({
-    kind: z.enum(["highlight", "ink", "shape", "note", "text"])
-      .describe("Art der Anmerkung. 'signature' gibt es hier NICHT — siehe pdf_sign."),
-    pageNumber: z.number().int().min(1).describe("1-basierte Seitenzahl."),
-    color: z.string().optional().describe('Farbe als "#rrggbb".'),
-    opacity: z.number().min(0).max(1).optional().describe("Deckkraft (nur highlight)."),
-    strokeWidth: z.number().optional().describe("Strichbreite als Anteil der angezeigten Seitenbreite."),
-    rects: z.array(z.object({ x: z.number(), y: z.number(), w: z.number(), h: z.number() })).optional()
-      .describe("Rechtecke (highlight), 0..1, Ursprung oben links."),
-    strokes: z.array(z.array(annotPoint)).optional().describe("Striche (ink), je Strich eine Punktfolge."),
-    shape: z.enum(["rectangle", "line", "arrow"]).optional(),
-    startX: z.number().optional(), startY: z.number().optional(),
-    endX: z.number().optional(), endY: z.number().optional(),
-    text: z.string().optional().describe("Inhalt (note, text) bzw. hervorgehobener Text (highlight)."),
-    fontSize: z.number().optional().describe("Schriftgröße als Anteil der angezeigten Seitenhöhe (text)."),
-    x: z.number().optional(), y: z.number().optional(),
-    id: z.string().optional().describe("Stabile Id → /NM. Weggelassen heißt: kein /NM."),
-    modified: z.string().optional().describe("ISO-8601-Zeitpunkt → /M. KEINE Systemuhr: ohne Angabe fehlt /M."),
-  });
-
   server.registerTool("pdf_annotations_write", {
     title: "Anmerkungen als PDF-Annotationen schreiben",
     description: `Schreibt Anmerkungen als echte /Annots in die PDF — Highlight, Stift (Ink), Rechteck/Linie/Pfeil, Notiz und Freitext.
@@ -453,6 +434,7 @@ Anders als beim Einbrennen bleiben sie in jedem Betrachter anwählbar, änderbar
 Koordinaten sind 0..1 mit Ursprung OBEN LINKS, bezogen auf die ANGEZEIGTE Seite (CropBox und /Rotate werden berücksichtigt).
 Erscheinungsbilder (/AP) werden bewusst nicht erzeugt; das macht der Betrachter aus /QuadPoints, /InkList, /L und /DA.
 Reproduzierbar: /M und /NM stammen aus 'modified' und 'id', nie aus Uhr oder Zufall.
+Trägt eine Anmerkung eine 'id', die in der Datei schon als /NM steht, wird die vorgefundene ERSETZT statt verdoppelt ('replaced' zählt das).
 Eingabe: 'path'/'dataBase64' plus 'annotations'. Ausgabe: 'outputPath' oder 'dataBase64'.`,
     inputSchema: {
       ...srcIn,
@@ -462,10 +444,12 @@ Eingabe: 'path'/'dataBase64' plus 'annotations'. Ausgabe: 'outputPath' oder 'dat
     annotations: writeAnn,
   }, guard(async (a: { path?: string; dataBase64?: string; annotations: annots.AnnotItem[]; outputPath?: string }) => {
     const r = await annots.writeAnnotations(await loadPdf(a), a.annotations);
-    const note = r.skipped > 0
-      ? `${r.written} Annotation(en) geschrieben, ${r.skipped} übersprungen.`
-      : `${r.written} Annotation(en) geschrieben.`;
-    return ok({ written: r.written, skipped: r.skipped, ...(await emitPdf(r.bytes, a.outputPath)) }, note);
+    const parts = [`${r.written} Annotation(en) geschrieben`];
+    if (r.replaced > 0) parts.push(`${r.replaced} davon ersetzt (gleiche /NM)`);
+    if (r.skipped > 0) parts.push(`${r.skipped} übersprungen`);
+    return ok(
+      { written: r.written, replaced: r.replaced, skipped: r.skipped, ...(await emitPdf(r.bytes, a.outputPath)) },
+      `${parts.join(", ")}.`);
   }));
 
   server.registerTool("pdf_annotations_read", {
