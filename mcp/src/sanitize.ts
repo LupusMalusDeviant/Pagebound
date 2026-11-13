@@ -117,28 +117,21 @@ function eigenerGrund(action: PDFDict, opt: Required<SanitizeOptions>): Grund | 
  * die schon in der Kette steht, und eine solche Datei würde den Säuberer sonst
  * bis zum Stapelüberlauf im Kreis schicken.
  */
-function gruendeInKette(
-  action: PDFDict,
-  opt: Required<SanitizeOptions>,
-  gesehen: Set<PDFDict> = new Set()
-): Array<[PDFDict, Grund]> {
+function aktionenDerKette(action: PDFDict, gesehen: Set<PDFDict> = new Set()): PDFDict[] {
   if (gesehen.has(action)) return [];
   gesehen.add(action);
 
-  const treffer: Array<[PDFDict, Grund]> = [];
-  const eigen = eigenerGrund(action, opt);
-  if (eigen) treffer.push([action, eigen]);
-
+  const alle = [action];
   const next = action.lookup(PDFName.of("Next"));
   if (next instanceof PDFDict) {
-    treffer.push(...gruendeInKette(next, opt, gesehen));
+    alle.push(...aktionenDerKette(next, gesehen));
   } else if (next instanceof PDFArray) {
     for (let i = 0; i < next.size(); i++) {
       const d = dictOrNull(next.lookup(i));
-      if (d) treffer.push(...gruendeInKette(d, opt, gesehen));
+      if (d) alle.push(...aktionenDerKette(d, gesehen));
     }
   }
-  return treffer;
+  return alle;
 }
 
 /**
@@ -300,13 +293,44 @@ export async function sanitize(input: Uint8Array, options: SanitizeOptions = {})
 
   /** Zählt die verbotenen Aktionen einer Kette; sagt, ob die Kette fällt. */
   const zaehleKette = (action: PDFDict): boolean => {
-    const treffer = gruendeInKette(action, opt);
-    for (const [dict, grund] of treffer) {
+    let weg = false;
+    for (const dict of aktionenDerKette(action)) {
+      const grund = eigenerGrund(dict, opt);
+      if (!grund) continue;
+      weg = true;
       if (gezaehlt.has(dict)) continue;
       gezaehlt.add(dict);
       removed[grund]++;
     }
-    return treffer.length > 0;
+    return weg;
+  };
+
+  /**
+   * Der Posten `annotationActions` — aber über die GANZE Kette.
+   *
+   * Vorher sah diese Regel nur die erste Aktion. Ein `/A` mit `/S /GoTo` und
+   * `/S /ResetForm` im `/Next` blieb deshalb vollständig stehen: der Sprung
+   * ist gewollter Inhalt und bleibt, und die Kettenprüfung kennt nur die drei
+   * Kategorien Skript, Herausgreifen und Link — `/ResetForm` ist keine davon.
+   * Gemeldet wurde `annotationActions: 0`, und ein Klick leerte weiterhin das
+   * Formular.
+   *
+   * `mitSprungUndLink` unterscheidet die zwei Träger: an `/A` bleiben Sprung
+   * und Link stehen (sie SIND der Inhalt der Annotation), an einem
+   * `/AA`-Auslöser nicht — dort ist nichts Inhalt.
+   */
+  const annotationsAktionen = (wurzel: PDFDict, mitSprungUndLink: boolean): boolean => {
+    if (!opt.annotationActions) return false;
+    let weg = false;
+    for (const dict of aktionenDerKette(wurzel)) {
+      if (eigenerGrund(dict, opt)) continue; // schon unter eigener Kategorie gezählt
+      if (mitSprungUndLink && BLEIBT_AM_FELD.includes(aktionsTyp(dict) ?? "")) continue;
+      weg = true;
+      if (gezaehlt.has(dict)) continue;
+      gezaehlt.add(dict);
+      removed.annotationActions++;
+    }
+    return weg;
   };
 
   /**
@@ -321,12 +345,12 @@ export async function sanitize(input: Uint8Array, options: SanitizeOptions = {})
   const aktionenSaeubern = (traeger: PDFDict, alsFeld: boolean): void => {
     const a = dictOrNull(traeger.lookup(PDFName.of("A")));
     if (a) {
-      let weg = zaehleKette(a);
-      if (!weg && alsFeld && opt.annotationActions && !BLEIBT_AM_FELD.includes(aktionsTyp(a) ?? "")) {
-        if (!gezaehlt.has(a)) { gezaehlt.add(a); removed.annotationActions++; }
-        weg = true;
-      }
-      if (weg) traeger.delete(PDFName.of("A"));
+      // Beide Prüfungen laufen, nicht nur die erste, die anschlägt: eine Kette
+      // kann ein Skript UND eine Formularaktion enthalten, und beide sollen in
+      // ihrem eigenen Posten auftauchen.
+      const verboten = zaehleKette(a);
+      const sonstige = alsFeld && annotationsAktionen(a, true);
+      if (verboten || sonstige) traeger.delete(PDFName.of("A"));
     }
 
     const aa = dictOrNull(traeger.lookup(PDFName.of("AA")));
@@ -334,12 +358,9 @@ export async function sanitize(input: Uint8Array, options: SanitizeOptions = {})
     for (const key of [...aa.keys()]) {
       const eintrag = dictOrNull(aa.lookup(key));
       if (!eintrag) continue;
-      let weg = zaehleKette(eintrag);
-      if (!weg && alsFeld && opt.annotationActions) {
-        if (!gezaehlt.has(eintrag)) { gezaehlt.add(eintrag); removed.annotationActions++; }
-        weg = true;
-      }
-      if (weg) aa.delete(key);
+      const verboten = zaehleKette(eintrag);
+      const sonstige = alsFeld && annotationsAktionen(eintrag, false);
+      if (verboten || sonstige) aa.delete(key);
     }
     if (aa.keys().length === 0) traeger.delete(PDFName.of("AA"));
   };

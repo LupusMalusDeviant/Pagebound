@@ -50,6 +50,14 @@ const MAX_PDF_BYTES = Number(process.env.MCP_MAX_PDF_BYTES) || 25 * 1024 * 1024;
 // JSON-RPC-Rahmen und mehrere Dateien in einem Aufruf.
 const HTTP_BODY_LIMIT = `${Math.ceil((MAX_PDF_BYTES * 4) / 3 / 1048576) + 8}mb`;
 
+// Dasselbe für stdio. Seit SDK 1.32 hat der Lesepuffer eine Vorgabe von 10 MiB,
+// und sie greift VOR dem Werkzeug: eine 8-MB-PDF ergibt base64 rund 11 MB, der
+// Puffer lief über, die Verbindung brach ab — ohne Antwort und ohne die
+// Fehlerkennung, die dieses Paket zusagt. Abgeleitet aus derselben Zahl wie das
+// HTTP-Limit, damit die beiden Wege dieselbe Grenze haben und ein zu grosser
+// Eingang in beiden Fällen als INPUT_TOO_LARGE zurückkommt.
+const STDIO_BUFFER_LIMIT = Math.ceil((MAX_PDF_BYTES * 4) / 3) + 8 * 1048576;
+
 /**
  * Serverversion aus der package.json — eine Quelle statt zweier (die beiden
  * Zahlen standen vorher auf 1.6.0 und 1.5.0). Aufrufer pinnen darauf; jede
@@ -970,7 +978,7 @@ function buildServer(): McpServer {
 
 async function runStdio() {
   const server = buildServer();
-  await server.connect(new StdioServerTransport());
+  await server.connect(new StdioServerTransport(undefined, undefined, { maxBufferSize: STDIO_BUFFER_LIMIT }));
   console.error("pagebound-pdf-mcp-server läuft (stdio).");
 }
 

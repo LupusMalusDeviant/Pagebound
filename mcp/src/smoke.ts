@@ -2,6 +2,8 @@
 // Bytes-in/bytes-out — no temp files; exercises every operation end-to-end.
 import { PDFArray, PDFBool, PDFDict, PDFDocument, PDFName, PDFNumber, PDFRef, PDFString, StandardFonts, rgb } from "pdf-lib";
 import { readFile, readdir } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { unzipSync, strFromU8 } from "fflate";
 import forge from "node-forge";
 import * as pdf from "./pdf.js";
@@ -852,6 +854,34 @@ async function main() {
     })();
     check("sanitize: eine Kette unter EINEM Namensbaumeintrag zaehlt zwei",
       ketteImBaum.removed.javascript === 2, JSON.stringify(ketteImBaum.removed));
+
+    // SCHRITT 11 — der Posten `annotationActions` sah nur die ERSTE Aktion.
+    // Ein /GoTo bleibt (Sprung ist Inhalt), und die Kettenpruefung kennt nur
+    // Skript, Herausgreifen und Link — /ResetForm ist keines davon. Die
+    // Formularaktion blieb damit stehen, gemeldet als annotationActions: 0.
+    const sprungMitReset = await (async () => {
+      const d = await PDFDocument.create();
+      const p = d.addPage([200, 200]);
+      const c = d.context;
+      p.node.set(PDFName.of("Annots"), c.obj([c.register(c.obj({
+        Type: PDFName.of("Annot"), Subtype: PDFName.of("Link"), Rect: c.obj([10, 10, 100, 30]),
+        A: c.register(c.obj({
+          S: PDFName.of("GoTo"), D: c.obj([p.ref, PDFName.of("Fit")]),
+          Next: c.register(c.obj({ S: PDFName.of("ResetForm") })),
+        })),
+      }))]));
+      return d.save({ useObjectStreams: false });
+    })();
+    const sprungSauber = await sanitize.sanitize(sprungMitReset);
+    const nachSprung = await PDFDocument.load(sprungSauber.bytes, { updateMetadata: false });
+    const annotsNachher = nachSprung.getPage(0).node.lookup(PDFName.of("Annots"));
+    const ersteAnnot = annotsNachher instanceof PDFArray ? annotsNachher.lookup(0) : null;
+    check("sanitize: eine /ResetForm im /Next eines Sprungs faellt und wird gezaehlt",
+      sprungSauber.removed.annotationActions === 1
+      && ersteAnnot instanceof PDFDict && ersteAnnot.get(PDFName.of("A")) === undefined,
+      JSON.stringify(sprungSauber.removed));
+    check("sanitize: die Annotation selbst bleibt dabei stehen",
+      annotsNachher instanceof PDFArray && annotsNachher.size() === 1);
   }
 
   // forms
@@ -1966,6 +1996,71 @@ async function main() {
       "PROCESSING_FAILED", "INTERNAL"]; // INVALID_INPUT ist der Default und steht nirgends explizit
     const unused = declared.filter((c) => !sources.some((src) => src.includes(`, "${c}")`)));
     check("error contract: jede dokumentierte Kennung wird auch vergeben", unused.length === 0, unused.join(","));
+  }
+
+  // --- Transport: eine grosse Eingabe ueber stdio ----------------------------
+  // Der Rest dieser Suite ruft die Motoren DIREKT. Der Transport dazwischen
+  // ist damit strukturell ungeprueft — und genau dort sass der Fehler: seit
+  // SDK 1.32 hat der Lesepuffer eine Vorgabe von 10 MiB, eine 8-MB-PDF ergibt
+  // base64 rund 11 MB, und die Verbindung brach ab, bevor ein Werkzeug auch
+  // nur anlief. Kein Ergebnis, keine Fehlerkennung, nichts.
+  //
+  // Geprueft wird deshalb am laufenden Server, ueber stdio, mit einer Eingabe
+  // jenseits der 10 MiB.
+  {
+    const gross = await (async () => {
+      const d = await PDFDocument.create();
+      d.addPage([200, 200]);
+      // Roher, unkomprimierter Strom: die Datei wird so gross wie der Inhalt.
+      d.catalog.set(PDFName.of("PageboundBallast"), d.context.register(d.context.stream("A".repeat(9_000_000))));
+      return d.save({ useObjectStreams: false });
+    })();
+    const base64 = Buffer.from(gross).toString("base64");
+
+    const antwort = await new Promise<string>((loese) => {
+      const kind = spawn(process.execPath, [fileURLToPath(new URL("./index.js", import.meta.url))], {
+        stdio: ["pipe", "pipe", "ignore"],
+      });
+      let aus = "";
+      let fertig = false;
+      const beenden = (text: string) => {
+        if (fertig) return;
+        fertig = true;
+        kind.kill();
+        loese(text);
+      };
+      const wecker = setTimeout(() => beenden("ZEITUEBERSCHREITUNG"), 60_000);
+      kind.stdout.on("data", (b: Buffer) => {
+        aus += b.toString("utf8");
+        for (const zeile of aus.split("\n")) {
+          if (!zeile.trim().startsWith("{")) continue;
+          try {
+            const o = JSON.parse(zeile) as { id?: number };
+            if (o.id === 2) { clearTimeout(wecker); beenden(zeile); }
+          } catch { /* noch unvollstaendig */ }
+        }
+      });
+      kind.on("error", () => { clearTimeout(wecker); beenden("START FEHLGESCHLAGEN"); });
+      kind.on("exit", () => { clearTimeout(wecker); beenden(aus || "VERBINDUNG ABGEBROCHEN"); });
+      // Ohne diesen Fänger beendet der Fehlerfall den SELBSTTEST: bricht der
+      // Server mitten im Schreiben ab, wirft stdin EPIPE, und das war beim
+      // Nachstellen ein Absturz statt einer roten Prüfung.
+      kind.stdin.on("error", () => { clearTimeout(wecker); beenden(aus || "SCHREIBEN ABGEBROCHEN"); });
+      const sende = (o: unknown) => { if (!fertig && kind.stdin.writable) kind.stdin.write(JSON.stringify(o) + "\n"); };
+      sende({
+        jsonrpc: "2.0", id: 1, method: "initialize",
+        params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "smoke", version: "1" } },
+      });
+      sende({ jsonrpc: "2.0", method: "notifications/initialized" });
+      sende({
+        jsonrpc: "2.0", id: 2, method: "tools/call",
+        params: { name: "pdf_info", arguments: { dataBase64: base64 } },
+      });
+    });
+
+    check(`transport: stdio nimmt eine Eingabe ueber 10 MiB an (base64 ${(base64.length / 1048576).toFixed(1)} MB)`,
+      antwort.includes('"id":2') && antwort.includes("Seite"),
+      antwort.slice(0, 200));
   }
   process.stdout.write(failures === 0 ? "\nALL PASS\n" : `\n${failures} FAILURE(S)\n`);
   process.exit(failures === 0 ? 0 : 1);
