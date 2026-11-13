@@ -721,6 +721,124 @@ async function main() {
       gemischt.removed.javascript === 1 && gemischt.removed.launchActions === 1
       && gemischt.removed.externalLinks === 0,
       JSON.stringify(gemischt.removed));
+
+    // SCHRITT 10 — die vier Befunde der FÜNFTEN Codex-Runde. Drei davon
+    // betreffen das Fegen: es ist nur so gut wie das Markieren davor, und es
+    // nützt nichts, wenn der Verweis auf den Fund anderswo stehen bleibt.
+
+    // (1) Ein Objekt, das pdf-lib nicht zerlegen konnte, ist für das
+    //     Markieren eine Blackbox. Hier: ein Strom mit einem /Length, das auf
+    //     ein nicht vorhandenes Objekt zeigt — vom Format erlaubt, von
+    //     pdf-lib als PDFInvalidObject abgelegt. Der Verweis auf Objekt 5
+    //     steht NUR in seinen Rohbytes.
+    const rohProbe = Buffer.from([
+      "%PDF-1.7\n",
+      "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n",
+      "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n",
+      "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200]",
+      " /Resources << /XObject << /Fx 4 0 R >> >> /Contents 6 0 R >>\nendobj\n",
+      "4 0 obj\n<< /Type /XObject /Subtype /Form /BBox [0 0 10 10] /Hilf 5 0 R /Length 9 0 R >>\n",
+      "stream\nq (stream) Q\nendstream\nendobj\n",
+      "5 0 obj\n<< /Marke (NUR_IM_ROHOBJEKT) >>\nendobj\n",
+      "6 0 obj\n<< /Length 0 >>\nstream\n\nendstream\nendobj\n",
+      "trailer\n<< /Size 7 /Root 1 0 R >>\n%%EOF\n",
+    ].join(""), "latin1");
+    const rohSauber = await sanitize.sanitize(rohProbe);
+    check("sanitize: ein Verweis in einem unzerlegbaren Objekt schuetzt sein Ziel",
+      await imKlartext(rohProbe, "NUR_IM_ROHOBJEKT")
+      && await imKlartext(rohSauber.bytes, "NUR_IM_ROHOBJEKT"),
+      "das Markieren muss die Rohbytes mitlesen, sonst fegt es fremdes Gut fort");
+
+    // (2) Ein Popup zeigt über /Parent auf seine Annotation zurück. Die
+    //     Anlage aus der /Annots-Liste zu nehmen genügt dann nicht — die
+    //     Annotation bleibt erreichbar, und ihr /FS mit ihr.
+    const popupProbe = await (async () => {
+      const d = await PDFDocument.create();
+      const p = d.addPage([200, 200]);
+      const c = d.context;
+      const spec = c.register(c.obj({
+        Type: PDFName.of("Filespec"), F: PDFString.of("privat.txt"),
+        EF: c.obj({ F: c.register(c.stream("PRIVAT_ANHANG_INHALT")) }),
+      }));
+      const anlage = c.obj({
+        Type: PDFName.of("Annot"), Subtype: PDFName.of("FileAttachment"),
+        Rect: c.obj([10, 10, 30, 30]), FS: spec,
+      });
+      const anlageRef = c.register(anlage);
+      const popup = c.register(c.obj({
+        Type: PDFName.of("Annot"), Subtype: PDFName.of("Popup"),
+        Rect: c.obj([40, 10, 120, 60]), Parent: anlageRef,
+      }));
+      anlage.set(PDFName.of("Popup"), popup);
+      p.node.set(PDFName.of("Annots"), c.obj([anlageRef, popup]));
+      return d.save({ useObjectStreams: false });
+    })();
+    const popupSauber = await sanitize.sanitize(popupProbe);
+    check("sanitize: ein Popup haelt die Dateianlage nicht am Leben",
+      popupSauber.removed.embeddedFiles === 1
+      && await imKlartext(popupProbe, "PRIVAT_ANHANG_INHALT")
+      && !(await imKlartext(popupSauber.bytes, "PRIVAT_ANHANG_INHALT")),
+      JSON.stringify(popupSauber.removed));
+
+    // (3) /AF darf auch an einem Struktur-Element hängen, nicht nur am
+    //     Katalog und an Seiten.
+    const strukturProbe = await (async () => {
+      const d = await PDFDocument.create();
+      d.addPage([200, 200]);
+      const c = d.context;
+      const spec = c.register(c.obj({
+        Type: PDFName.of("Filespec"), F: PDFString.of("struktur.txt"),
+        EF: c.obj({ F: c.register(c.stream("STRUKTUR_ANHANG_INHALT")) }),
+      }));
+      d.catalog.set(PDFName.of("Names"), c.register(c.obj({
+        EmbeddedFiles: c.register(c.obj({ Names: c.obj([PDFString.of("struktur.txt"), spec]) })),
+      })));
+      d.catalog.set(PDFName.of("StructTreeRoot"), c.register(c.obj({
+        Type: PDFName.of("StructTreeRoot"),
+        K: c.register(c.obj({
+          Type: PDFName.of("StructElem"), S: PDFName.of("Document"), AF: c.obj([spec]),
+        })),
+      })));
+      return d.save({ useObjectStreams: false });
+    })();
+    const strukturSauber = await sanitize.sanitize(strukturProbe);
+    check("sanitize: /AF an einem Struktur-Element haelt den Anhang nicht am Leben",
+      strukturSauber.removed.embeddedFiles === 1
+      && await imKlartext(strukturProbe, "STRUKTUR_ANHANG_INHALT")
+      && !(await imKlartext(strukturSauber.bytes, "STRUKTUR_ANHANG_INHALT")),
+      JSON.stringify(strukturSauber.removed));
+
+    // (4) Der Namensbaum zaehlte an allen anderen Zaehlregeln vorbei: er sah
+    //     weder, dass ein Skript geteilt wird, noch dass eines eine Kette hat.
+    const geteiltesSkript = await (async () => {
+      const d = await PDFDocument.create();
+      d.addPage([200, 200]);
+      const c = d.context;
+      const js = c.register(c.obj({ S: PDFName.of("JavaScript"), JS: PDFString.of("einmal.geheim();") }));
+      d.catalog.set(PDFName.of("Names"), c.register(c.obj({
+        JavaScript: c.register(c.obj({ Names: c.obj([PDFString.of("a"), js]) })),
+      })));
+      d.catalog.set(PDFName.of("OpenAction"), js);
+      return sanitize.sanitize(await d.save({ useObjectStreams: false }));
+    })();
+    check("sanitize: ein Skript in Namensbaum UND /OpenAction zaehlt einmal",
+      geteiltesSkript.removed.javascript === 1, JSON.stringify(geteiltesSkript.removed));
+
+    const ketteImBaum = await (async () => {
+      const d = await PDFDocument.create();
+      d.addPage([200, 200]);
+      const c = d.context;
+      const zweites = c.register(c.obj({ S: PDFName.of("JavaScript"), JS: PDFString.of("zweites.geheim();") }));
+      const erstes = c.register(c.obj({
+        S: PDFName.of("JavaScript"), JS: PDFString.of("erstes.geheim();"), Next: zweites,
+      }));
+      d.catalog.set(PDFName.of("Names"), c.register(c.obj({
+        JavaScript: c.register(c.obj({ Names: c.obj([PDFString.of("a"), erstes]) })),
+      })));
+      return sanitize.sanitize(await d.save({ useObjectStreams: false }));
+    })();
+    check("sanitize: eine Kette unter EINEM Namensbaumeintrag zaehlt zwei",
+      ketteImBaum.removed.javascript === 2, JSON.stringify(ketteImBaum.removed));
   }
 
   // forms

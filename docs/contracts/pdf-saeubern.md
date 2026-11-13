@@ -112,6 +112,35 @@ hat „Sanitize PDF"; dem Datenschutz-Produkt fehlt es.
 >    Fassung aus Nachtrag 2, unbemerkt). Beide Wege werden abgeräumt, die
 >    Anlage zählt dabei **einmal**.
 
+> **Nachtrag 4 (nach der fünften Codex-Runde, 2026-11-13).** Die Runde prüfte
+> das Fegen aus Nachtrag 3. Es bleibt, aber es war an drei Stellen zu naiv —
+> und eine vierte Stelle zählte an allen Zählregeln vorbei.
+>
+> 1. **Das Fegen ist nur so gut wie das Markieren.** Ein Objekt, das pdf-lib
+>    nicht zerlegen konnte (`PDFInvalidObject` — etwa ein Strom mit einem
+>    `/Length`, das auf ein fehlendes Objekt zeigt; vom Format erlaubt), ist
+>    für den Markierer eine Blackbox. Seine Verweise waren unsichtbar, und was
+>    sie hielten, fegte der Durchgang fort: gemessen verlor eine Form-XObject
+>    ihre Schrift, und die Textextraktion lieferte danach `stream` statt
+>    `ABCDEF`. **Festlegung: die Rohbytes solcher Objekte werden nach `N M R`
+>    abgesucht und alles Gefundene mitmarkiert.** Zu viel zu markieren lässt
+>    ein Objekt liegen; zu wenig zerstört die Datei — die Richtung des Irrtums
+>    ist hier nicht beliebig.
+> 2. **Eine Dateianlage aus der Liste zu nehmen genügt nicht.** Ein Popup zeigt
+>    über `/Parent` auf seine Annotation zurück, ein getaggtes Dokument über
+>    `/OBJR /Obj`. Beides hält die Annotation erreichbar — und mit ihr den
+>    Anhang. **Festlegung: `/FS` wird am Objekt gelöst, nicht nur die
+>    Annotation aus `/Annots` genommen; ihr Popup geht mit.**
+> 3. **`/AF` steht nicht nur am Katalog und an Seiten.** Struktur-Elemente,
+>    Annotationen und XObjects dürfen es ebenfalls tragen. **Festlegung: der
+>    `/AF`-Durchgang läuft über alle erreichbaren Wörterbücher**, nach
+>    Namensbaum und Annotationen, damit jede Anlage genau einmal zählt.
+> 4. **Der Namensbaum zählte an den Zählregeln vorbei.** Er zählte Einträge
+>    statt Aktionen: ein Skript, das sich Namensbaum und `/OpenAction` teilen,
+>    ergab `2`; eine `/Next`-Kette unter einem Eintrag ergab `1`. **Festlegung:
+>    jeder Eintrag läuft durch dieselbe Kettenzählung mit demselben
+>    Gedächtnis wie jede andere Stelle.**
+
 ## Das Problem
 
 Eine PDF kann weit mehr mitbringen als Seiten: JavaScript, das beim Öffnen

@@ -35,7 +35,7 @@
 // Zufalls-Ids, `updateMetadata: false` beim Laden.
 // =============================================================================
 
-import { PDFDocument, PDFDict, PDFName, PDFArray, PDFRef, PDFStream } from "pdf-lib";
+import { PDFDocument, PDFDict, PDFName, PDFArray, PDFRef, PDFStream, PDFInvalidObject } from "pdf-lib";
 import { NO_METADATA_BUMP } from "./pdf.js";
 
 export interface SanitizeOptions {
@@ -165,12 +165,45 @@ function namensbaumWerte(wurzel: PDFDict | null): unknown[] {
 }
 
 /**
- * Jedes indirekte Objekt, das von den Wurzeln des Dokuments aus erreichbar
- * ist. Wurzeln sind alle Einträge des Trailers — `/Root`, `/Info`, `/ID` und
- * was sonst dort steht.
+ * Verweise aus einem Objekt herauslesen, das pdf-lib nicht zerlegen konnte.
+ *
+ * `PDFInvalidObject` entsteht zum Beispiel bei einem Strom mit indirektem
+ * `/Length` — vom Format ausdrücklich erlaubt. Für das Markieren ist so ein
+ * Objekt eine Blackbox: seine Verweise sind unsichtbar, und was sie halten,
+ * fiele dem Fegen zum Opfer. Gemessen: eine Form-XObject mit indirektem
+ * `/Length` verlor ihre Schrift, und die Textextraktion lieferte danach
+ * `stream` statt `ABCDEF`.
+ *
+ * Deshalb werden seine Rohbytes nach `N M R` abgesucht. Zu viel zu markieren
+ * ist harmlos — dann bleibt ein Objekt liegen. Zu wenig zerstört die Datei.
  */
-function erreichbare(doc: PDFDocument): Set<string> {
-  const erreicht = new Set<string>();
+function refsAusRohbytes(obj: PDFInvalidObject): PDFRef[] {
+  const puffer = new Uint8Array(obj.sizeInBytes());
+  obj.copyBytesInto(puffer, 0);
+  const text = Buffer.from(puffer).toString("latin1");
+  const treffer: PDFRef[] = [];
+  const muster = /(\d+)\s+(\d+)\s+R\b/g;
+  let m: RegExpExecArray | null;
+  while ((m = muster.exec(text)) !== null) {
+    treffer.push(PDFRef.of(Number(m[1]), Number(m[2])));
+  }
+  return treffer;
+}
+
+/**
+ * Jedes indirekte Objekt, das von den Wurzeln des Dokuments aus erreichbar
+ * ist, und jedes erreichbare Wörterbuch. Wurzeln sind alle Einträge des
+ * Trailers — `/Root`, `/Info`, `/ID` und was sonst dort steht.
+ *
+ * Die Wörterbücher kommen mit zurück, weil `/AF` (associated files) nicht nur
+ * am Katalog und an Seiten stehen darf, sondern auch an Struktur-Elementen,
+ * Annotationen und XObjects. Wer nur die zwei bekannten Stellen abräumt, lässt
+ * einen angeblich entfernten Anhang über die dritte am Leben.
+ */
+function erreichbare(doc: PDFDocument): { refs: Set<string>; dicts: PDFDict[] } {
+  const refs = new Set<string>();
+  const dicts: PDFDict[] = [];
+  const gesehen = new Set<PDFDict>();
   const offen: unknown[] = Object.values(doc.context.trailerInfo as Record<string, unknown>);
 
   while (offen.length > 0) {
@@ -178,8 +211,8 @@ function erreichbare(doc: PDFDocument): Set<string> {
 
     if (wert instanceof PDFRef) {
       const schluessel = wert.toString();
-      if (erreicht.has(schluessel)) continue;
-      erreicht.add(schluessel);
+      if (refs.has(schluessel)) continue;
+      refs.add(schluessel);
       offen.push(doc.context.lookup(wert));
       continue;
     }
@@ -187,13 +220,19 @@ function erreichbare(doc: PDFDocument): Set<string> {
       for (let i = 0; i < wert.size(); i++) offen.push(wert.get(i));
       continue;
     }
+    if (wert instanceof PDFInvalidObject) {
+      for (const ref of refsAusRohbytes(wert)) offen.push(ref);
+      continue;
+    }
     // Ein Strom trägt sein Wörterbuch bei sich; dessen Verweise zählen mit
     // (etwa `/SMask` an einem Bild).
     const dict = wert instanceof PDFDict ? wert : (wert instanceof PDFStream ? wert.dict : null);
-    if (!dict) continue;
+    if (!dict || gesehen.has(dict)) continue;
+    gesehen.add(dict);
+    dicts.push(dict);
     for (const key of dict.keys()) offen.push(dict.get(key));
   }
-  return erreicht;
+  return { refs, dicts };
 }
 
 /**
@@ -209,7 +248,7 @@ function erreichbare(doc: PDFDocument): Set<string> {
  * eine frühere Fassung des Seiteninhalts enthalten.
  */
 function fegen(doc: PDFDocument): number {
-  const erreicht = erreichbare(doc);
+  const { refs: erreicht } = erreichbare(doc);
   let n = 0;
   for (const [ref] of doc.context.enumerateIndirectObjects()) {
     if (erreicht.has(ref.toString())) continue;
@@ -293,13 +332,13 @@ export async function sanitize(input: Uint8Array, options: SanitizeOptions = {})
     if (aa.keys().length === 0) traeger.delete(PDFName.of("AA"));
   };
 
-  // Dieselbe Dateianlage hängt oft an ZWEI Stellen: im Namensbaum
-  // `/EmbeddedFiles` und zusätzlich in `/AF` (associated files) am Katalog
-  // oder an einer Seite — pdf-lib selbst schreibt beides. Wer nur den
-  // Namensbaum abhängt, lässt die Anlage über `/AF` erreichbar; wer das
-  // Objekt stattdessen löscht, lässt in `/AF` einen toten Verweis zurück.
-  // Dieses Gedächtnis sorgt dafür, dass beide Wege abgeräumt werden und die
-  // Anlage trotzdem nur EINMAL zählt.
+  // Dieselbe Dateianlage hängt oft an MEHREREN Stellen: im Namensbaum
+  // `/EmbeddedFiles`, an einer `/FileAttachment`-Annotation und zusätzlich in
+  // `/AF` (associated files) — am Katalog, an einer Seite, an einem
+  // Struktur-Element, an einer Annotation, an einem XObject. pdf-lib selbst
+  // schreibt Namensbaum UND Katalog-`/AF`. Wer nur eine Stelle abhängt, lässt
+  // die Anlage über die anderen erreichbar. Dieses Gedächtnis sorgt dafür,
+  // dass alle Wege abgeräumt werden und die Anlage trotzdem EINMAL zählt.
   const anhaenge = new Set<PDFDict>();
 
   const afSaeubern = (traeger: PDFDict): void => {
@@ -329,7 +368,18 @@ export async function sanitize(input: Uint8Array, options: SanitizeOptions = {})
     if (opt.javascript) {
       const js = dictOrNull(names.lookup(PDFName.of("JavaScript")));
       if (js) {
-        removed.javascript += namensbaumWerte(js).length;
+        for (const wert of namensbaumWerte(js)) {
+          const aktion = dictOrNull(wert);
+          // Durch denselben Zähler wie alle anderen Stellen: ein Skript, das
+          // sich Namensbaum und `/OpenAction` teilen, ist EIN Fund, und ein
+          // Eintrag mit `/Next` sind mehrere. Beides sah die blosse
+          // Längenzählung nicht.
+          if (!aktion) { removed.javascript++; continue; }
+          if (zaehleKette(aktion)) continue;
+          // Ein Eintrag im JavaScript-Baum ohne `/S /JavaScript` — manche
+          // Erzeuger schreiben nur `/JS`. Er zählt trotzdem, einmal.
+          if (!gezaehlt.has(aktion)) { gezaehlt.add(aktion); removed.javascript++; }
+        }
         names.delete(PDFName.of("JavaScript"));
       }
     }
@@ -354,19 +404,20 @@ export async function sanitize(input: Uint8Array, options: SanitizeOptions = {})
     katalog.delete(PDFName.of("OpenAction"));
   }
 
-  // --- /AA und /AF am Katalog -----------------------------------------------
+  // --- /AA am Katalog -------------------------------------------------------
   aktionenSaeubern(katalog, false);
-  afSaeubern(katalog);
 
-  // --- Seiten: /AA, /AF und die Annotationen --------------------------------
+  // --- Seiten: /AA und die Annotationen -------------------------------------
   for (const page of doc.getPages()) {
     aktionenSaeubern(page.node, false);
-    afSaeubern(page.node);
 
     const annots = page.node.lookup(PDFName.of("Annots"));
     if (!(annots instanceof PDFArray)) continue;
 
-    for (let i = annots.size() - 1; i >= 0; i--) {
+    const raus = new Set<number>();
+    const popups = new Set<string>();
+
+    for (let i = 0; i < annots.size(); i++) {
       const annot = dictOrNull(annots.lookup(i));
       if (!annot) continue;
 
@@ -379,12 +430,26 @@ export async function sanitize(input: Uint8Array, options: SanitizeOptions = {})
           if (spec) anhaenge.add(spec);
           removed.embeddedFiles++;
         }
-        annots.remove(i);
+        // Den Anhang AM OBJEKT lösen, nicht nur die Annotation aus der Liste
+        // nehmen. Ein Popup zeigt über `/Parent` auf sie zurück, ein
+        // getaggtes Dokument über `/OBJR /Obj` — beides hält die Annotation
+        // am Leben, und dann hinge der Anhang weiter daran.
+        annot.delete(PDFName.of("FS"));
+        const popup = annot.get(PDFName.of("Popup"));
+        if (popup instanceof PDFRef) popups.add(popup.toString());
+        raus.add(i);
         besucht.add(annot);
         continue;
       }
 
       einmal(annot, true);
+    }
+
+    // Zweiter Durchgang: die Anlagen und ihre Popups aus der Liste nehmen.
+    // Ein Popup kann vor seiner Annotation stehen, deshalb nicht im ersten.
+    for (let i = annots.size() - 1; i >= 0; i--) {
+      const ref = annots.get(i);
+      if (raus.has(i) || (ref instanceof PDFRef && popups.has(ref.toString()))) annots.remove(i);
     }
   }
 
@@ -436,6 +501,17 @@ export async function sanitize(input: Uint8Array, options: SanitizeOptions = {})
         if (n) stapel.push(n);
       }
     }
+  }
+
+  // --- /AF, wo immer es steht ----------------------------------------------
+  // Nicht nur am Katalog und an Seiten: `/AF` darf auch an Struktur-Elementen,
+  // Annotationen und XObjects hängen. Ein Anhang, der im Namensbaum abgehängt
+  // wurde, bliebe über jede dieser Stellen am Leben — gemeldet als entfernt,
+  // tatsächlich noch da. Deshalb läuft dieser Durchgang über ALLE erreichbaren
+  // Wörterbücher, und er läuft NACH Namensbaum und Annotationen, damit jede
+  // Anlage schon bekannt ist und nur einmal zählt.
+  if (opt.embeddedFiles) {
+    for (const d of erreichbare(doc).dicts) afSaeubern(d);
   }
 
   // --- Metadaten -------------------------------------------------------------
