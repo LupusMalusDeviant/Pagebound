@@ -978,7 +978,33 @@ function buildServer(): McpServer {
 
 async function runStdio() {
   const server = buildServer();
-  await server.connect(new StdioServerTransport(undefined, undefined, { maxBufferSize: STDIO_BUFFER_LIMIT }));
+  const transport = new StdioServerTransport(undefined, undefined, { maxBufferSize: STDIO_BUFFER_LIMIT });
+  await server.connect(transport);
+
+  // Läuft der Lesepuffer trotzdem über, schliesst das SDK die Verbindung —
+  // ohne Antwort und ohne Kennung. Dieses Paket sagt stabile Fehlerkennungen
+  // zu, also wird noch eine geschrieben, bevor es still wird: dieselbe
+  // Kennung wie im HTTP-Weg und im Werkzeug-Fehlerpfad, damit Aufrufer nur
+  // einen Fall kennen müssen. `id: null` ist der Fall, den JSON-RPC dafür
+  // vorsieht — die Anfrage wurde nie gelesen, ihre Id ist unbekannt.
+  //
+  // Erst NACH connect(): `Protocol.connect` setzt `onerror` selbst und würde
+  // einen vorher gesetzten Fänger überschreiben.
+  const weiterReichen = transport.onerror;
+  transport.onerror = (err: Error) => {
+    if (/ReadBuffer exceeded maximum size/.test(String(err?.message ?? err))) {
+      process.stdout.write(JSON.stringify({
+        jsonrpc: "2.0",
+        id: null,
+        error: {
+          code: -32600,
+          message: `Anfrage überschreitet das stdio-Puffer-Limit dieses Servers (${STDIO_BUFFER_LIMIT} Bytes).`,
+          data: { code: "INPUT_TOO_LARGE", stdioBufferLimit: STDIO_BUFFER_LIMIT, maxBytesPerFile: MAX_PDF_BYTES },
+        },
+      }) + "\n");
+    }
+    weiterReichen?.(err);
+  };
   console.error("pagebound-pdf-mcp-server läuft (stdio).");
 }
 

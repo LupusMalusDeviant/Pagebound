@@ -2008,6 +2008,56 @@ async function main() {
   // Geprueft wird deshalb am laufenden Server, ueber stdio, mit einer Eingabe
   // jenseits der 10 MiB.
   {
+    /**
+     * Startet den gebauten Server als eigenen Prozess, schickt ihm einen
+     * `pdf_info`-Aufruf und gibt die erste Zeile zurueck, die eine Antwort auf
+     * diesen Aufruf ist — ein Ergebnis mit `id: 2` oder ein Fehler.
+     */
+    const frageUeberStdio = (base64: string, env: Record<string, string> = {}) =>
+      new Promise<string>((loese) => {
+        const kind = spawn(process.execPath, [fileURLToPath(new URL("./index.js", import.meta.url))], {
+          stdio: ["pipe", "pipe", "ignore"],
+          env: { ...process.env, ...env },
+        });
+        let aus = "";
+        let fertig = false;
+        const beenden = (text: string) => {
+          if (fertig) return;
+          fertig = true;
+          clearTimeout(wecker);
+          kind.kill();
+          loese(text);
+        };
+        const wecker = setTimeout(() => beenden("ZEITUEBERSCHREITUNG"), 120_000);
+        kind.stdout.on("data", (b: Buffer) => {
+          aus += b.toString("utf8");
+          for (const zeile of aus.split("\n")) {
+            if (!zeile.trim().startsWith("{")) continue;
+            try {
+              const o = JSON.parse(zeile) as { id?: number | null; error?: unknown };
+              if (o.id === 2 || o.error) beenden(zeile);
+            } catch { /* noch unvollstaendig */ }
+          }
+        });
+        kind.on("error", () => beenden("START FEHLGESCHLAGEN"));
+        kind.on("exit", () => beenden(aus || "VERBINDUNG ABGEBROCHEN"));
+        // Ohne diesen Fänger beendet der Fehlerfall den SELBSTTEST: bricht der
+        // Server mitten im Schreiben ab, wirft stdin EPIPE, und das war beim
+        // Nachstellen ein Absturz statt einer roten Prüfung.
+        kind.stdin.on("error", () => beenden(aus || "SCHREIBEN ABGEBROCHEN"));
+        const sende = (o: unknown) => { if (!fertig && kind.stdin.writable) kind.stdin.write(JSON.stringify(o) + "\n"); };
+        sende({
+          jsonrpc: "2.0", id: 1, method: "initialize",
+          params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "smoke", version: "1" } },
+        });
+        sende({ jsonrpc: "2.0", method: "notifications/initialized" });
+        sende({
+          jsonrpc: "2.0", id: 2, method: "tools/call",
+          params: { name: "pdf_info", arguments: { dataBase64: base64 } },
+        });
+      });
+
+    // (a) Gueltige Eingabe jenseits der SDK-Vorgabe von 10 MiB: muss durch.
     const gross = await (async () => {
       const d = await PDFDocument.create();
       d.addPage([200, 200]);
@@ -2016,51 +2066,21 @@ async function main() {
       return d.save({ useObjectStreams: false });
     })();
     const base64 = Buffer.from(gross).toString("base64");
-
-    const antwort = await new Promise<string>((loese) => {
-      const kind = spawn(process.execPath, [fileURLToPath(new URL("./index.js", import.meta.url))], {
-        stdio: ["pipe", "pipe", "ignore"],
-      });
-      let aus = "";
-      let fertig = false;
-      const beenden = (text: string) => {
-        if (fertig) return;
-        fertig = true;
-        kind.kill();
-        loese(text);
-      };
-      const wecker = setTimeout(() => beenden("ZEITUEBERSCHREITUNG"), 60_000);
-      kind.stdout.on("data", (b: Buffer) => {
-        aus += b.toString("utf8");
-        for (const zeile of aus.split("\n")) {
-          if (!zeile.trim().startsWith("{")) continue;
-          try {
-            const o = JSON.parse(zeile) as { id?: number };
-            if (o.id === 2) { clearTimeout(wecker); beenden(zeile); }
-          } catch { /* noch unvollstaendig */ }
-        }
-      });
-      kind.on("error", () => { clearTimeout(wecker); beenden("START FEHLGESCHLAGEN"); });
-      kind.on("exit", () => { clearTimeout(wecker); beenden(aus || "VERBINDUNG ABGEBROCHEN"); });
-      // Ohne diesen Fänger beendet der Fehlerfall den SELBSTTEST: bricht der
-      // Server mitten im Schreiben ab, wirft stdin EPIPE, und das war beim
-      // Nachstellen ein Absturz statt einer roten Prüfung.
-      kind.stdin.on("error", () => { clearTimeout(wecker); beenden(aus || "SCHREIBEN ABGEBROCHEN"); });
-      const sende = (o: unknown) => { if (!fertig && kind.stdin.writable) kind.stdin.write(JSON.stringify(o) + "\n"); };
-      sende({
-        jsonrpc: "2.0", id: 1, method: "initialize",
-        params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "smoke", version: "1" } },
-      });
-      sende({ jsonrpc: "2.0", method: "notifications/initialized" });
-      sende({
-        jsonrpc: "2.0", id: 2, method: "tools/call",
-        params: { name: "pdf_info", arguments: { dataBase64: base64 } },
-      });
-    });
-
+    const antwort = await frageUeberStdio(base64);
     check(`transport: stdio nimmt eine Eingabe ueber 10 MiB an (base64 ${(base64.length / 1048576).toFixed(1)} MB)`,
       antwort.includes('"id":2') && antwort.includes("Seite"),
       antwort.slice(0, 200));
+
+    // (b) Jenseits des PUFFERS. Die Grenze wird fuer diesen Lauf heruntergesetzt
+    //     (MCP_MAX_PDF_BYTES), damit die Probe klein bleibt — geprueft wird das
+    //     Verhalten, nicht die Zahl. Das SDK raeumt den Puffer und schliesst die
+    //     Verbindung; ohne eigenen Faenger kaeme hier gar nichts zurueck, und
+    //     die Zusage „stabile Fehlerkennungen" waere an dieser Stelle Papier.
+    const zuGross = "A".repeat(10 * 1024 * 1024);
+    const ueberlauf = await frageUeberStdio(zuGross, { MCP_MAX_PDF_BYTES: String(1024 * 1024) });
+    check("transport: jenseits des Puffers kommt INPUT_TOO_LARGE statt Schweigen",
+      ueberlauf.includes("INPUT_TOO_LARGE") && ueberlauf.includes('"jsonrpc"'),
+      ueberlauf.slice(0, 200));
   }
   process.stdout.write(failures === 0 ? "\nALL PASS\n" : `\n${failures} FAILURE(S)\n`);
   process.exit(failures === 0 ? 0 : 1);
