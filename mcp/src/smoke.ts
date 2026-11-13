@@ -749,6 +749,19 @@ async function main() {
       && await imKlartext(rohSauber.bytes, "NUR_IM_ROHOBJEKT"),
       "das Markieren muss die Rohbytes mitlesen, sonst fegt es fremdes Gut fort");
 
+    // Dasselbe mit einem Kommentar und einem Nullbyte zwischen den Marken.
+    // Beides trennt laut Format (§ 7.2.2/7.2.3) genauso wie ein Leerzeichen,
+    // und beides faellt nicht unter das `\s` einer JavaScript-Regex.
+    for (const [was, trenner] of [["einem Kommentar", "%Anmerkung\n"], ["einem Nullbyte", "\0"]]) {
+      const probe = Buffer.from(rohProbe.toString("latin1")
+        .replace("/Hilf 5 0 R", `/Hilf 5${trenner}0 R`), "latin1");
+      const sauberTrenner = await sanitize.sanitize(probe);
+      check(`sanitize: ein Verweis mit ${was} getrennt wird auch gefunden`,
+        await imKlartext(probe, "NUR_IM_ROHOBJEKT")
+        && await imKlartext(sauberTrenner.bytes, "NUR_IM_ROHOBJEKT"),
+        JSON.stringify(trenner));
+    }
+
     // (2) Ein Popup zeigt über /Parent auf seine Annotation zurück. Die
     //     Anlage aus der /Annots-Liste zu nehmen genügt dann nicht — die
     //     Annotation bleibt erreichbar, und ihr /FS mit ihr.

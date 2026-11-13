@@ -176,15 +176,27 @@ function namensbaumWerte(wurzel: PDFDict | null): unknown[] {
  *
  * Deshalb werden seine Rohbytes nach `N M R` abgesucht. Zu viel zu markieren
  * ist harmlos — dann bleibt ein Objekt liegen. Zu wenig zerstört die Datei.
+ *
+ * Getrennt werden die drei Marken durch PDF-Zwischenraum ODER einen
+ * Kommentar. Beides steht im Format (§ 7.2.2 und 7.2.3), und beides deckt
+ * das `\s` einer JavaScript-Regex NICHT ab: `\0` fehlt ihm, Kommentare
+ * ohnehin. `/F1 5%Anmerkung\n0 R` wurde deshalb übersehen, und die Schrift
+ * dahinter weggefegt.
  */
+const TRENNER = String.raw`(?:[\0\t\n\f\r ]|%[^\r\n]*)+`;
+const REF_MUSTER = new RegExp(
+  String.raw`(\d+)${TRENNER}(\d+)${TRENNER}R(?![0-9A-Za-z])`, "g");
+
 function refsAusRohbytes(obj: PDFInvalidObject): PDFRef[] {
   const puffer = new Uint8Array(obj.sizeInBytes());
   obj.copyBytesInto(puffer, 0);
   const text = Buffer.from(puffer).toString("latin1");
   const treffer: PDFRef[] = [];
-  const muster = /(\d+)\s+(\d+)\s+R\b/g;
+  // Eine globale Regex trägt ihren Stand mit sich; vor jedem Durchlauf
+  // zurücksetzen, sonst beginnt der zweite Aufruf mitten im Text.
+  REF_MUSTER.lastIndex = 0;
   let m: RegExpExecArray | null;
-  while ((m = muster.exec(text)) !== null) {
+  while ((m = REF_MUSTER.exec(text)) !== null) {
     treffer.push(PDFRef.of(Number(m[1]), Number(m[2])));
   }
   return treffer;
