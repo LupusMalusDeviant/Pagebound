@@ -62,7 +62,7 @@ RUN dotnet publish Pagebound.Web.csproj \
 # /etc/nginx/modules/10_http_brotli.conf; Sites kommen aus /etc/nginx/http.d/*.conf;
 # nginx.post-install legt dort default.conf (404-default_server) und /run/nginx an.
 # Geprüft wird das Image im CI-Job „Docker image smoke" (ci.yml).
-FROM alpine:3.22 AS runtime
+FROM alpine:3.24 AS runtime
 
 # post-install legt /etc/nginx/http.d/default.conf an: ein default_server auf :80,
 # der ALLES mit 404 beantwortet und unseren Block aussticht (so im CI-Smoke
