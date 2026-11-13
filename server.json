@@ -3,7 +3,7 @@
   "name": "io.github.LupusMalusDeviant/pagebound",
   "title": "Pagebound PDF — tokenless MCP server",
   "description": "PDF tools for agents: pages, merge/split, forms, AES-256, PDF/A, ZUGFeRD, signing, OCR, designs.",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "websiteUrl": "https://pagebound.app.lupusmalus.dev",
   "repository": {
     "url": "https://github.com/LupusMalusDeviant/Pagebound",
@@ -20,7 +20,7 @@
   "packages": [
     {
       "registryType": "oci",
-      "identifier": "ghcr.io/lupusmalusdeviant/pagebound-mcp:2.1.0",
+      "identifier": "ghcr.io/lupusmalusdeviant/pagebound-mcp:2.2.0",
       "runtimeHint": "docker",
       "runtimeArguments": [
         { "type": "named", "name": "-i", "description": "Keep stdin open for the stdio transport." },
