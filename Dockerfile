@@ -23,7 +23,7 @@ RUN npm run build
 # -----------------------------------------------------------------------------
 # Stage 2: .NET — restore & publish Blazor WASM
 # -----------------------------------------------------------------------------
-FROM mcr.microsoft.com/dotnet/sdk:10.0 AS dotnetbuild
+FROM mcr.microsoft.com/dotnet/sdk:11.0 AS dotnetbuild
 WORKDIR /src
 
 # Copy source projects (Pagebound.Web references Core + Infrastructure)
