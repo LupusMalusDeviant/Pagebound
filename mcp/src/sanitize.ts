@@ -9,18 +9,33 @@
 //
 // Drei Festlegungen, die hier sichtbar werden:
 //   * Je Posten eine ZAHL zurück, kein „fertig". Wer zwölf Anhänge vermutet
-//     und drei entfernt bekommt, muss das sehen. Gezählt wird je ENTFERNTER
-//     AKTION, nicht je Träger (Nachtrag 2 im Vertrag).
+//     und drei entfernt bekommt, muss das sehen. Gezählt wird je VERBOTENER
+//     AKTION, auch innerhalb einer /Next-Kette (Nachtrag 3 im Vertrag).
 //   * Der Seiteninhalt bleibt. Säubern ist kein Flachklopfen: Annotationen,
 //     Formularfelder und Lesezeichen überleben, nur ihre Aktionen gehen.
 //   * Entfernt heisst gelöscht, nicht abgehängt. Ein abgehängter Datenstrom
 //     steht weiter lesbar in der Datei (Nachtrag 1 im Vertrag).
 //
+// DER AUFBAU — erst abhängen, dann fegen.
+//
+// Das Löschen läuft NICHT entlang einer Liste bekannter Nutzlast-Schlüssel.
+// Dieser Weg wurde versucht und war zweimal falsch: er folgte dem Ziel einer
+// `/GoTo`-Aktion bis in den Seitenbaum und löschte die Seite, und er übersah
+// die Ströme unter `/EF /DOS`, `/Mac` und `/Unix`, weil sie nicht auf der
+// Liste standen. Eine Liste, die beides richtig hätte, müsste das ganze
+// Format kennen — und ein geteiltes Objekt riss sie trotzdem mit.
+//
+// Stattdessen: der Durchlauf HÄNGT nur ab (löscht Schlüssel, nimmt Einträge
+// aus Feldern), und danach fegt `fegen()` jedes indirekte Objekt fort, das
+// von der Wurzel aus nicht mehr erreichbar ist. Das trifft die Nutzlast
+// zuverlässig, lässt Seiten und geteilte Objekte in Ruhe und braucht keine
+// Vorannahme darüber, wo eine PDF ihre Geheimnisse ablegt.
+//
 // Reproduzierbarkeit (MCP-Zusage seit 2.0.0): keine Systemuhr, keine
 // Zufalls-Ids, `updateMetadata: false` beim Laden.
 // =============================================================================
 
-import { PDFDocument, PDFDict, PDFName, PDFArray, PDFRef } from "pdf-lib";
+import { PDFDocument, PDFDict, PDFName, PDFArray, PDFRef, PDFStream } from "pdf-lib";
 import { NO_METADATA_BUMP } from "./pdf.js";
 
 export interface SanitizeOptions {
@@ -62,21 +77,6 @@ const HERAUSGREIFEND = ["Launch", "GoToR", "SubmitForm", "ImportData"];
  */
 const BLEIBT_AM_FELD = ["GoTo", "URI"];
 
-/**
- * Schlüssel, unter denen eine Aktion oder eine Dateianlage ihre Nutzlast oder
- * ihren Nachfolger hält. `loescheTief` folgt genau diesen — das ist die Liste,
- * an der entscheidet, ob am Ende noch Klartext in der Datei steht.
- *
- *   /JS   Quelltext des Skripts (Strom ODER String, oft indirekt)
- *   /Next nachgeschaltete Aktion(en) — die eigentliche Falle (Befund 2)
- *   /F    Dateiangabe einer /Launch-Aktion bzw. der Strom in einem /EF
- *   /UF   dasselbe in Unicode
- *   /D    Ziel einer /GoToR-Aktion
- *   /Win  Windows-Teil einer /Launch-Aktion (enthält den Programmpfad)
- *   /EF   die eingebetteten Ströme einer Dateianlage
- */
-const NUTZLAST = ["JS", "Next", "F", "UF", "D", "Win", "EF"];
-
 /** `/Info`-Feld, das als einziges stehen bleibt (siehe Vertrag). */
 const INFO_BLEIBT = "/Producer";
 
@@ -102,103 +102,119 @@ function eigenerGrund(action: PDFDict, opt: Required<SanitizeOptions>): Grund | 
 }
 
 /**
- * Entscheidet, ob eine Aktion fällt — aus eigenem Recht oder weil ihr
- * Nachfolger fällt.
+ * Alle verbotenen Aktionen einer `/Next`-Kette, mit ihrem jeweiligen Grund.
  *
- * Die `/Next`-Kette wird IMMER weiterverfolgt, auch wenn die Aktion selbst
- * bleiben dürfte. Vorher brach die Prüfung beim ersten erkannten Typ ab, und
- * genau das war der Weg an der Vorgabe vorbei: `externalLinks` steht per
- * Vorgabe AUS, also blieb ein `/URI` stehen — und mit ihm das JavaScript in
- * seinem `/Next`. Jeder Posten meldete dabei 0.
+ * Die Kette wird IMMER ganz durchlaufen, auch wenn die erste Aktion bleiben
+ * dürfte, und sie wird GANZ gezählt, nicht nur bis zum ersten Treffer. Zwei
+ * Gründe dafür, beide aus Codex-Runden:
+ *
+ *   * `externalLinks` steht per Vorgabe AUS. Ein `/URI` mit JavaScript im
+ *     `/Next` ging deshalb im Normalbetrieb durch, und jeder Posten meldete 0.
+ *   * Zwei verkettete Skripte verschwanden beide, gemeldet wurde `1`. Eine
+ *     Zahl, die nicht zählt, verfehlt den erklärten Zweck des Berichts.
  *
  * `gesehen` bricht Zyklen ab: `/Next` darf laut Format auf eine Aktion zeigen,
  * die schon in der Kette steht, und eine solche Datei würde den Säuberer sonst
  * bis zum Stapelüberlauf im Kreis schicken.
  */
-function faelltWeg(
+function gruendeInKette(
   action: PDFDict,
   opt: Required<SanitizeOptions>,
   gesehen: Set<PDFDict> = new Set()
-): Grund | null {
-  if (gesehen.has(action)) return null;
+): Array<[PDFDict, Grund]> {
+  if (gesehen.has(action)) return [];
   gesehen.add(action);
 
+  const treffer: Array<[PDFDict, Grund]> = [];
   const eigen = eigenerGrund(action, opt);
-  if (eigen) return eigen;
+  if (eigen) treffer.push([action, eigen]);
 
   const next = action.lookup(PDFName.of("Next"));
-  if (next instanceof PDFDict) return faelltWeg(next, opt, gesehen);
-  if (next instanceof PDFArray) {
+  if (next instanceof PDFDict) {
+    treffer.push(...gruendeInKette(next, opt, gesehen));
+  } else if (next instanceof PDFArray) {
     for (let i = 0; i < next.size(); i++) {
       const d = dictOrNull(next.lookup(i));
-      const grund = d ? faelltWeg(d, opt, gesehen) : null;
-      if (grund) return grund;
+      if (d) treffer.push(...gruendeInKette(d, opt, gesehen));
     }
   }
-  return null;
+  return treffer;
 }
 
 /**
- * Löscht ein Objekt samt allem, was unter {@link NUTZLAST} daran hängt.
- *
- * Den Verweis bloss zu entfernen genügt nicht. Der eingebettete Datenstrom,
- * der Skriptquelltext und der Programmpfad einer `/Launch`-Aktion blieben als
- * verwaiste Objekte in der Datei stehen — `strings` findet sie, jedes
- * Reparaturwerkzeug hängt sie wieder ein. Für ein Werkzeug, dessen ganzer
- * Zweck „das ist jetzt raus" ist, wäre das die falsche Art von Sauberkeit.
- *
- * `gesehen` verhindert, dass ein von zwei Seiten verwendetes Objekt zweimal
- * besucht wird (und bricht Zyklen ab).
+ * Die Werte eines Namensbaums. Gelöscht wird hier nichts — das besorgt
+ * `fegen()`, sobald der Baum vom Katalog abgehängt ist. Zurück kommen die
+ * aufgelösten Werte und nicht nur ihre Zahl, weil dieselbe Dateianlage auch
+ * unter `/AF` hängen kann und dann nicht zweimal zählen darf.
  */
-function loescheTief(doc: PDFDocument, wert: unknown, gesehen: Set<string> = new Set()): void {
-  if (wert instanceof PDFRef) {
-    const schluessel = wert.toString();
-    if (gesehen.has(schluessel)) return;
-    gesehen.add(schluessel);
-    loescheInhalt(doc, doc.context.lookup(wert), gesehen);
-    doc.context.delete(wert);
-    return;
-  }
-  // Ein direktes (nicht indirektes) Dict hat kein eigenes Objekt, seine Kinder
-  // aber oft schon — der Strom unter /EF etwa.
-  loescheInhalt(doc, wert, gesehen);
-}
+function namensbaumWerte(wurzel: PDFDict | null): unknown[] {
+  if (!wurzel) return [];
+  const werte: unknown[] = [];
 
-function loescheInhalt(doc: PDFDocument, ziel: unknown, gesehen: Set<string>): void {
-  if (ziel instanceof PDFArray) {
-    for (let i = 0; i < ziel.size(); i++) loescheTief(doc, ziel.get(i), gesehen);
-    return;
-  }
-  if (!(ziel instanceof PDFDict)) return;
-  for (const name of NUTZLAST) {
-    const wert = ziel.get(PDFName.of(name));
-    if (wert !== undefined) loescheTief(doc, wert, gesehen);
-  }
-}
-
-/**
- * Räumt einen Namensbaum ab: zählt die Einträge UND löscht die Objekte, auf
- * die sie zeigen (siehe {@link loescheTief}).
- */
-function raeumeNamensbaum(doc: PDFDocument, wurzel: PDFDict | null): number {
-  if (!wurzel) return 0;
-  let n = 0;
-
+  // [name, wert, name, wert, …] — nur die ungeraden Plätze sind Werte.
   const names = wurzel.lookup(PDFName.of("Names"));
   if (names instanceof PDFArray) {
-    // [name, wert, name, wert, …] — nur die ungeraden Plätze sind Werte.
-    for (let i = 1; i < names.size(); i += 2) {
-      loescheTief(doc, names.get(i));
-      n++;
-    }
+    for (let i = 1; i < names.size(); i += 2) werte.push(names.lookup(i));
   }
 
   const kids = wurzel.lookup(PDFName.of("Kids"));
   if (kids instanceof PDFArray) {
-    for (let i = 0; i < kids.size(); i++) {
-      n += raeumeNamensbaum(doc, dictOrNull(kids.lookup(i)));
-      loescheTief(doc, kids.get(i));
+    for (let i = 0; i < kids.size(); i++) werte.push(...namensbaumWerte(dictOrNull(kids.lookup(i))));
+  }
+  return werte;
+}
+
+/**
+ * Jedes indirekte Objekt, das von den Wurzeln des Dokuments aus erreichbar
+ * ist. Wurzeln sind alle Einträge des Trailers — `/Root`, `/Info`, `/ID` und
+ * was sonst dort steht.
+ */
+function erreichbare(doc: PDFDocument): Set<string> {
+  const erreicht = new Set<string>();
+  const offen: unknown[] = Object.values(doc.context.trailerInfo as Record<string, unknown>);
+
+  while (offen.length > 0) {
+    const wert = offen.pop();
+
+    if (wert instanceof PDFRef) {
+      const schluessel = wert.toString();
+      if (erreicht.has(schluessel)) continue;
+      erreicht.add(schluessel);
+      offen.push(doc.context.lookup(wert));
+      continue;
     }
+    if (wert instanceof PDFArray) {
+      for (let i = 0; i < wert.size(); i++) offen.push(wert.get(i));
+      continue;
+    }
+    // Ein Strom trägt sein Wörterbuch bei sich; dessen Verweise zählen mit
+    // (etwa `/SMask` an einem Bild).
+    const dict = wert instanceof PDFDict ? wert : (wert instanceof PDFStream ? wert.dict : null);
+    if (!dict) continue;
+    for (const key of dict.keys()) offen.push(dict.get(key));
+  }
+  return erreicht;
+}
+
+/**
+ * Fegt jedes indirekte Objekt fort, das nicht mehr erreichbar ist.
+ *
+ * Das ist die eigentliche Löschung. Abgehängte Skriptquelltexte, Anhänge,
+ * Aktionsketten und der XMP-Strom verschwinden hier — ohne dass der Säuberer
+ * wissen muss, unter welchem Schlüssel eine PDF sie abgelegt hat, und ohne
+ * dass er ein Objekt mitreisst, das noch jemandem gehört.
+ *
+ * Verwaiste Objekte, die schon beim Laden niemandem gehörten, gehen mit. Für
+ * ein Säuberungswerkzeug ist das kein Nebeneffekt: ein verwaistes Objekt kann
+ * eine frühere Fassung des Seiteninhalts enthalten.
+ */
+function fegen(doc: PDFDocument): number {
+  const erreicht = erreichbare(doc);
+  let n = 0;
+  for (const [ref] of doc.context.enumerateIndirectObjects()) {
+    if (erreicht.has(ref.toString())) continue;
+    doc.context.delete(ref);
+    n++;
   }
   return n;
 }
@@ -226,30 +242,40 @@ export async function sanitize(input: Uint8Array, options: SanitizeOptions = {})
   const katalog = doc.catalog;
   const names = dictOrNull(katalog.lookup(PDFName.of("Names")));
 
+  // Ein Aktionsobjekt kann an mehreren Stellen hängen (zwei Annotationen, die
+  // sich dasselbe `/A` teilen; ein `/Next`, das auch für sich verwendet wird).
+  // Gezählt wird es einmal.
+  const gezaehlt = new Set<PDFDict>();
+
+  /** Zählt die verbotenen Aktionen einer Kette; sagt, ob die Kette fällt. */
+  const zaehleKette = (action: PDFDict): boolean => {
+    const treffer = gruendeInKette(action, opt);
+    for (const [dict, grund] of treffer) {
+      if (gezaehlt.has(dict)) continue;
+      gezaehlt.add(dict);
+      removed[grund]++;
+    }
+    return treffer.length > 0;
+  };
+
   /**
-   * Säubert `/A` und `/AA` an einem Träger.
+   * Hängt `/A` und `/AA` an einem Träger ab.
    *
    * `alsFeld` unterscheidet die zwei Sorten von Trägern: an einer Annotation
    * oder einem Formularfeld fällt unter `annotationActions` auch eine Aktion
    * ohne eigenen Grund (ausser Sprung und Link). Am Katalog, an einer Seite
    * und an einem Lesezeichen fällt nur, was aus eigenem Recht fällt — dort
    * ist ein `/O`-Auslöser mit einem Sprung normales Verhalten.
-   *
-   * Gezählt wird je Aktion, nicht je Bündel: ein `/AA` mit drei Skripten
-   * meldete vorher `javascript: 1`. Eine Zahl, die nicht zählt, ist der
-   * Hauptzweck des Berichts verfehlt.
    */
   const aktionenSaeubern = (traeger: PDFDict, alsFeld: boolean): void => {
     const a = dictOrNull(traeger.lookup(PDFName.of("A")));
     if (a) {
-      const grund = faelltWeg(a, opt);
-      const unterAnnotationActions =
-        !grund && alsFeld && opt.annotationActions && !BLEIBT_AM_FELD.includes(aktionsTyp(a) ?? "");
-      if (grund || unterAnnotationActions) {
-        if (grund) removed[grund]++; else removed.annotationActions++;
-        loescheTief(doc, traeger.get(PDFName.of("A")));
-        traeger.delete(PDFName.of("A"));
+      let weg = zaehleKette(a);
+      if (!weg && alsFeld && opt.annotationActions && !BLEIBT_AM_FELD.includes(aktionsTyp(a) ?? "")) {
+        if (!gezaehlt.has(a)) { gezaehlt.add(a); removed.annotationActions++; }
+        weg = true;
       }
+      if (weg) traeger.delete(PDFName.of("A"));
     }
 
     const aa = dictOrNull(traeger.lookup(PDFName.of("AA")));
@@ -257,21 +283,39 @@ export async function sanitize(input: Uint8Array, options: SanitizeOptions = {})
     for (const key of [...aa.keys()]) {
       const eintrag = dictOrNull(aa.lookup(key));
       if (!eintrag) continue;
-      const grund = faelltWeg(eintrag, opt);
-      if (grund) removed[grund]++;
-      else if (alsFeld && opt.annotationActions) removed.annotationActions++;
-      else continue; // harmloser Auslöser an Katalog/Seite/Lesezeichen: bleibt
-      loescheTief(doc, aa.get(key));
-      aa.delete(key);
+      let weg = zaehleKette(eintrag);
+      if (!weg && alsFeld && opt.annotationActions) {
+        if (!gezaehlt.has(eintrag)) { gezaehlt.add(eintrag); removed.annotationActions++; }
+        weg = true;
+      }
+      if (weg) aa.delete(key);
     }
-    if (aa.keys().length === 0) {
-      loescheTief(doc, traeger.get(PDFName.of("AA")));
-      traeger.delete(PDFName.of("AA"));
+    if (aa.keys().length === 0) traeger.delete(PDFName.of("AA"));
+  };
+
+  // Dieselbe Dateianlage hängt oft an ZWEI Stellen: im Namensbaum
+  // `/EmbeddedFiles` und zusätzlich in `/AF` (associated files) am Katalog
+  // oder an einer Seite — pdf-lib selbst schreibt beides. Wer nur den
+  // Namensbaum abhängt, lässt die Anlage über `/AF` erreichbar; wer das
+  // Objekt stattdessen löscht, lässt in `/AF` einen toten Verweis zurück.
+  // Dieses Gedächtnis sorgt dafür, dass beide Wege abgeräumt werden und die
+  // Anlage trotzdem nur EINMAL zählt.
+  const anhaenge = new Set<PDFDict>();
+
+  const afSaeubern = (traeger: PDFDict): void => {
+    if (!opt.embeddedFiles) return;
+    const af = traeger.lookup(PDFName.of("AF"));
+    if (!(af instanceof PDFArray)) return;
+    for (let i = af.size() - 1; i >= 0; i--) {
+      const spec = dictOrNull(af.lookup(i));
+      if (spec && !anhaenge.has(spec)) { anhaenge.add(spec); removed.embeddedFiles++; }
+      af.remove(i);
     }
+    traeger.delete(PDFName.of("AF"));
   };
 
   // Ein Widget steht in `/Annots` der Seite UND in `/AcroForm /Fields`. Ohne
-  // dieses Gedächtnis zählte derselbe Fund zweimal.
+  // dieses Gedächtnis liefe der Träger zweimal durch.
   const besucht = new Set<PDFDict>();
   const einmal = (knoten: PDFDict, alsFeld: boolean): boolean => {
     if (besucht.has(knoten)) return false;
@@ -285,16 +329,18 @@ export async function sanitize(input: Uint8Array, options: SanitizeOptions = {})
     if (opt.javascript) {
       const js = dictOrNull(names.lookup(PDFName.of("JavaScript")));
       if (js) {
-        removed.javascript += raeumeNamensbaum(doc, js);
-        loescheTief(doc, names.get(PDFName.of("JavaScript")));
+        removed.javascript += namensbaumWerte(js).length;
         names.delete(PDFName.of("JavaScript"));
       }
     }
     if (opt.embeddedFiles) {
       const ef = dictOrNull(names.lookup(PDFName.of("EmbeddedFiles")));
       if (ef) {
-        removed.embeddedFiles += raeumeNamensbaum(doc, ef);
-        loescheTief(doc, names.get(PDFName.of("EmbeddedFiles")));
+        for (const wert of namensbaumWerte(ef)) {
+          const spec = dictOrNull(wert);
+          if (spec) anhaenge.add(spec);
+          removed.embeddedFiles++;
+        }
         names.delete(PDFName.of("EmbeddedFiles"));
       }
     }
@@ -304,23 +350,18 @@ export async function sanitize(input: Uint8Array, options: SanitizeOptions = {})
 
   // --- /OpenAction am Katalog ----------------------------------------------
   const open = katalog.lookup(PDFName.of("OpenAction"));
-  if (open instanceof PDFDict) {
-    const grund = faelltWeg(open, opt);
-    if (grund) {
-      removed[grund]++;
-      // Der Quelltext des Skripts steht im Objekt — abhängen genügt nicht,
-      // er bliebe als verwaistes Objekt lesbar in der Datei.
-      loescheTief(doc, katalog.get(PDFName.of("OpenAction")));
-      katalog.delete(PDFName.of("OpenAction"));
-    }
+  if (open instanceof PDFDict && zaehleKette(open)) {
+    katalog.delete(PDFName.of("OpenAction"));
   }
 
-  // --- /AA am Katalog -------------------------------------------------------
+  // --- /AA und /AF am Katalog -----------------------------------------------
   aktionenSaeubern(katalog, false);
+  afSaeubern(katalog);
 
-  // --- Seiten: /AA und die Annotationen -------------------------------------
+  // --- Seiten: /AA, /AF und die Annotationen --------------------------------
   for (const page of doc.getPages()) {
     aktionenSaeubern(page.node, false);
+    afSaeubern(page.node);
 
     const annots = page.node.lookup(PDFName.of("Annots"));
     if (!(annots instanceof PDFArray)) continue;
@@ -333,13 +374,13 @@ export async function sanitize(input: Uint8Array, options: SanitizeOptions = {})
       const subtype = annot.lookup(PDFName.of("Subtype"));
       const istAnlage = subtype instanceof PDFName && subtype.asString() === "/FileAttachment";
       if (istAnlage && opt.embeddedFiles) {
-        // Auch hier: die Annotation abzuhängen lässt den Datenstrom stehen.
-        loescheTief(doc, annot.get(PDFName.of("FS")));
-        removed.embeddedFiles++;
-        const ref = annots.get(i);
+        const spec = dictOrNull(annot.lookup(PDFName.of("FS")));
+        if (!spec || !anhaenge.has(spec)) {
+          if (spec) anhaenge.add(spec);
+          removed.embeddedFiles++;
+        }
         annots.remove(i);
         besucht.add(annot);
-        if (ref instanceof PDFRef) doc.context.delete(ref);
         continue;
       }
 
@@ -347,10 +388,9 @@ export async function sanitize(input: Uint8Array, options: SanitizeOptions = {})
     }
   }
 
-  // --- /AcroForm: /XFA, /CO und die Aktionen der Felder ---------------------
-  // Ein Feld mit `/AA /K` (Tastendruck) oder `/AA /V` (Prüfung) ist KEINE
-  // Annotation der Seite, wenn es Kinder hat — es steht nur hier. Vorher lief
-  // der Säuberer an diesem ganzen Teilbaum vorbei.
+  // --- /AcroForm: /CO und die Aktionen der Felder ---------------------------
+  // Ein Feld mit Kindern steht NUR hier, nicht in `/Annots` der Seite — sein
+  // `/AA /K` (Tastendruck) bliebe sonst aktiv.
   const acro = dictOrNull(katalog.lookup(PDFName.of("AcroForm")));
   if (acro) {
     if (opt.javascript) {
@@ -404,23 +444,23 @@ export async function sanitize(input: Uint8Array, options: SanitizeOptions = {})
     if (info instanceof PDFDict) {
       // Über die tatsächlichen Schlüssel laufen, nicht über eine feste Liste:
       // `/Customer`, `/Matter`, `/SAP_DocID` sind erlaubte eigene Felder, und
-      // der Vertrag sagt „alle ausser /Producer". Eine feste Liste liess genau
-      // die Felder stehen, die niemand erwartet — und meldete dafür 0.
+      // der Vertrag sagt „alle ausser /Producer".
       for (const key of [...info.keys()]) {
         if (key.asString() === INFO_BLEIBT) continue;
-        loescheTief(doc, info.get(key));
         info.delete(key);
         removed.metadata++;
       }
     }
-    // Der XMP-Strom am Katalog ist die zweite, oft vergessene Hälfte — und er
-    // muss gelöscht werden, nicht abgehängt: sein Inhalt ist Klartext-XML.
+    // Der XMP-Strom am Katalog ist die zweite, oft vergessene Hälfte.
     if (katalog.get(PDFName.of("Metadata")) !== undefined) {
-      loescheTief(doc, katalog.get(PDFName.of("Metadata")));
       katalog.delete(PDFName.of("Metadata"));
       removed.metadata++;
     }
   }
+
+  // Erst jetzt wird gelöscht: alles, was nach dem Abhängen niemandem mehr
+  // gehört. Siehe den Kopf dieser Datei.
+  fegen(doc);
 
   return { bytes: await doc.save({ useObjectStreams: true }), removed };
 }

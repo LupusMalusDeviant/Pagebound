@@ -71,6 +71,47 @@ hat „Sanitize PDF"; dem Datenschutz-Produkt fehlt es.
 >    gezählt.** Harmlose Auslöser an Katalog und Seite bleiben stehen. Ein
 >    Widget, das in `/Annots` UND in `/AcroForm /Fields` steht, zählt einmal.
 
+> **Nachtrag 3 (nach der vierten Codex-Runde, 2026-11-13).** Die Runde prüfte
+> die Korrekturen aus Nachtrag 2 und fand drei Rückschläge — alle drei in
+> derselben Entscheidung: **Löschen entlang einer Liste bekannter
+> Nutzlast-Schlüssel.** Diese Entscheidung wird zurückgenommen.
+>
+> Sie war in beide Richtungen falsch. Sie **riss zu viel mit**: das Ziel einer
+> `/GoTo`-Aktion steht unter `/D` und ist eine **Seite** — eine `/GoTo`-Aktion
+> mit JavaScript im `/Next` löschte damit die Seite aus dem Dokument (gemessen:
+> PDF.js meldete danach zwei Seiten ohne Text). Dasselbe traf ein
+> Aktionsobjekt, das sich zwei Stellen teilen: der `/Next`-Nachfolger einer
+> entfernten Aktion verschwand auch dort, wo er bleiben durfte, und liess einen
+> toten Verweis zurück. Und sie **übersah zugleich**: `/EF` kennt neben `/F`
+> und `/UF` auch `/DOS`, `/Mac` und `/Unix` — ein Anhang darunter blieb im
+> Klartext stehen, obwohl der Bericht ihn als entfernt meldete.
+>
+> **Festlegung: der Durchlauf hängt nur ab, gelöscht wird danach durch Fegen.**
+> Nach dem Abhängen wird von den Wurzeln des Dokuments aus markiert, und jedes
+> indirekte Objekt, das niemand mehr erreicht, verlässt die Datei. Das trifft
+> die Nutzlast ohne Vorannahme darüber, wo eine PDF sie ablegt, und es lässt
+> alles stehen, was noch jemandem gehört. **Verwaiste Objekte, die schon beim
+> Laden niemandem gehörten, gehen mit** — für ein Säuberungswerkzeug ist das
+> kein Nebeneffekt: ein verwaistes Objekt kann eine frühere Fassung des
+> Seiteninhalts enthalten.
+>
+> Zwei Folgefestlegungen:
+>
+> 1. **Zählen heisst zählen, auch in der Kette.** Zwei verkettete Skripte
+>    verschwanden beide, gemeldet wurde `1`. Eine gemischte Kette
+>    (`/URI` → JavaScript → `/Launch`) meldete `javascript: 1,
+>    launchActions: 0`. Gezählt wird jetzt **jede verbotene Aktion der Kette
+>    unter ihrer eigenen Kategorie**, jedes Aktionsobjekt genau einmal. Eine
+>    Aktion, die nur als Vorspann mitfällt (der `/URI` oben), wird nicht
+>    gezählt: gezählt werden die Funde, nicht die Kollateralschäden.
+> 2. **`/AF` gehört dazu.** Eine Dateianlage hängt oft an zwei Stellen: im
+>    Namensbaum `/EmbeddedFiles` **und** in `/AF` (associated files) am
+>    Katalog oder an einer Seite — pdf-lib selbst schreibt beides. Wer nur den
+>    Namensbaum abhängt, lässt die Anlage über `/AF` erreichbar; wer das Objekt
+>    stattdessen löscht, lässt in `/AF` einen toten Verweis zurück (das tat die
+>    Fassung aus Nachtrag 2, unbemerkt). Beide Wege werden abgeräumt, die
+>    Anlage zählt dabei **einmal**.
+
 ## Das Problem
 
 Eine PDF kann weit mehr mitbringen als Seiten: JavaScript, das beim Öffnen
@@ -84,7 +125,7 @@ Dokumente. Wer eine PDF weitergibt, gibt das alles mit — und sieht es nicht.
 | Posten | Vorgabe | Was dahinter steckt |
 |---|---|---|
 | `javascript` | **an** | `/Names /JavaScript` (Namensbaum), `/OpenAction` mit `/S /JavaScript`, `/AA` am Katalog, an Seiten, an Annotationen und an Formularfeldern |
-| `embeddedFiles` | **an** | `/Names /EmbeddedFiles`, `/FileAttachment`-Annotationen, `/EF` an Dateianlagen |
+| `embeddedFiles` | **an** | `/Names /EmbeddedFiles`, `/AF` (associated files) am Katalog und an Seiten, `/FileAttachment`-Annotationen, `/EF` an Dateianlagen (auch `/DOS`, `/Mac`, `/Unix`) |
 | `metadata` | **an** | **alle** `/Info`-Schlüssel ausser `/Producer` (auch eigene wie `/Customer`), dazu der XMP-Strom `/Metadata` am Katalog |
 | `annotationActions` | **an** | `/A` und `/AA` an Annotationen und Formularfeldern, ausser `/GoTo` und `/URI` (nicht die Annotation selbst) |
 | `launchActions` | **an** | `/Launch`, `/GoToR`, `/SubmitForm`, `/ImportData` — alles, was aus der Datei herausgreift, auch an Lesezeichen |

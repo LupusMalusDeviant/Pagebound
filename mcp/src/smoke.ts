@@ -1,6 +1,6 @@
 // Smoke test for the PDF operations (run after `npm run build`: `node dist/smoke.js`).
 // Bytes-in/bytes-out — no temp files; exercises every operation end-to-end.
-import { PDFArray, PDFBool, PDFDict, PDFDocument, PDFName, PDFNumber, PDFString, StandardFonts, rgb } from "pdf-lib";
+import { PDFArray, PDFBool, PDFDict, PDFDocument, PDFName, PDFNumber, PDFRef, PDFString, StandardFonts, rgb } from "pdf-lib";
 import { readFile, readdir } from "node:fs/promises";
 import { unzipSync, strFromU8 } from "fflate";
 import forge from "node-forge";
@@ -508,9 +508,19 @@ async function main() {
     check("sanitize: PDF.js findet danach kein JavaScript mehr",
       nachher.dokumentJs === 0 && nachher.seitenJs === 0,
       `dokumentJs=${nachher.dokumentJs} seitenJs=${nachher.seitenJs}`);
+    const anhangReste: string[] = [];
+    for (const nadel of ["/EmbeddedFiles", "notiz.txt", "/Filespec", "/EF"]) {
+      if (await imKlartext(sauber.bytes, nadel)) anhangReste.push(nadel);
+    }
     check("sanitize: der Anhang ist danach auch im Klartext fort",
-      !(await imKlartext(sauber.bytes, "/EmbeddedFiles"))
-      && !(await imKlartext(sauber.bytes, "notiz.txt")));
+      anhangReste.length === 0, `Reste: ${anhangReste.join(", ")}`);
+    // pdf-lib traegt eine Anlage ZWEIMAL ein: in den Namensbaum und in /AF
+    // (associated files) am Katalog. Wer nur das Objekt loescht, laesst in
+    // /AF einen toten Verweis stehen.
+    const nachKatalog = (await PDFDocument.load(sauber.bytes, { updateMetadata: false })).catalog;
+    check("sanitize: kein toter Verweis in /AF am Katalog",
+      nachKatalog.get(PDFName.of("AF")) === undefined,
+      nachKatalog.keys().map((k) => k.asString()).join(" "));
     check("sanitize: auch der Quelltext der Skripte ist fort, nicht nur der Verweis",
       await imKlartext(schmutzig, "app.alert") && !(await imKlartext(sauber.bytes, "app.alert")));
     check("sanitize: der Pfad der /Launch-Aktion ist fort",
@@ -608,6 +618,109 @@ async function main() {
     try { await sanitize.sanitize(zyklus); zyklusOk = true; }
     catch (e) { zyklusFehler = e instanceof Error ? e.message : String(e); }
     check("sanitize: ein /Next-Zyklus laeuft nicht in den Stapelueberlauf", zyklusOk, zyklusFehler);
+
+    // SCHRITT 9 — die vier Befunde der VIERTEN Codex-Runde. Drei davon waren
+    // Rückschläge der dritten: das Löschen entlang einer Schlüsselliste riss
+    // zu viel mit und übersah zugleich etwas. Seither hängt der Durchlauf nur
+    // ab, und `fegen()` nimmt, was niemandem mehr gehört.
+
+    // (1) Das Ziel einer /GoTo-Aktion ist eine SEITE. Wer der Aktion beim
+    //     Löschen in ihr /D folgt, löscht die Seite aus dem Dokument.
+    const zielProbe = await (async () => {
+      const d = await PDFDocument.create();
+      const f = await d.embedFont(StandardFonts.Helvetica);
+      const p = d.addPage([300, 300]);
+      p.drawText("Sprungziel bleibt", { x: 20, y: 250, size: 12, font: f, color: rgb(0, 0, 0) });
+      const c = d.context;
+      d.catalog.set(PDFName.of("OpenAction"), c.register(c.obj({
+        S: PDFName.of("GoTo"),
+        D: c.obj([p.ref, PDFName.of("Fit")]),
+        Next: c.register(c.obj({ S: PDFName.of("JavaScript"), JS: PDFString.of("sprung.geheim();") })),
+      })));
+      return d.save({ useObjectStreams: false });
+    })();
+    const zielSauber = await sanitize.sanitize(zielProbe);
+    const zielGelesen = await liesMitPdfJs(zielSauber.bytes);
+    check("sanitize: das Sprungziel einer /GoTo-Aktion ueberlebt (die Seite bleibt)",
+      zielGelesen.seiten === 1 && zielGelesen.text.includes("Sprungziel"),
+      `seiten=${zielGelesen.seiten} text=${JSON.stringify(zielGelesen.text)}`);
+    check("sanitize: das Skript hinter dem Sprung ist trotzdem fort",
+      await imKlartext(zielProbe, "sprung.geheim")
+      && !(await imKlartext(zielSauber.bytes, "sprung.geheim")));
+
+    // (2) /EF kennt neben /F und /UF auch /DOS, /Mac und /Unix. Eine feste
+    //     Schlüsselliste liess den Strom darunter stehen.
+    const dosProbe = await (async () => {
+      const d = await PDFDocument.create();
+      d.addPage([200, 200]);
+      const c = d.context;
+      const spec = c.register(c.obj({
+        Type: PDFName.of("Filespec"), F: PDFString.of("alt.txt"),
+        EF: c.obj({ DOS: c.register(c.stream("ANHANG_DOS_GEHEIM")) }),
+      }));
+      d.catalog.set(PDFName.of("Names"), c.register(c.obj({
+        EmbeddedFiles: c.register(c.obj({ Names: c.obj([PDFString.of("alt.txt"), spec]) })),
+      })));
+      return d.save({ useObjectStreams: false });
+    })();
+    const dosSauber = await sanitize.sanitize(dosProbe);
+    check("sanitize: ein Anhang unter /EF /DOS wird mitgezaehlt und entfernt",
+      dosSauber.removed.embeddedFiles === 1
+      && await imKlartext(dosProbe, "ANHANG_DOS_GEHEIM")
+      && !(await imKlartext(dosSauber.bytes, "ANHANG_DOS_GEHEIM")),
+      JSON.stringify(dosSauber.removed));
+
+    // (3) Ein Aktionsobjekt darf an zwei Stellen hängen. Wer der /Next-Kette
+    //     beim Löschen folgt, reisst die Aktion aus der Annotation mit, die
+    //     sie behalten durfte — und lässt dort einen toten Verweis zurück.
+    const geteiltProbe = await (async () => {
+      const d = await PDFDocument.create();
+      const p = d.addPage([300, 300]);
+      const c = d.context;
+      const uri = c.register(c.obj({ S: PDFName.of("URI"), URI: PDFString.of("https://geteilt.invalid/") }));
+      d.catalog.set(PDFName.of("OpenAction"), c.register(c.obj({
+        S: PDFName.of("JavaScript"), JS: PDFString.of("geteilt.geheim();"), Next: uri,
+      })));
+      p.node.set(PDFName.of("Annots"), c.obj([c.register(c.obj({
+        Type: PDFName.of("Annot"), Subtype: PDFName.of("Link"),
+        Rect: c.obj([10, 10, 100, 30]), A: uri,
+      }))]));
+      return d.save({ useObjectStreams: false });
+    })();
+    const geteiltSauber = await sanitize.sanitize(geteiltProbe);
+    const geteiltGelesen = await liesMitPdfJs(geteiltSauber.bytes);
+    check("sanitize: eine geteilte /URI-Aktion bleibt der Annotation erhalten",
+      geteiltGelesen.links === 1 && geteiltSauber.removed.externalLinks === 0,
+      `links=${geteiltGelesen.links} ${JSON.stringify(geteiltSauber.removed)}`);
+    check("sanitize: das Skript davor ist trotzdem fort",
+      geteiltSauber.removed.javascript === 1
+      && !(await imKlartext(geteiltSauber.bytes, "geteilt.geheim")));
+
+    // (4) Zählen heisst zählen — auch innerhalb einer Kette, und auch über
+    //     Kategoriegrenzen hinweg.
+    const kette = async (...typen: string[]) => {
+      const d = await PDFDocument.create();
+      d.addPage([200, 200]);
+      const c = d.context;
+      const bau = (i: number): PDFRef => {
+        const felder: Record<string, unknown> = { S: PDFName.of(typen[i]) };
+        if (typen[i] === "JavaScript") felder.JS = PDFString.of(`kette${i}.geheim();`);
+        if (typen[i] === "URI") felder.URI = PDFString.of("https://kette.invalid/");
+        if (typen[i] === "Launch") felder.F = PDFString.of("C:/kette.exe");
+        if (i + 1 < typen.length) felder.Next = bau(i + 1);
+        return c.register(c.obj(felder as never));
+      };
+      d.catalog.set(PDFName.of("OpenAction"), bau(0));
+      return sanitize.sanitize(await d.save({ useObjectStreams: false }));
+    };
+    const zweiSkripte = await kette("JavaScript", "JavaScript");
+    check("sanitize: zwei verkettete Skripte zaehlen zwei, nicht eins",
+      zweiSkripte.removed.javascript === 2, JSON.stringify(zweiSkripte.removed));
+    const gemischt = await kette("URI", "JavaScript", "Launch");
+    check("sanitize: eine gemischte Kette zaehlt je Kategorie getrennt",
+      gemischt.removed.javascript === 1 && gemischt.removed.launchActions === 1
+      && gemischt.removed.externalLinks === 0,
+      JSON.stringify(gemischt.removed));
   }
 
   // forms
